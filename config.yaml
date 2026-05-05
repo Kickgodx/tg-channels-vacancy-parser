@@ -1,0 +1,60 @@
+telegram:
+  mode: telethon  # web | telethon — для Telethon см. README и pip install '.[telethon]'
+  telethon_session_file: sessions/tg_jobs.session
+
+sources:
+  channels:
+    # - durov
+    - qa_jobs
+    # - gogetajob
+    # - jobgolang
+
+search:
+  date_from: "2026-01-01"
+  date_to: "2026-05-06"
+  max_days: 365
+
+filters:
+  specializations:
+    - Python
+    - Java
+    - QA
+    - AQA
+    - SDET
+    - Go
+    - Golang
+    - Software Engineer
+    - Backend
+  exclude_keywords:
+    - junior
+    - intern
+    - курсы
+    - реклама
+  countries: []
+  cities: []
+  work_formats:
+    - any
+
+parser:
+  vacancy_score_threshold: 2
+  # Минимум «содержательных» баллов (всё кроме признаков email/@). 1 — не брать только @упоминания.
+  vacancy_min_substantive_score: 1
+  # Лимит сообщений с канала: для Telethon при заданных date_from/date_to — сколько сообщений подряд
+  # можно просмотреть (от новых к старым), пока не выйдем за date_from или не упрёмся в лимит.
+  max_posts_per_channel: 20000
+  request_timeout_seconds: 25
+  sleep_between_requests_seconds: 1
+  vacancy_fuzzy_duplicate_threshold: 88
+  fuzzy_compare_prefix_len: 500
+
+dictionaries:
+  specializations: {}
+  exclude_keywords: null
+  technologies: []
+  work_format_synonyms: {}
+
+output:
+  directory: output
+  excel_filename: vacancies.xlsx
+  json_filename: vacancies.json
+  charts_directory: charts
