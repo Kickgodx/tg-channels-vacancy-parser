@@ -2,10 +2,36 @@
 
 from __future__ import annotations
 
+import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+
+def _require_streamlit_runtime() -> None:
+    """
+    Запуск через ``python streamlit_app.py`` не создаёт контекст Streamlit (см. ScriptRunContext).
+    Нужна команда ``streamlit run …`` или ``python -m tg_jobs_parser.cli run-web``.
+    """
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+    except ImportError:
+        return
+    if get_script_run_ctx() is not None:
+        return
+    print(
+        "Этот файл нельзя запускать как обычный Python-скрипт.\n\n"
+        "  poetry run streamlit run tg_jobs_parser/web/streamlit_app.py\n\n"
+        "или с тем же интерпретатором:\n\n"
+        "  python -m tg_jobs_parser.cli run-web\n",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+
+_require_streamlit_runtime()
 
 from tg_jobs_parser.analytics.charts import plotly_daily_line, plotly_grade_bar, plotly_spec_bar
 from tg_jobs_parser.channel_search import search_channels
@@ -14,6 +40,7 @@ from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.exporters.excel_exporter import export_excel
 from tg_jobs_parser.exporters.json_exporter import export_json
 from tg_jobs_parser.parse_runner import run_parse
+from tg_jobs_parser.utils.dates import parse_date
 from tg_jobs_parser.utils.logger import setup_logging
 
 st.set_page_config(page_title="Telegram Jobs MVP", layout="wide")
@@ -25,6 +52,22 @@ def default_config_path() -> Path:
     if cand.is_file():
         return cand
     return Path(__file__).resolve().parents[2] / "config.yaml"
+
+
+def _date_range_defaults(path_str: str) -> tuple[date, date]:
+    """Начальные date_from / date_to из YAML; иначе сегодня (для ``st.date_input``)."""
+    try:
+        p = Path(path_str)
+        if p.is_file():
+            c = load_config(p)
+            df = parse_date(c.search.date_from)
+            dt = parse_date(c.search.date_to)
+            if df and dt:
+                return df, dt
+    except (ConfigLoadError, OSError, ValueError):
+        pass
+    t = date.today()
+    return t, t
 
 
 st.title("Парсер IT-вакансий из Telegram-каналов (Telethon)")
@@ -78,8 +121,10 @@ with st.sidebar:
         height=120,
     )
 
-    date_from = st.date_input("date_from")
-    date_to = st.date_input("date_to")
+    _df0, _dt0 = _date_range_defaults(cfg_path)
+    date_from = st.date_input("date_from", value=_df0, key="run_date_from")
+    date_to = st.date_input("date_to", value=_dt0, key="run_date_to")
+    st.caption("Стартовые даты — из config.yaml (не «только сегодня»).")
     countries = st.text_input("Страны (через запятую, пусто = все)", "")
     cities = st.text_input("Города (через запятую)", "")
     work_opts = ["any", "remote", "hybrid", "office", "relocation", "exclude_office"]
@@ -164,6 +209,8 @@ def rebuild_config_inline() -> "AppConfig":
 tab_run, tab_results = st.tabs(["Запуск", "Последний результат"])
 
 with tab_run:
+    # Виджеты (multiselect колонок и др.) вызывают полный rerun скрипта; результат должен жить
+    # вне «if st.button», иначе после любого изменения таблица пропадает (кнопка в новом прогоне False).
     if st.button("Запустить парсинг", type="primary"):
         try:
             cfg_inline = rebuild_config_inline()
@@ -178,6 +225,25 @@ with tab_run:
             result = run_parse(cfg_inline, cli_overrides={"ui": True})
         st.session_state["last_result"] = result
 
+        out_dir = Path(cfg_inline.output.directory)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        xlsx_path = out_dir / cfg_inline.output.excel_filename
+        json_path = out_dir / cfg_inline.output.json_filename
+        export_excel(
+            xlsx_path,
+            result.vacancies_all,
+            result.vacancies_unique,
+            result.duplicates,
+            result.metrics,
+        )
+        export_json(result, json_path)
+        st.session_state["download_xlsx_bytes"] = xlsx_path.read_bytes()
+        st.session_state["download_json_text"] = json_path.read_text(encoding="utf-8")
+
+    result = st.session_state.get("last_result")
+    if result is None:
+        st.caption("Нажмите «Запустить парсинг», чтобы загрузить данные.")
+    else:
         if result.parse_warnings:
             st.warning(result.parse_warnings)
 
@@ -195,50 +261,57 @@ with tab_run:
         df = pd.DataFrame(rows)
         if not df.empty:
             st.subheader("Таблица (уникальные)")
+            default_cols = [
+                c for c in ["id", "source_channel", "post_date", "vacancy_score", "cleaned_text"] if c in df.columns
+            ]
             show_cols = st.multiselect(
                 "Колонки",
                 options=list(df.columns),
-                default=[c for c in ["id", "source_channel", "post_date", "vacancy_score", "cleaned_text"] if c in df.columns],
+                default=default_cols or list(df.columns)[:5],
+                key="vacancy_unique_columns",
             )
-            st.dataframe(df[show_cols], use_container_width=True, height=400)
+            if show_cols:
+                st.dataframe(df[show_cols], width="stretch", height=400)
+            else:
+                st.info("Выберите хотя бы одну колонку.")
+        else:
+            st.info("Нет строк для таблицы уникальных вакансий (после фильтров).")
 
-            st.subheader("Графики (Plotly)")
-            c1, c2 = st.columns(2)
-            fig1 = plotly_spec_bar(result.metrics)
-            if fig1:
-                c1.plotly_chart(fig1, use_container_width=True)
-            fig2 = plotly_grade_bar(result.metrics)
-            if fig2:
-                c2.plotly_chart(fig2, use_container_width=True)
-            fig3 = plotly_daily_line(result.metrics)
-            if fig3:
-                st.plotly_chart(fig3, use_container_width=True)
+        st.subheader("Графики (Plotly)")
+        c1, c2 = st.columns(2)
+        fig1 = plotly_spec_bar(result.metrics)
+        if fig1:
+            c1.plotly_chart(fig1, width="stretch")
+        fig2 = plotly_grade_bar(result.metrics)
+        if fig2:
+            c2.plotly_chart(fig2, width="stretch")
+        fig3 = plotly_daily_line(result.metrics)
+        if fig3:
+            st.plotly_chart(fig3, width="stretch")
 
-        out_dir = Path(cfg_inline.output.directory)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        xlsx_path = out_dir / cfg_inline.output.excel_filename
-        json_path = out_dir / cfg_inline.output.json_filename
-        export_excel(
-            xlsx_path,
-            result.vacancies_all,
-            result.vacancies_unique,
-            result.duplicates,
-            result.metrics,
-        )
-        export_json(result, json_path)
+        rp = result.run_params or {}
+        out_rp = rp.get("output") or {}
+        xlsx_name = out_rp.get("excel_filename", "vacancies.xlsx")
+        json_name = out_rp.get("json_filename", "vacancies.json")
 
-        st.download_button(
-            "Скачать Excel",
-            data=xlsx_path.read_bytes(),
-            file_name=xlsx_path.name,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        st.download_button(
-            "Скачать JSON",
-            data=json_path.read_text(encoding="utf-8"),
-            file_name=json_path.name,
-            mime="application/json",
-        )
+        xlsx_bytes = st.session_state.get("download_xlsx_bytes")
+        json_text = st.session_state.get("download_json_text")
+        if xlsx_bytes:
+            st.download_button(
+                "Скачать Excel",
+                data=xlsx_bytes,
+                file_name=xlsx_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_xlsx",
+            )
+        if json_text:
+            st.download_button(
+                "Скачать JSON",
+                data=json_text,
+                file_name=json_name,
+                mime="application/json",
+                key="dl_json",
+            )
 
 with tab_results:
     res = st.session_state.get("last_result")
