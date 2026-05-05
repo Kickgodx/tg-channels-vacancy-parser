@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
@@ -141,8 +141,7 @@ class ParserConfig(BaseModel):
         default=5000,
         ge=1,
         description=(
-            "Web: максимум постов с одной страницы цепочки. "
-            "Telethon при заданных date_from/date_to: максимум сообщений, которые можно **просмотреть** "
+            "Telethon: при заданных date_from/date_to — максимум сообщений, которые можно **просмотреть** "
             "(идём от новых к старым, пока не выйдем за date_from или не упрёмся в этот лимит)."
         ),
     )
@@ -160,9 +159,10 @@ class OutputConfig(BaseModel):
 
 
 class TelegramConfig(BaseModel):
-    """Транспорт получения сообщений: публичный web или MTProto через Telethon."""
+    """Получение сообщений только через Telethon (MTProto, файл сессии)."""
 
-    mode: Literal["web", "telethon"] = "web"
+    model_config = ConfigDict(extra="ignore")
+
     telethon_session_file: str = Field(
         default="sessions/tg_jobs.session",
         description="Файл сессии Telethon (после первой авторизации).",

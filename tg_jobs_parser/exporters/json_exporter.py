@@ -14,7 +14,7 @@ def export_json(result: ParseResult, path: str | Path) -> Path:
     payload = {
         "run_params": result.run_params,
         "parsed_at": result.parsed_at.isoformat(),
-        "web_limitation_warning": result.web_limitation_warning,
+        "parse_warnings": result.parse_warnings,
         "posts_fetched": result.posts_fetched,
         "vacancies_all": [v.model_dump(mode="json") for v in result.vacancies_all],
         "vacancies_unique": [v.model_dump(mode="json") for v in result.vacancies_unique],

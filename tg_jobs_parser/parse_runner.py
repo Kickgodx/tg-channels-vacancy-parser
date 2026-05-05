@@ -1,9 +1,8 @@
-"""Оркестрация: парсинг веб-ленты → извлечение → фильтры → дедуп → метрики."""
+"""Оркестрация: Telethon → извлечение → фильтры → дедуп → метрики."""
 
 from __future__ import annotations
 
 import re
-import sys
 from datetime import datetime, timezone
 
 from tg_jobs_parser.analytics.metrics_builder import build_metrics
@@ -22,7 +21,7 @@ from tg_jobs_parser.filters.vacancy_filters import apply_post_filters
 from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
-from tg_jobs_parser.parsers.telegram_web import TelegramWebParser, normalize_channel_username
+from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import clamp_range_days, parse_date
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
 from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
@@ -32,20 +31,14 @@ _LOG = get_logger(__name__)
 
 
 def _channel_parser(config: AppConfig) -> BaseChannelParser:
-    """Выбор реализации источника сообщений (web / Telethon)."""
-    if config.telegram.mode != "telethon":
-        return TelegramWebParser(config)
-
+    """Единственный источник сообщений — Telethon (MTProto с файлом сессии)."""
     from tg_jobs_parser.parsers.telegram_telethon import TelegramTelethonParser, telethon_import_error
 
-    if telethon_import_error():
-        _LOG.warning(
-            "Режим telethon задан, но в этом интерпретаторе нет пакета Telethon — используется web. "
-            "Python: %s. Если ставили через Poetry: «poetry run python -m tg_jobs_parser.cli …» "
-            "или активируйте .venv (Scripts\\activate).",
-            sys.executable,
-        )
-        return TelegramWebParser(config)
+    if err := telethon_import_error():
+        raise RuntimeError(
+            "Нужен пакет Telethon: pip install telethon python-dotenv "
+            "(или poetry install --extras telethon). Убедитесь, что используете тот же Python, что и при установке зависимостей."
+        ) from err
     return TelegramTelethonParser(config)
 
 
@@ -163,10 +156,9 @@ def run_parse(config: AppConfig, cli_overrides: dict | None = None) -> ParseResu
         )
         date_from, date_to = df_clamped, dt_clamped
 
-    if config.telegram.mode == "telethon":
-        all_warnings.append(
-            "Режим Telegram: Telethon (MTProto). Убедитесь, что активна сессия и заданы переменные окружения TELEGRAM_*."
-        )
+    all_warnings.append(
+        "Telegram: Telethon (MTProto). Убедитесь, что активна сессия и заданы TELEGRAM_API_ID / TELEGRAM_API_HASH."
+    )
 
     specs_map = config.merged_specializations()
     posts_fetched = 0
@@ -212,12 +204,12 @@ def run_parse(config: AppConfig, cli_overrides: dict | None = None) -> ParseResu
     if cli_overrides:
         run_params["cli_overrides"] = cli_overrides
 
-    web_limitation = "; ".join(all_warnings) if all_warnings else None
+    parse_warnings = "; ".join(all_warnings) if all_warnings else None
 
     return ParseResult(
         run_params=run_params,
         posts_fetched=posts_fetched,
-        web_limitation_warning=web_limitation,
+        parse_warnings=parse_warnings,
         vacancies_all=candidates,
         vacancies_unique=unique,
         duplicates=dups,

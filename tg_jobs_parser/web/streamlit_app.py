@@ -27,7 +27,7 @@ def default_config_path() -> Path:
     return Path(__file__).resolve().parents[2] / "config.yaml"
 
 
-st.title("Парсер IT-вакансий из публичных Telegram-каналов (MVP)")
+st.title("Парсер IT-вакансий из Telegram-каналов (Telethon)")
 
 with st.sidebar:
     st.header("Источники")
@@ -44,28 +44,21 @@ with st.sidebar:
         st.caption(f"Бэкенд: {backend}")
         st.write(found or "(ничего не найдено — провайдер недоступен или верстка изменилась)")
 
-    tg_mode_preview = "web"
+    _sess_default = "sessions/tg_jobs.session"
     try:
         if Path(cfg_path).is_file():
-            tg_mode_preview = load_config(cfg_path).telegram.mode
+            _sess_default = load_config(cfg_path).telegram.telethon_session_file
     except ConfigLoadError:
         pass
 
-    telegram_mode_sel = st.selectbox(
-        "Режим чтения Telegram",
-        options=["web", "telethon"],
-        index=0 if tg_mode_preview == "web" else 1,
-        help="telethon нужен для глубины истории; первая авторизация надёжнее из консоли (CLI).",
-    )
     telethon_session_path = st.text_input(
         "Файл сессии Telethon",
-        value="sessions/tg_jobs.session",
+        value=_sess_default,
+        help="Парсинг только через Telethon (MTProto). Первая авторизация удобнее из CLI.",
     )
-    if telegram_mode_sel == "telethon":
-        st.caption(
-            "Нужны TELEGRAM_API_ID / TELEGRAM_API_HASH в .env и установка pip install '.[telethon]'. "
-            "Перед Streamlit авторизуйтесь хотя бы раз через CLI, чтобы создать файл сессии."
-        )
+    st.caption(
+        "Нужны TELEGRAM_API_ID / TELEGRAM_API_HASH в .env. Один раз выполните parse через CLI, чтобы создать файл сессии."
+    )
 
     st.header("Фильтры")
     all_specs = list(DEFAULT_SPECIALIZATIONS.keys())
@@ -164,10 +157,7 @@ def rebuild_config_inline() -> "AppConfig":
     data["parser"] = p
     data["output"] = OutputConfig(**data.get("output", {})).model_dump()
     session_file = (telethon_session_path or "").strip() or base.telegram.telethon_session_file
-    data["telegram"] = TelegramConfig(
-        mode=telegram_mode_sel,
-        telethon_session_file=session_file,
-    ).model_dump()
+    data["telegram"] = TelegramConfig(telethon_session_file=session_file).model_dump()
     return AppConfig.model_validate(data)
 
 
@@ -188,8 +178,8 @@ with tab_run:
             result = run_parse(cfg_inline, cli_overrides={"ui": True})
         st.session_state["last_result"] = result
 
-        if result.web_limitation_warning:
-            st.warning(result.web_limitation_warning)
+        if result.parse_warnings:
+            st.warning(result.parse_warnings)
 
         st.success(
             f"Постов: {result.posts_fetched}; вакансий после фильтров: {len(result.vacancies_all)}; "

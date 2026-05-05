@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -15,7 +15,11 @@ class ParseResult(BaseModel):
 
     run_params: dict = Field(default_factory=dict)
     posts_fetched: int = 0
-    web_limitation_warning: str | None = None
+    parse_warnings: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("web_limitation_warning", "parse_warnings"),
+        description="Предупреждения прогона (лимиты дат, каналы, Telethon и т.д.).",
+    )
     vacancies_all: list[Vacancy] = Field(default_factory=list)
     vacancies_unique: list[Vacancy] = Field(default_factory=list)
     duplicates: list[Vacancy] = Field(default_factory=list)

@@ -20,7 +20,7 @@ from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_runner import run_parse
 from tg_jobs_parser.utils.logger import get_logger, setup_logging
 
-app = typer.Typer(help="Парсер IT-вакансий из публичных Telegram-каналов (MVP).")
+app = typer.Typer(help="Парсер IT-вакансий из Telegram-каналов через Telethon (MVP).")
 _LOG = get_logger(__name__)
 
 
@@ -36,7 +36,6 @@ def _build_config_from_cli(
     work_formats: list[str] | None,
     output_dir: str | None,
     threshold: int | None,
-    telegram_mode: str | None,
     telegram_session: str | None,
 ) -> AppConfig:
     data = base.model_dump()
@@ -73,8 +72,6 @@ def _build_config_from_cli(
         data["parser"] = p
 
     tg_updates: dict[str, str] = {}
-    if telegram_mode:
-        tg_updates["mode"] = telegram_mode
     if telegram_session:
         tg_updates["telethon_session_file"] = telegram_session
     if tg_updates:
@@ -109,11 +106,6 @@ def parse(
     ),
     output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o"),
     threshold: Optional[int] = typer.Option(None, "--threshold"),
-    telegram_mode: Optional[str] = typer.Option(
-        None,
-        "--telegram-mode",
-        help="web (по умолчанию в YAML) или telethon",
-    ),
     telegram_session: Optional[str] = typer.Option(
         None,
         "--telegram-session",
@@ -149,7 +141,6 @@ def parse(
         work_formats=wf,
         output_dir=output_dir,
         threshold=threshold,
-        telegram_mode=telegram_mode,
         telegram_session=telegram_session,
     )
 

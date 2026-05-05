@@ -9,7 +9,7 @@ from pathlib import Path
 
 from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
-from tg_jobs_parser.parsers.telegram_web import normalize_channel_username
+from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import parse_date
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
 from tg_jobs_parser.utils.logger import get_logger

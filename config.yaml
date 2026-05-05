@@ -1,5 +1,4 @@
 telegram:
-  mode: telethon  # web | telethon — для Telethon см. README и pip install '.[telethon]'
   telethon_session_file: sessions/tg_jobs.session
 
 sources:
@@ -8,6 +7,7 @@ sources:
     - qa_jobs
     # - gogetajob
     # - jobgolang
+    - relocatesme
 
 search:
   date_from: "2026-01-01"

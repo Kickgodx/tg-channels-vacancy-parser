@@ -21,7 +21,7 @@ class RawPost:
 
 
 class BaseChannelParser(ABC):
-    """Абстракция источника постов (web, будущий Telegram API)."""
+    """Абстракция источника постов (Telethon и др.)."""
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
