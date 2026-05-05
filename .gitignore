@@ -1,17 +1,76 @@
+# --- виртуальные окружения ---
 .venv/
 venv/
+env/
+.env/
+.python-version
+
+# --- Python ---
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+share/python-wheels/
+*.manifest
+*.spec
+
+# --- тесты / покрытие / линтеры ---
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+hypothesis/
+
+# --- сборка ---
 dist/
 build/
+*.egg-info/
+
+# --- проект: артефакты запуска (не коммитить выгрузки и сессии Telegram) ---
 output/
 logs/
 sessions/
 *.xlsx
+
+# --- секреты и локальная конфигурация ---
 .env
+.env.*
+!.env.example
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- IDE / редакторы ---
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+
+# --- Windows ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# --- прочее ---
+*.log
+*.tmp
+*.temp
