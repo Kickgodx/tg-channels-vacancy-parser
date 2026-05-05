@@ -42,6 +42,7 @@ from tg_jobs_parser.exporters.json_exporter import export_json
 from tg_jobs_parser.parse_runner import run_parse
 from tg_jobs_parser.utils.dates import parse_date
 from tg_jobs_parser.utils.logger import setup_logging
+from tg_jobs_parser.utils.text import post_id_display
 
 st.set_page_config(page_title="Telegram Jobs MVP", layout="wide")
 setup_logging()
@@ -82,10 +83,25 @@ with st.sidebar:
     )
 
     kw = st.text_input("Поиск каналов (best-effort, DuckDuckGo)", value="python jobs telegram channel")
-    if st.button("Найти кандидатов каналов"):
+    if st.button("Найти кандидатов каналов", key="btn_channel_search"):
         found, backend = search_channels(kw)
-        st.caption(f"Бэкенд: {backend}")
-        st.write(found or "(ничего не найдено — провайдер недоступен или верстка изменилась)")
+        st.session_state["channel_search_last"] = {
+            "found": found,
+            "backend": backend,
+            "query": kw.strip(),
+        }
+    _ch_search = st.session_state.get("channel_search_last")
+    if _ch_search:
+        st.caption(f"Последний поиск ({_ch_search.get('query', '')!r}), бэкенд: {_ch_search.get('backend', '')}")
+        _found = _ch_search.get("found") or []
+        if _found:
+            st.write(_found)
+        else:
+            st.info(
+                "Ответ DuckDuckGo был 200, но в HTML не нашлось ссылок вида t.me/… "
+                "(часто так бывает: пустая выдача, антибот или другая вёрстка). "
+                "Каналы надёжнее указывать вручную выше."
+            )
 
     _sess_default = "sessions/tg_jobs.session"
     try:
@@ -255,6 +271,7 @@ with tab_run:
         rows = []
         for v in result.vacancies_unique:
             d = v.model_dump(mode="python")
+            d["id"] = post_id_display(str(d.get("id") or ""))
             d["technologies"] = ", ".join(d["technologies"])
             d["detected_specializations"] = ", ".join(d["detected_specializations"])
             rows.append(d)
@@ -262,16 +279,46 @@ with tab_run:
         if not df.empty:
             st.subheader("Таблица (уникальные)")
             default_cols = [
-                c for c in ["id", "source_channel", "post_date", "vacancy_score", "cleaned_text"] if c in df.columns
+                c
+                for c in [
+                    "id",
+                    "source_channel",
+                    "post_date",
+                    "detected_salary_avg",
+                    "salary_currency",
+                    "work_format",
+                    "vacancy_score",
+                    "cleaned_text",
+                ]
+                if c in df.columns
             ]
             show_cols = st.multiselect(
                 "Колонки",
                 options=list(df.columns),
-                default=default_cols or list(df.columns)[:5],
-                key="vacancy_unique_columns",
+                default=default_cols or list(df.columns)[:8],
+                key="vacancy_unique_columns_v2",
             )
             if show_cols:
-                st.dataframe(df[show_cols], width="stretch", height=400)
+                _col_cfg: dict = {}
+                if "detected_salary_avg" in show_cols:
+                    _col_cfg["detected_salary_avg"] = st.column_config.NumberColumn(
+                        "Средняя зарплата",
+                        help="Извлечённое среднее (min/max или одно значение), без пересчёта валют.",
+                        format="%.0f",
+                    )
+                if "salary_currency" in show_cols:
+                    _col_cfg["salary_currency"] = st.column_config.TextColumn("Валюта")
+                if "work_format" in show_cols:
+                    _col_cfg["work_format"] = st.column_config.TextColumn(
+                        "Формат работы",
+                        help="remote | hybrid | office | relocation | unknown",
+                    )
+                st.dataframe(
+                    df[show_cols],
+                    width="stretch",
+                    height=400,
+                    column_config=_col_cfg or None,
+                )
             else:
                 st.info("Выберите хотя бы одну колонку.")
         else:

@@ -13,6 +13,7 @@ from openpyxl.utils import get_column_letter
 
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.utils.text import post_id_display
 
 _DATETIME_FMT = "DD.MM.YYYY HH:MM:SS"
 
@@ -34,19 +35,11 @@ def _excel_single_line(text: str | None) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
-def _post_id_only(full_id: str) -> str:
-    """``qa_jobs-255541`` → ``255541`` (Telegram message id)."""
-    if not full_id:
-        return ""
-    tail = full_id.rsplit("-", 1)[-1]
-    return tail if tail.isdigit() else full_id
-
-
 def _vacancy_row_for_excel(v: Vacancy, *, include_parse_dedup_columns: bool = True) -> dict[str, Any]:
     """Колонки без префикса ``detected_``, читаемые имена для отчёта."""
     d = v.model_dump(mode="python")
     row: dict[str, Any] = {
-        "post_id": _post_id_only(str(d.get("id") or "")),
+        "post_id": post_id_display(str(d.get("id") or "")),
         "source_channel": d.get("source_channel"),
         "post_url": d.get("post_url"),
         "post_date": _naive_utc_for_excel(d.get("post_date")),

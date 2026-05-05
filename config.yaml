@@ -3,11 +3,13 @@ telegram:
 
 sources:
   channels:
-    # - durov
     - qa_jobs
     # - gogetajob
     # - jobgolang
+    - qajobsoffers
     - relocatesme
+    - EkleftJob
+    - qa_vacancy_pl
 
 search:
   date_from: "2026-01-01"
