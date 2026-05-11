@@ -81,15 +81,27 @@ def matches_location_policy(
     return True
 
 
-def apply_post_filters(v: Vacancy, config: AppConfig, spec_map: dict[str, list[str]]) -> bool:
-    """Возвращает True если вакансия остаётся в выдаче."""
+def apply_post_filters(
+    v: Vacancy,
+    config: AppConfig,
+    spec_map: dict[str, list[str]],
+    *,
+    exclude_keywords: list[str] | None = None,
+) -> bool:
+    """
+    Возвращает True если вакансия остаётся в выдаче.
+
+    ``exclude_keywords`` можно передать заранее, чтобы не пересобирать список на каждом посте
+    (актуально при пакетной обработке).
+    """
     if v.vacancy_score < config.parser.vacancy_score_threshold:
         return False
     if v.vacancy_substantive_score < config.parser.vacancy_min_substantive_score:
         return False
     if not matches_specialization_filter(v, config.filters.specializations, spec_map):
         return False
-    if not matches_exclude_keywords(v, config.merged_exclude_keywords()):
+    excl = exclude_keywords if exclude_keywords is not None else config.merged_exclude_keywords()
+    if not matches_exclude_keywords(v, excl):
         return False
     if not matches_work_format_policy(v, config.filters.work_formats):
         return False

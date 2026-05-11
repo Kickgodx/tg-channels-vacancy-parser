@@ -32,3 +32,18 @@ class BaseChannelParser(ABC):
         Возвращает список постов и предупреждение об ограничениях (если есть).
         ``channel_username`` — без ``@``.
         """
+
+    def fetch_posts_many(
+        self, channel_usernames: list[str]
+    ) -> list[tuple[str, list[RawPost], str | None]]:
+        """
+        Пакетный вариант: вернуть результаты по нескольким каналам.
+
+        Дефолтная реализация — последовательный fallback через ``fetch_posts``.
+        Конкретные парсеры (Telethon) переопределяют для распараллеливания.
+        """
+        out: list[tuple[str, list[RawPost], str | None]] = []
+        for ch in channel_usernames:
+            posts, warn = self.fetch_posts(ch)
+            out.append((ch, posts, warn))
+        return out

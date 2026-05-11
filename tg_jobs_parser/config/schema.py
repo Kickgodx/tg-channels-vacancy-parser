@@ -145,6 +145,15 @@ class ParserConfig(BaseModel):
             "(идём от новых к старым, пока не выйдем за date_from или не упрёмся в этот лимит)."
         ),
     )
+    channel_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description=(
+            "Сколько каналов опрашивать одновременно в рамках одной Telethon-сессии. "
+            "1 = последовательно (старое поведение). Разумный диапазон — 3..8: больше повышает риск FloodWait."
+        ),
+    )
     request_timeout_seconds: float = 20.0
     sleep_between_requests_seconds: float = 1.0
     vacancy_fuzzy_duplicate_threshold: int = 88

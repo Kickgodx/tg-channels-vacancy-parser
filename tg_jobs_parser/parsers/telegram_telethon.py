@@ -56,6 +56,9 @@ class TelegramTelethonParser(BaseChannelParser):
 
     Первый запуск может запросить телефон, код из SMS и пароль 2FA — взаимодействие через консоль
     (интерактивный режим Telethon). После авторизации сохраняется файл сессии.
+
+    Поддерживает пакетный режим ``fetch_posts_many``: один ``TelegramClient`` на все каналы и
+    конкурентный обход через ``asyncio.gather`` с ограничением ``parser.channel_concurrency``.
     """
 
     def fetch_posts(self, channel_username: str) -> tuple[list[RawPost], str | None]:
@@ -69,20 +72,109 @@ class TelegramTelethonParser(BaseChannelParser):
             return [], "Пустое имя канала."
 
         try:
-            return asyncio.run(self._fetch_async(username))
+            return asyncio.run(self._fetch_single_with_own_client(username))
         except RuntimeError:
             raise
         except Exception as e:  # noqa: BLE001
             _LOG.exception("Telethon: ошибка для @%s: %s", username, e)
             return [], f"@{username}: Telethon — {e}"
 
-    async def _fetch_async(self, username: str) -> tuple[list[RawPost], str | None]:
+    def fetch_posts_many(
+        self, channel_usernames: list[str]
+    ) -> list[tuple[str, list[RawPost], str | None]]:
+        if err := telethon_import_error():
+            raise RuntimeError(
+                "Пакет telethon не установлен. Установите: pip install telethon python-dotenv"
+            ) from err
+
+        usernames: list[str] = []
+        out_placeholder: list[tuple[str, list[RawPost], str | None]] = []
+        for ch in channel_usernames:
+            u = normalize_channel_username(ch)
+            if not u:
+                out_placeholder.append((ch, [], "Пустое имя канала."))
+                continue
+            if u not in usernames:
+                usernames.append(u)
+
+        if not usernames:
+            return out_placeholder
+
+        results = asyncio.run(self._fetch_many_async(usernames))
+        return out_placeholder + results
+
+    async def _fetch_single_with_own_client(
+        self, username: str
+    ) -> tuple[list[RawPost], str | None]:
+        """Старый одиночный путь: свой клиент на один канал (используется fetch_posts)."""
         from telethon import TelegramClient
 
         api_id, api_hash = telegram_api_credentials()
         session_path = Path(self.config.telegram.telethon_session_file)
         session_path.parent.mkdir(parents=True, exist_ok=True)
 
+        client = TelegramClient(session_path.as_posix(), api_id, api_hash)
+        try:
+            await self._start_client(client)
+            return await self._iter_channel(client, username)
+        finally:
+            await client.disconnect()
+
+    async def _fetch_many_async(
+        self, usernames: list[str]
+    ) -> list[tuple[str, list[RawPost], str | None]]:
+        """Один клиент + asyncio.gather с ограничением конкурентности."""
+        from telethon import TelegramClient
+
+        api_id, api_hash = telegram_api_credentials()
+        session_path = Path(self.config.telegram.telethon_session_file)
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+
+        concurrency = max(1, int(getattr(self.config.parser, "channel_concurrency", 4)))
+        # Telethon при создании клиента сохраняет ссылку на текущий event loop; создаём его
+        # внутри уже работающего цикла asyncio.run, всё корректно.
+        client = TelegramClient(session_path.as_posix(), api_id, api_hash)
+        try:
+            await self._start_client(client)
+            sem = asyncio.Semaphore(concurrency)
+            _LOG.info(
+                "Telethon: пакетный обход %s каналов, конкурентность=%s",
+                len(usernames),
+                concurrency,
+            )
+
+            async def _one(u: str) -> tuple[str, list[RawPost], str | None]:
+                async with sem:
+                    try:
+                        posts, warn = await self._iter_channel(client, u)
+                        return u, posts, warn
+                    except Exception as e:  # noqa: BLE001
+                        _LOG.exception("Telethon: ошибка для @%s: %s", u, e)
+                        return u, [], f"@{u}: Telethon — {e}"
+
+            tasks = [asyncio.create_task(_one(u)) for u in usernames]
+            return list(await asyncio.gather(*tasks))
+        finally:
+            await client.disconnect()
+
+    async def _start_client(self, client) -> None:
+        """Один client.start() с подгрузкой телефона/2FA из .env (если есть)."""
+        try_load_dotenv()
+        phone = os.environ.get("TELEGRAM_PHONE", "").strip() or None
+        pwd = os.environ.get("TELEGRAM_2FA_PASSWORD", "").strip() or None
+        start_kw: dict = {}
+        if phone:
+            start_kw["phone"] = phone
+        if pwd:
+            start_kw["password"] = pwd
+        await client.start(**start_kw)
+
+        me = await client.get_me()
+        if me is not None:
+            _LOG.info("Telethon: сессия активна (%s).", getattr(me, "username", me.id))
+
+    async def _iter_channel(self, client, username: str) -> tuple[list[RawPost], str | None]:
+        """Вычитка одного канала на уже подключённом клиенте."""
         max_scan = self.config.parser.max_posts_per_channel
 
         df_d = parse_date(self.config.search.date_from)
@@ -91,73 +183,56 @@ class TelegramTelethonParser(BaseChannelParser):
         dt_end = _combine_utc(dt_d, end_of_day=True) if dt_d else None
         use_date_window = dt_start is not None and dt_end is not None
 
+        # При полном диапазоне дат крутим историю до выхода за date_from; limit в Telethon —
+        # это потолок по числу **просмотренных** сообщений (включая пропущенные по дате).
+        iter_limit = None if use_date_window else max_scan
+
         scanned = 0
         posts: list[RawPost] = []
-        client = TelegramClient(session_path.as_posix(), api_id, api_hash)
-        try:
-            try_load_dotenv()
-            phone = os.environ.get("TELEGRAM_PHONE", "").strip() or None
-            pwd = os.environ.get("TELEGRAM_2FA_PASSWORD", "").strip() or None
-            start_kw: dict = {}
-            if phone:
-                start_kw["phone"] = phone
-            if pwd:
-                start_kw["password"] = pwd
-            await client.start(**start_kw)
 
-            me = await client.get_me()
-            if me is not None:
-                _LOG.info("Telethon: сессия активна (%s).", getattr(me, "username", me.id))
+        async for msg in client.iter_messages(username, limit=iter_limit):
+            scanned += 1
+            if scanned > max_scan:
+                _LOG.warning(
+                    "Telethon @%s: достигнут лимит max_posts_per_channel=%s просмотренных сообщений. "
+                    "Увеличьте parser.max_posts_per_channel в config.yaml, если нужна более глубокая история.",
+                    username,
+                    max_scan,
+                )
+                break
 
-            # При полном диапазоне дат крутим историю до выхода за date_from; limit в Telethon —
-            # это потолок по числу **просмотренных** сообщений (включая пропущенные по дате).
-            iter_limit = None if use_date_window else max_scan
+            raw = getattr(msg, "message", None)
+            if not raw or not str(raw).strip():
+                continue
 
-            async for msg in client.iter_messages(username, limit=iter_limit):
-                scanned += 1
-                if scanned > max_scan:
-                    _LOG.warning(
-                        "Telethon @%s: достигнут лимит max_posts_per_channel=%s просмотренных сообщений. "
-                        "Увеличьте parser.max_posts_per_channel в config.yaml, если нужна более глубокая история.",
-                        username,
-                        max_scan,
-                    )
+            md = getattr(msg, "date", None)
+            if md is None:
+                continue
+            msg_dt = md
+            if msg_dt.tzinfo is None:
+                msg_dt = msg_dt.replace(tzinfo=timezone.utc)
+            else:
+                msg_dt = msg_dt.astimezone(timezone.utc)
+
+            if use_date_window:
+                if msg_dt > dt_end:
+                    continue
+                if msg_dt < dt_start:
                     break
 
-                raw = getattr(msg, "message", None)
-                if not raw or not str(raw).strip():
-                    continue
+            post_id = str(msg.id)
+            text = compact_whitespace(str(raw))
+            post_url = f"https://t.me/{username}/{post_id}"
 
-                md = getattr(msg, "date", None)
-                if md is None:
-                    continue
-                msg_dt = md
-                if msg_dt.tzinfo is None:
-                    msg_dt = msg_dt.replace(tzinfo=timezone.utc)
-                else:
-                    msg_dt = msg_dt.astimezone(timezone.utc)
-
-                if use_date_window:
-                    if msg_dt > dt_end:
-                        continue
-                    if msg_dt < dt_start:
-                        break
-
-                post_id = str(msg.id)
-                text = compact_whitespace(str(raw))
-                post_url = f"https://t.me/{username}/{post_id}"
-
-                posts.append(
-                    RawPost(
-                        channel_username=username,
-                        post_id=post_id,
-                        text=text,
-                        post_date=msg_dt,
-                        post_url=post_url,
-                    )
+            posts.append(
+                RawPost(
+                    channel_username=username,
+                    post_id=post_id,
+                    text=text,
+                    post_date=msg_dt,
+                    post_url=post_url,
                 )
-        finally:
-            await client.disconnect()
+            )
 
         posts.sort(key=lambda p: p.post_date or datetime.min.replace(tzinfo=timezone.utc))
         cnt = len(posts)
@@ -168,7 +243,6 @@ class TelegramTelethonParser(BaseChannelParser):
             scanned,
             max_scan,
         )
-
         return posts, None
 
 

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from tg_jobs_parser.analytics.metrics_builder import build_metrics
@@ -62,14 +65,30 @@ def _extract_experience(text: str) -> str | None:
     return None
 
 
-def raw_post_to_vacancy(post: RawPost, config: AppConfig) -> Vacancy:
+def raw_post_to_vacancy(
+    post: RawPost,
+    config: AppConfig,
+    *,
+    spec_map: dict[str, list[str]] | None = None,
+    tech_list: list[str] | None = None,
+    wf_map: dict[str, list[str]] | None = None,
+) -> Vacancy:
+    """
+    Преобразовать сырой пост в вакансию.
+
+    Словари можно передать заранее (``spec_map``/``tech_list``/``wf_map``) — это критично
+    при пакетной обработке, иначе на каждый пост они пересобираются заново.
+    """
     raw = post.text
     cleaned = clean_display_text(raw)
     score, _, substantive = compute_vacancy_score(raw)
 
-    spec_map = config.merged_specializations()
-    tech_list = config.merged_technologies()
-    wf_map = config.merged_work_format_synonyms()
+    if spec_map is None:
+        spec_map = config.merged_specializations()
+    if tech_list is None:
+        tech_list = config.merged_technologies()
+    if wf_map is None:
+        wf_map = config.merged_work_format_synonyms()
 
     specs = extract_specializations(raw, spec_map)
     salary = extract_salary(raw)
@@ -160,7 +179,13 @@ def run_parse(config: AppConfig, cli_overrides: dict | None = None) -> ParseResu
         "Telegram: Telethon (MTProto). Убедитесь, что активна сессия и заданы TELEGRAM_API_ID / TELEGRAM_API_HASH."
     )
 
+    # Предвычисляем все словари один раз — иначе они пересобирались бы на каждом из тысяч постов.
     specs_map = config.merged_specializations()
+    tech_list = config.merged_technologies()
+    wf_map = config.merged_work_format_synonyms()
+    exclude_kw = config.merged_exclude_keywords()
+    threshold = config.parser.vacancy_score_threshold
+
     posts_fetched = 0
     candidates: list[Vacancy] = []
 
@@ -170,23 +195,82 @@ def run_parse(config: AppConfig, cli_overrides: dict | None = None) -> ParseResu
         if u and u not in channels_unique:
             channels_unique.append(u)
 
-    for ch in channels_unique:
-        posts, warn = channel_fetcher.fetch_posts(ch)
+    # Каналы опрашиваются параллельно в рамках одной Telethon-сессии (см. parser.channel_concurrency).
+    # Результат — список (username, posts, warning) в произвольном порядке: пост-обработка и так
+    # сортирует выдачу по дате, поэтому порядок каналов значения не имеет.
+    fetch_started = time.monotonic()
+    fetch_results = channel_fetcher.fetch_posts_many(channels_unique)
+    fetch_elapsed = time.monotonic() - fetch_started
+
+    all_posts: list[RawPost] = []
+    for ch, posts, warn in fetch_results:
         if warn:
             all_warnings.append(warn)
             _LOG.warning("Канал @%s: %s", ch, warn)
         posts_fetched += len(posts)
-        for post in posts:
-            v = raw_post_to_vacancy(post, config)
-            if v.vacancy_score < config.parser.vacancy_score_threshold:
-                continue
-            if not apply_post_filters(v, config, specs_map):
-                continue
-            candidates.append(v)
+        all_posts.extend(posts)
 
-    _LOG.info("После фильтров осталось вакансий-кандидатов: %s", len(candidates))
+    _LOG.info(
+        "Выборка завершена: %s постов с %s каналов за %.1f с.",
+        posts_fetched,
+        len(channels_unique),
+        fetch_elapsed,
+    )
 
+    def _process_one(post: RawPost) -> Vacancy | None:
+        v = raw_post_to_vacancy(post, config, spec_map=specs_map, tech_list=tech_list, wf_map=wf_map)
+        if v.vacancy_score < threshold:
+            return None
+        if not apply_post_filters(v, config, specs_map, exclude_keywords=exclude_kw):
+            return None
+        return v
+
+    # CPU-bound пост-обработка: каждый пост проходит через десяток regex-экстракторов.
+    # Python re реализован на C и отпускает GIL, поэтому ThreadPoolExecutor реально ускоряет
+    # обработку на нескольких ядрах. На малом объёме оверхед пула не оправдан — идём в один поток.
+    workers = max(2, min(8, (os.cpu_count() or 4)))
+    process_started = time.monotonic()
+    if len(all_posts) < 200 or workers == 1:
+        for i, post in enumerate(all_posts, 1):
+            v = _process_one(post)
+            if v is not None:
+                candidates.append(v)
+            if i % 500 == 0:
+                _LOG.info("Обработано постов: %s/%s; прошло вакансий: %s", i, len(all_posts), len(candidates))
+    else:
+        _LOG.info(
+            "Пост-обработка %s постов в %s потоков (regex отпускает GIL).",
+            len(all_posts),
+            workers,
+        )
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="post-proc") as ex:
+            chunksize = max(16, len(all_posts) // (workers * 8) or 16)
+            for i, v in enumerate(ex.map(_process_one, all_posts, chunksize=chunksize), 1):
+                if v is not None:
+                    candidates.append(v)
+                if i % 500 == 0:
+                    _LOG.info(
+                        "Обработано постов: %s/%s; прошло вакансий: %s",
+                        i,
+                        len(all_posts),
+                        len(candidates),
+                    )
+
+    process_elapsed = time.monotonic() - process_started
+    _LOG.info(
+        "Пост-обработка завершена за %.1f с. После фильтров осталось вакансий-кандидатов: %s",
+        process_elapsed,
+        len(candidates),
+    )
+
+    dedup_started = time.monotonic()
     unique, dups = deduplicate_vacancies(candidates, config)
+    _LOG.info(
+        "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
+        len(unique),
+        len(dups),
+        time.monotonic() - dedup_started,
+    )
 
     sort_vacancies_for_report(candidates)
     sort_vacancies_for_report(unique)

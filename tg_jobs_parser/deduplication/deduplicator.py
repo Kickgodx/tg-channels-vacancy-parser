@@ -21,6 +21,9 @@ def deduplicate_vacancies(vacancies: list[Vacancy], config: AppConfig) -> tuple[
     prefix_len = config.parser.fuzzy_compare_prefix_len
 
     groups: dict[str, list[Vacancy]] = {}
+    # group_keys кэширует посчитанный ключ представителя группы — иначе на каждой новой
+    # вакансии этот ключ пересчитывался бы O(N) раз для одной и той же группы.
+    group_keys: dict[str, str] = {}
     raw_hashes: dict[str, str] = {}
     norm_hashes: dict[str, str] = {}
 
@@ -51,9 +54,7 @@ def deduplicate_vacancies(vacancies: list[Vacancy], config: AppConfig) -> tuple[
             candidate_key = group_key_parts(v)
             best_gid: str | None = None
             best_score = 0
-            for gid, members in groups.items():
-                ref = members[0]
-                ref_key = group_key_parts(ref)
+            for gid, ref_key in group_keys.items():
                 score = fuzz.token_set_ratio(candidate_key, ref_key)
                 if score >= threshold and score > best_score:
                     best_score = score
@@ -64,8 +65,8 @@ def deduplicate_vacancies(vacancies: list[Vacancy], config: AppConfig) -> tuple[
 
         if assigned_group is None:
             gid = short_id_from_hash(sha256_text(rh + nh))
-            assigned_group = gid
             groups.setdefault(gid, []).append(v)
+            group_keys[gid] = group_key_parts(v)
             raw_hashes[rh] = gid
             norm_hashes[nh] = gid
             v.is_duplicate = False
