@@ -276,12 +276,16 @@ with tab_run:
             d["detected_specializations"] = ", ".join(d["detected_specializations"])
             rows.append(d)
         df = pd.DataFrame(rows)
+        # Нумерация строк в st.dataframe берётся из индекса — сдвигаем на 1, чтобы строки
+        # отображались с «1», а не с «0».
+        if not df.empty:
+            df.index = pd.RangeIndex(start=1, stop=len(df) + 1)
         if not df.empty:
             st.subheader("Таблица (уникальные)")
             default_cols = [
                 c
                 for c in [
-                    "id",
+                    "post_url",
                     "source_channel",
                     "post_date",
                     "detected_salary_avg",
@@ -296,7 +300,7 @@ with tab_run:
                 "Колонки",
                 options=list(df.columns),
                 default=default_cols or list(df.columns)[:8],
-                key="vacancy_unique_columns_v2",
+                key="vacancy_unique_columns_v4",
             )
             if show_cols:
                 _col_cfg: dict = {}
@@ -312,6 +316,18 @@ with tab_run:
                     _col_cfg["work_format"] = st.column_config.TextColumn(
                         "Формат работы",
                         help="remote | hybrid | office | relocation | unknown",
+                    )
+                if "post_url" in show_cols:
+                    _col_cfg["post_url"] = st.column_config.LinkColumn(
+                        "Пост в Telegram",
+                        help="Прямая ссылка на сообщение — клик откроет пост в Telegram.",
+                        display_text="Открыть пост",
+                    )
+                if "source_url" in show_cols:
+                    _col_cfg["source_url"] = st.column_config.LinkColumn(
+                        "Канал",
+                        help="Ссылка на превью канала (t.me/s/...).",
+                        display_text="Канал",
                     )
                 st.dataframe(
                     df[show_cols],
