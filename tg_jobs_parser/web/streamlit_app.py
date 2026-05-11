@@ -177,6 +177,48 @@ def split_csv(s: str) -> list[str]:
     return [p.strip() for p in s.split(",") if p.strip()]
 
 
+@st.dialog("Подробная вакансия", width="large")
+def _show_vacancy_dialog(v, index_1based: int) -> None:
+    """Широкая модалка с полным текстом вакансии и быстрыми ссылками."""
+    st.markdown(f"### №{index_1based} — @{v.source_channel}")
+
+    btn_cols = st.columns([1, 1])
+    if v.post_url:
+        btn_cols[0].link_button("Открыть пост в Telegram", v.post_url, type="primary")
+    if v.source_url:
+        btn_cols[1].link_button(f"Открыть канал @{v.source_channel}", v.source_url)
+
+    meta: list[str] = []
+    if v.post_date:
+        meta.append(f"Дата: {v.post_date.strftime('%Y-%m-%d %H:%M')}")
+    if v.detected_salary_avg:
+        meta.append(
+            f"Зарплата: ~{v.detected_salary_avg:,.0f} {v.salary_currency or ''}".strip()
+        )
+    if v.work_format:
+        meta.append(f"Формат: {v.work_format}")
+    if v.detected_grade and v.detected_grade != "unknown":
+        meta.append(f"Грейд: {v.detected_grade}")
+    loc_parts = [x for x in (v.country, v.city) if x]
+    if loc_parts:
+        meta.append("Локация: " + " / ".join(loc_parts))
+    if v.company:
+        meta.append(f"Компания: {v.company}")
+    if v.contact:
+        meta.append(f"Контакт: {v.contact}")
+    if meta:
+        st.caption(" • ".join(meta))
+
+    if v.detected_specializations:
+        st.markdown("**Специализации:** " + ", ".join(v.detected_specializations))
+    if v.technologies:
+        st.markdown("**Технологии:** " + ", ".join(v.technologies))
+
+    st.divider()
+    st.markdown("**Полный текст:**")
+    st.write(v.cleaned_text or v.raw_text or "_(пусто)_")
+
+
 def rebuild_config_inline() -> "AppConfig":
     from tg_jobs_parser.config.schema import (
         AppConfig,
@@ -302,6 +344,9 @@ with tab_run:
                 default=default_cols or list(df.columns)[:8],
                 key="vacancy_unique_columns_v4",
             )
+            st.caption(
+                "Кликните по строке таблицы — откроется широкое окно с полным текстом вакансии и кнопками-ссылками."
+            )
             if show_cols:
                 _col_cfg: dict = {}
                 if "detected_salary_avg" in show_cols:
@@ -329,12 +374,30 @@ with tab_run:
                         help="Ссылка на превью канала (t.me/s/...).",
                         display_text="Канал",
                     )
-                st.dataframe(
+                table_event = st.dataframe(
                     df[show_cols],
                     width="stretch",
                     height=400,
                     column_config=_col_cfg or None,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="vacancy_unique_dataframe",
                 )
+
+                # event.selection.rows возвращает позиционные индексы DataFrame (0-based),
+                # которые совпадают с позицией в result.vacancies_unique.
+                sel_rows: list[int] = []
+                if table_event is not None and hasattr(table_event, "selection"):
+                    sel_rows = list(getattr(table_event.selection, "rows", None) or [])
+
+                last_seen = st.session_state.get("_vacancy_dialog_last_row")
+                if sel_rows:
+                    pos = sel_rows[0]
+                    if 0 <= pos < len(result.vacancies_unique) and pos != last_seen:
+                        st.session_state["_vacancy_dialog_last_row"] = pos
+                        _show_vacancy_dialog(result.vacancies_unique[pos], pos + 1)
+                else:
+                    st.session_state["_vacancy_dialog_last_row"] = None
             else:
                 st.info("Выберите хотя бы одну колонку.")
         else:
