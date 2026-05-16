@@ -193,12 +193,14 @@ class AIEnrichmentService:
             return
         rl = self._client.rate_limiter
         _LOG.info(
-            "AI LLM: завершено %s/%s | API %s | кэш %s | не вакансии %s | ошибок %s | "
-            "пропуск (rate-limit) %s | паузы %.0f с | 429-retries %s.",
+            "AI LLM: завершено %s/%s | API %s | кэш %s | пропуск score<%s: %s | "
+            "не вакансии %s | ошибок %s | пропуск (rate-limit) %s | паузы %.0f с | 429-retries %s.",
             self._progress_done,
             self._progress_total,
             self.stats.calls,
             self.stats.cache_hits,
+            self._ai.skip_if_vacancy_score_below,
+            self.stats.skipped_score,
             self.stats.dropped_not_job,
             self.stats.errors,
             self.stats.rate_limit_skipped,

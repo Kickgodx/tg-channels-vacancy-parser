@@ -34,23 +34,24 @@ ai:
   enabled: false
   mode: assist
   provider: openrouter
-  model: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+  model: google/gemini-3.1-flash-lite
+  # model: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
   fallback_models:
     - poolside/laguna-m.1:free
     - z-ai/glm-4.5-air:free
-    # - openai/gpt-oss-120b:free reasoning only
-    # - baidu/cobuddy:free reasoning only
+    - deepseek/deepseek-v4-flash:free
     # - qwen/qwen3-coder:free
   max_posts_per_run: 0
-  skip_if_vacancy_score_below: 0
+  skip_if_vacancy_score_below: 2
   concurrency: 2
-  requests_per_minute: 12
+  requests_per_minute: 50
   max_retries_on_429: 0
   retry_base_delay_seconds: 5
   stop_llm_when_rate_limited: true
   use_cache: true
   reasoning_enabled: false
   allow_unknown_specializations: true
+  use_few_shot: true
 
 search:
   date_from: "2026-05-05"

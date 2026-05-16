@@ -27,6 +27,7 @@ class ParseProgressSnapshot:
     ai_llm_disabled_reason: str | None = None
     ai_tokens_in: int = 0
     ai_tokens_out: int = 0
+    ai_skipped_score: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
 
 

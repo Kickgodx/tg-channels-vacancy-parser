@@ -23,6 +23,23 @@ def _vacancy() -> Vacancy:
     )
 
 
+def test_enrich_skips_low_vacancy_score(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    cfg = AppConfig()
+    cfg = cfg.model_copy(
+        update={
+            "ai": cfg.ai.model_copy(
+                update={"enabled": True, "skip_if_vacancy_score_below": 3, "use_cache": False}
+            ),
+        }
+    )
+    service = AIEnrichmentService(cfg)
+    low = _vacancy().model_copy(update={"vacancy_score": 1})
+    service.begin_batch(1)
+    assert service.enrich(low) is None
+    assert service.stats.skipped_score == 1
+
+
 def test_enrich_drops_non_job(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     cfg = AppConfig()

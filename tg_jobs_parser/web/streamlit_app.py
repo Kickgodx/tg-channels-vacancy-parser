@@ -36,7 +36,10 @@ _require_streamlit_runtime()
 from tg_jobs_parser.analytics.charts import plotly_daily_line, plotly_grade_bar, plotly_spec_bar
 from tg_jobs_parser.channel_search import search_channels
 from tg_jobs_parser.config.loader import ConfigLoadError, load_config
-from tg_jobs_parser.ai.models_catalog import OPENROUTER_FREE_MODELS
+from tg_jobs_parser.ai.models_catalog import (
+    OPENROUTER_FREE_MODELS,
+    merge_openrouter_model_options,
+)
 from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.exporters.excel_exporter import export_excel
 from tg_jobs_parser.exporters.json_exporter import export_json
@@ -189,20 +192,34 @@ with st.sidebar:
         value=bool(getattr(_ai_cfg, "enabled", False)),
         help="Нужен OPENROUTER_API_KEY в .env. Посты обрабатываются параллельно до дедупликации.",
     )
-    _free_opts = list(OPENROUTER_FREE_MODELS)
-    _default_model = getattr(_ai_cfg, "model", _free_opts[0]) if _ai_cfg else _free_opts[0]
-    _model_idx = _free_opts.index(_default_model) if _default_model in _free_opts else 0
-    ai_model_choice = st.selectbox("Основная модель", options=_free_opts, index=_model_idx)
+    _cfg_model = (getattr(_ai_cfg, "model", None) or "").strip() if _ai_cfg else ""
     _cfg_fallbacks = list(getattr(_ai_cfg, "fallback_models", [])) if _ai_cfg else []
-    _fallback_default = [m for m in _cfg_fallbacks if m in _free_opts and m != ai_model_choice]
-    if not _fallback_default:
-        _fallback_default = [m for m in _free_opts if m != ai_model_choice]
+    _model_opts = merge_openrouter_model_options(_cfg_model or None, _cfg_fallbacks)
+    if not _model_opts:
+        _model_opts = list(merge_openrouter_model_options(None, None))
+    _model_idx = _model_opts.index(_cfg_model) if _cfg_model in _model_opts else 0
+    _model_key = f"ai_primary|{cfg_path}|{_cfg_model}"
+    ai_model_choice = st.selectbox(
+        "Основная модель",
+        options=_model_opts,
+        index=_model_idx,
+        key=_model_key,
+        help="По умолчанию — ai.model из config.yaml; ниже — каталог free-моделей OpenRouter.",
+    )
+    _fallback_opts = [m for m in _model_opts if m != ai_model_choice]
+    for m in _cfg_fallbacks:
+        if m and m != ai_model_choice and m not in _fallback_opts:
+            _fallback_opts.append(m)
+    _fallback_default = [m for m in _cfg_fallbacks if m in _fallback_opts and m != ai_model_choice]
     ai_fallback_models = st.multiselect(
         "Fallback-модели (по порядку при ошибке основной)",
-        options=[m for m in _free_opts if m != ai_model_choice],
+        options=_fallback_opts,
         default=_fallback_default,
-        help="Список бесплатных моделей OpenRouter; при сбое основной пробуются по очереди.",
+        key=f"ai_fallback|{cfg_path}|{ai_model_choice}",
+        help="По умолчанию — ai.fallback_models из config.yaml.",
     )
+    if _cfg_model and _cfg_model not in OPENROUTER_FREE_MODELS:
+        st.caption(f"Основная модель из config.yaml (вне каталога free): `{_cfg_model}`")
 
 
 def split_csv(s: str) -> list[str]:
@@ -274,6 +291,10 @@ def _render_live_progress(
     if snap.ai_llm_disabled:
         lines.append(
             f"**LLM отключён** (дальше только rules): {snap.ai_llm_disabled_reason or 'rate limit'}"
+        )
+    if snap.ai_skipped_score:
+        lines.append(
+            f"**Без LLM (низкий vacancy_score):** {snap.ai_skipped_score}"
         )
     if snap.ai_tokens_in or snap.ai_tokens_out:
         total_tok = snap.ai_tokens_in + snap.ai_tokens_out
@@ -408,7 +429,9 @@ def rebuild_config_inline() -> "AppConfig":
     if use_ai:
         ai_base["enabled"] = True
         ai_base["model"] = ai_model_choice
-        ai_base["fallback_models"] = [m for m in ai_fallback_models if m != ai_model_choice]
+        if ai_fallback_models:
+            ai_base["fallback_models"] = [m for m in ai_fallback_models if m != ai_model_choice]
+        # пустой multiselect — не затираем fallback_models из config.yaml
     else:
         ai_base["enabled"] = False
     data["ai"] = AiConfig(**ai_base).model_dump()
@@ -483,9 +506,12 @@ with tab_run:
             t1.metric("AI tokens (input)", f"{tin:,}".replace(",", " "))
             t2.metric("AI tokens (output)", f"{tout:,}".replace(",", " "))
             t3.metric("AI tokens (всего)", f"{tsum:,}".replace(",", " "))
+            skipped = int(ai_stats.get("skipped_score") or 0)
             st.info(
                 f"AI: вызовов {ai_stats.get('calls', 0)}, кэш {ai_stats.get('cache_hits', 0)}, "
+                f"без LLM (низкий score) {skipped}, "
                 f"отсечено не-вакансий {ai_stats.get('dropped_not_job', 0)}, "
+                f"пропуск rate-limit {ai_stats.get('rate_limit_skipped', 0)}, "
                 f"ошибок {ai_stats.get('errors', 0)}."
             )
 
