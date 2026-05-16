@@ -211,6 +211,15 @@ def parse(
                 fg=typer.colors.CYAN,
             )
         )
+        typer.echo(
+            typer.style(
+                f"AI: вызовов {ai_stats.get('calls', 0)}, кэш {ai_stats.get('cache_hits', 0)}, "
+                f"без LLM (низкий score) {ai_stats.get('skipped_score', 0)}, "
+                f"не-вакансий {ai_stats.get('dropped_not_job', 0)}, "
+                f"rate-limit {ai_stats.get('rate_limit_skipped', 0)}.",
+                fg=typer.colors.CYAN,
+            )
+        )
 
 
 @app.command("analyze")

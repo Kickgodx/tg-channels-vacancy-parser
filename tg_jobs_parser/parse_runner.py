@@ -300,6 +300,7 @@ def run_parse(
             ai_llm_disabled_reason=rl.llm_disabled_reason if rl else None,
             ai_tokens_in=ai_service.stats.tokens_in if ai_service else 0,
             ai_tokens_out=ai_service.stats.tokens_out if ai_service else 0,
+            ai_skipped_score=ai_service.stats.skipped_score if ai_service else 0,
         )
         if partial_dir and candidates:
             p = save_partial_batch(partial_dir, snap, run_id=partial_run_id)
