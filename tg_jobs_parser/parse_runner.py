@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from pathlib import Path
 
 from tg_jobs_parser.analytics.metrics_builder import build_metrics
 from tg_jobs_parser.config.schema import AppConfig
@@ -23,6 +25,11 @@ from tg_jobs_parser.extraction.vacancy_detector import compute_vacancy_score
 from tg_jobs_parser.filters.vacancy_filters import apply_post_filters
 from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.parse_progress import (
+    ParseProgressCallback,
+    ParseProgressSnapshot,
+    save_partial_batch,
+)
 from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import clamp_range_days, parse_date, resolve_search_date_to
@@ -39,8 +46,8 @@ def _channel_parser(config: AppConfig) -> BaseChannelParser:
 
     if err := telethon_import_error():
         raise RuntimeError(
-            "Нужен пакет Telethon: pip install telethon python-dotenv "
-            "(или poetry install --extras telethon). Убедитесь, что используете тот же Python, что и при установке зависимостей."
+            "Нужен Telethon: poetry install (и при необходимости --extras telethon). "
+            "Запускайте через poetry run python -m tg_jobs_parser.cli …"
         ) from err
     return TelegramTelethonParser(config)
 
@@ -65,7 +72,7 @@ def _extract_experience(text: str) -> str | None:
     return None
 
 
-def raw_post_to_vacancy(
+def raw_post_to_vacancy_rules(
     post: RawPost,
     config: AppConfig,
     *,
@@ -74,7 +81,7 @@ def raw_post_to_vacancy(
     wf_map: dict[str, list[str]] | None = None,
 ) -> Vacancy:
     """
-    Преобразовать сырой пост в вакансию.
+    Rule-based извлечение (без LLM).
 
     Словари можно передать заранее (``spec_map``/``tech_list``/``wf_map``) — это критично
     при пакетной обработке, иначе на каждый пост они пересобираются заново.
@@ -139,7 +146,27 @@ def raw_post_to_vacancy(
     )
 
 
-def run_parse(config: AppConfig, cli_overrides: dict | None = None) -> ParseResult:
+def raw_post_to_vacancy(
+    post: RawPost,
+    config: AppConfig,
+    *,
+    spec_map: dict[str, list[str]] | None = None,
+    tech_list: list[str] | None = None,
+    wf_map: dict[str, list[str]] | None = None,
+) -> Vacancy:
+    """Алиас rule-based извлечения (обратная совместимость)."""
+    return raw_post_to_vacancy_rules(
+        post, config, spec_map=spec_map, tech_list=tech_list, wf_map=wf_map
+    )
+
+
+def run_parse(
+    config: AppConfig,
+    cli_overrides: dict | None = None,
+    *,
+    progress_callback: ParseProgressCallback | None = None,
+    progress_every_n_posts: int | None = None,
+) -> ParseResult:
     """
     Основной сценарий MVP.
 
@@ -188,6 +215,11 @@ def run_parse(config: AppConfig, cli_overrides: dict | None = None) -> ParseResu
 
     posts_fetched = 0
     candidates: list[Vacancy] = []
+    batch_step = progress_every_n_posts or config.parser.progress_batch_posts
+    partial_dir: Path | None = None
+    partial_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if config.output.save_progress_batches:
+        partial_dir = Path(config.output.directory) / config.output.partial_batches_subdirectory
 
     channels_unique: list[str] = []
     for ch in config.sources.channels:
@@ -217,37 +249,95 @@ def run_parse(config: AppConfig, cli_overrides: dict | None = None) -> ParseResu
         fetch_elapsed,
     )
 
+    ai_service = None
+    if config.ai.enabled:
+        from tg_jobs_parser.ai.enricher import AIEnrichmentService
+
+        try:
+            ai_service = AIEnrichmentService(config)
+            ai_service.begin_batch(len(all_posts))
+            all_warnings.append(
+                f"AI: OpenRouter, модель {config.ai.model}"
+                + (
+                    f", fallback [{', '.join(config.ai.resolved_fallback_models())}]"
+                    if config.ai.resolved_fallback_models()
+                    else ""
+                )
+                + f", режим {config.ai.mode}, concurrency={config.ai.concurrency}."
+            )
+            logging.getLogger("httpx").setLevel(logging.WARNING)
+            logging.getLogger("openai").setLevel(logging.WARNING)
+            _LOG.info("AI-обогащение включено (до дедупликации).")
+        except Exception as e:
+            all_warnings.append(f"AI не запущен: {e}")
+            _LOG.error("AI не инициализирован: %s", e)
+
     def _process_one(post: RawPost) -> Vacancy | None:
-        v = raw_post_to_vacancy(post, config, spec_map=specs_map, tech_list=tech_list, wf_map=wf_map)
-        if v.vacancy_score < threshold:
+        v = raw_post_to_vacancy_rules(
+            post, config, spec_map=specs_map, tech_list=tech_list, wf_map=wf_map
+        )
+        if ai_service is not None:
+            v = ai_service.enrich(v)
+            if v is None:
+                return None
+        elif v.vacancy_score < threshold:
             return None
         if not apply_post_filters(v, config, specs_map, exclude_keywords=exclude_kw):
             return None
         return v
 
-    # CPU-bound пост-обработка: каждый пост проходит через десяток regex-экстракторов.
-    # Python re реализован на C и отпускает GIL, поэтому ThreadPoolExecutor реально ускоряет
-    # обработку на нескольких ядрах. На малом объёме оверхед пула не оправдан — идём в один поток.
-    workers = max(2, min(8, (os.cpu_count() or 4)))
+    def _emit_progress(posts_processed: int, *, phase: str = "processing") -> None:
+        if not progress_callback and not partial_dir:
+            return
+        rl = ai_service._client.rate_limiter if ai_service is not None else None
+        snap = ParseProgressSnapshot(
+            posts_processed=posts_processed,
+            posts_total=len(all_posts),
+            vacancies_found=len(candidates),
+            vacancies=list(candidates),
+            phase=phase,
+            ai_llm_disabled=bool(rl and rl.llm_disabled),
+            ai_llm_disabled_reason=rl.llm_disabled_reason if rl else None,
+            ai_tokens_in=ai_service.stats.tokens_in if ai_service else 0,
+            ai_tokens_out=ai_service.stats.tokens_out if ai_service else 0,
+        )
+        if partial_dir and candidates:
+            p = save_partial_batch(partial_dir, snap, run_id=partial_run_id)
+            snap.extra["partial_path"] = str(p)
+        if progress_callback:
+            progress_callback(snap)
+
+    # Пост-обработка: regex (+ опционально LLM в пуле потоков).
+    if ai_service is not None:
+        workers = max(1, min(config.ai.concurrency, 16))
+    else:
+        workers = max(2, min(8, (os.cpu_count() or 4)))
+
     process_started = time.monotonic()
-    if len(all_posts) < 200 or workers == 1:
+    if len(all_posts) < 200 and ai_service is None:
         for i, post in enumerate(all_posts, 1):
             v = _process_one(post)
             if v is not None:
                 candidates.append(v)
+            if i % batch_step == 0 or i == len(all_posts):
+                _emit_progress(i)
             if i % 500 == 0:
                 _LOG.info("Обработано постов: %s/%s; прошло вакансий: %s", i, len(all_posts), len(candidates))
     else:
+        label = "regex+AI" if ai_service else "regex"
         _LOG.info(
-            "Пост-обработка %s постов в %s потоков (regex отпускает GIL).",
+            "Пост-обработка %s постов в %s потоков (%s).",
             len(all_posts),
             workers,
+            label,
         )
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="post-proc") as ex:
-            chunksize = max(16, len(all_posts) // (workers * 8) or 16)
+            chunksize = max(8, len(all_posts) // (workers * 8) or 8)
             for i, v in enumerate(ex.map(_process_one, all_posts, chunksize=chunksize), 1):
                 if v is not None:
                     candidates.append(v)
+                if i % batch_step == 0 or i == len(all_posts):
+                    _emit_progress(i)
                 if i % 500 == 0:
                     _LOG.info(
                         "Обработано постов: %s/%s; прошло вакансий: %s",
@@ -257,6 +347,15 @@ def run_parse(config: AppConfig, cli_overrides: dict | None = None) -> ParseResu
                     )
 
     process_elapsed = time.monotonic() - process_started
+    _emit_progress(len(all_posts), phase="post_processing_done")
+    if ai_service is not None:
+        ai_service.log_batch_finished()
+        all_warnings.append(ai_service.stats.format_token_summary())
+        if ai_service._client.rate_limiter.llm_disabled:
+            all_warnings.append(
+                f"AI: LLM отключён ({ai_service._client.rate_limiter.llm_disabled_reason}). "
+                "Оставшиеся посты обработаны только rules."
+            )
     _LOG.info(
         "Пост-обработка завершена за %.1f с. После фильтров осталось вакансий-кандидатов: %s",
         process_elapsed,
@@ -285,6 +384,8 @@ def run_parse(config: AppConfig, cli_overrides: dict | None = None) -> ParseResu
     metrics.warnings.extend(all_warnings)
 
     run_params = config.to_serializable_dict()
+    if ai_service is not None:
+        run_params["ai_stats"] = ai_service.stats.to_dict()
     if cli_overrides:
         run_params["cli_overrides"] = cli_overrides
 

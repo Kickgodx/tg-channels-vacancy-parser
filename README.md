@@ -1,6 +1,6 @@
 # tg_jobs_parser
 
-Локальное **Windows-first** MVP-приложение на Python: парсинг Telegram-каналов с IT-вакансиями через **Telethon** (ваш аккаунт, MTProto), без LLM: правиловое извлечение полей, фильтры, дедуп, метрики, экспорт **Excel/JSON**, CLI (**Typer**) и **Streamlit** + **Plotly**.
+Локальное **Windows-first** MVP-приложение на Python: парсинг Telegram-каналов с IT-вакансиями через **Telethon** (ваш аккаунт, MTProto), правиловое извлечение полей, **опциональный AI** (OpenRouter), фильтры, дедуп, метрики, экспорт **Excel/JSON**, CLI (**Typer**) и **Streamlit** + **Plotly**.
 
 Каналы задаются в `config.yaml` (или `--channels`). Опционально в Streamlit доступен best-effort **поиск кандидатов каналов** через DuckDuckGo (не заменяет ручной список источников).
 
@@ -16,7 +16,7 @@ TELEGRAM_API_ID=12345678
 TELEGRAM_API_HASH=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-3. Установите проект: `pip install -e .` — в зависимости уже входят **telethon** и **python-dotenv**. Дополнительно для ускорения шифрования на Windows: `pip install ".[telethon]"` (extra ставит **cryptg**).
+3. Установите проект через Poetry (см. ниже). Дополнительно для ускорения Telethon на Windows: `poetry install --extras telethon` (ставит **cryptg**).
 4. В `config.yaml` укажите `telegram.telethon_session_file` (путь к файлу сессии).
 5. **Первый запуск** удобнее из консоли: Telethon запросит телефон, код из SMS и при необходимости пароль 2FA — так создаётся файл сессии. В Streamlit интерактивная авторизация обычно неудобна; сначала выполните хотя бы один успешный `parse` через CLI.
 
@@ -36,8 +36,8 @@ poetry run python -m tg_jobs_parser.cli parse --config config.yaml
 ```text
 tg_jobs_parser/
   README.md
-  requirements.txt
   pyproject.toml
+  poetry.lock
   config.yaml
   .env.example
   .gitignore
@@ -53,6 +53,7 @@ tg_jobs_parser/
     config/       — YAML + Pydantic-схема
     parsers/      — Telethon, channel_username
     extraction/   — нормализация, vacancy score, специализации, зарплата...
+    ai/           — OpenRouter (OpenAI SDK), промпты, кэш, слияние с rules
     models/       — Vacancy, метрики, ParseResult
     filters/      — фильтры по конфигу/CLI/UI
     deduplication/- хэши + rapidfuzz
@@ -63,38 +64,27 @@ tg_jobs_parser/
   tests/
 ```
 
-## Установка на Windows
+## Установка (Poetry)
 
-Откройте PowerShell или **cmd**:
-
-```powershell
-cd путь\к\tg_jobs_parser
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-Или установка пакета в editable-режиме:
-
-```powershell
-pip install -e ".[dev]"
-```
-
-### Poetry
-
-**Telethon входит в optional extra** `telethon`: при обычном `poetry install` пакет **не** ставится, поэтому получается предупреждение про fallback на web.
+Проект **Poetry-first**: зависимости и extras задаются в `pyproject.toml` / `poetry.lock`.
 
 ```powershell
 cd путь\к\tg_jobs_parser
 poetry install
-# опционально ускорение Telethon (cryptg): poetry install --extras telethon
+# опционально ускорение Telethon (cryptg):
+poetry install --extras telethon
+# опционально AI (OpenRouter + openai SDK):
+poetry install --extras ai
 ```
 
-Проверка, что Telethon в активном venv: `poetry run python -c "import telethon; print(telethon.__version__)"`.
+Проверка окружения:
 
-Важно: **голый** `python` в консоли часто указывает на другой интерпретатор, не на Poetry-окружение.
-Тогда Telethon «есть» при `poetry run python -c ...`, но пропадает при `python -m tg_jobs_parser.cli`.
-Используйте **`poetry run python -m tg_jobs_parser.cli …`** или один раз выполните **`poetry shell`**, либо активируйте `.venv\\Scripts\\activate`.
+```powershell
+poetry run python -c "import telethon; print(telethon.__version__)"
+```
+
+Важно: **голый** `python` в консоли часто указывает на другой интерпретатор, не на Poetry-venv.
+Используйте **`poetry run python -m tg_jobs_parser.cli …`** или **`poetry shell`**, либо активируйте `.venv\Scripts\Activate.ps1`.
 
 ## Конфигурация
 
@@ -107,12 +97,93 @@ poetry install
 - **`vacancy_score_threshold`** — минимальный общий счёт правил из `extraction/vacancy_detector.py` (маркеры вакансии, разработческие формулировки, намёки на зарплату, грейд, компания, **email или @**, слова формата remote/office…).
 - **`vacancy_min_substantive_score`** — минимальный счёт **без** бонуса за email/`@username`. Значение **1** и выше отсекает короткие обсуждения, где сработало только упоминание контакта, но нет хотя бы одного другого признака (например зарплаты, офис/hybrid или явного «vacancy»/developer и т.д.).
 
+### Секция `ai` (опционально)
+
+По умолчанию **`ai.enabled: false`** — работают только эвристики из `extraction/`. При включении каждый пост (до дедупликации) дополнительно разбирается через **OpenRouter**; HTTP-клиент — официальный пакет **[`openai`](https://github.com/openai/openai-python)** (OpenAI-compatible API, тот же протокол, что у OpenRouter).
+
+| Поле | Назначение |
+|------|------------|
+| **`enabled`** | Включить LLM-разбор. |
+| **`mode`** | `assist` — AI уточняет поля поверх rules; `primary` — AI основной источник (rules — fallback при ошибке). |
+| **`model`** | Основная модель OpenRouter. |
+| **`fallback_models`** | Список запасных free-моделей (пробуются по порядку при ошибке основной). |
+| **`concurrency`** | Параллельные LLM-запросы (**для `:free` моделей — `1`**, иначе 429). |
+| **`requests_per_minute`** | Пауза между запросами (по умолчанию **12**; лимит OpenRouter free ≈ **16/мин**). |
+| **`stop_llm_when_rate_limited`** | При `X-RateLimit-Remaining: 0` — **отключить LLM** до конца прогона (только rules). |
+| **`max_retries_on_429`** | Повторы при 429 (для free лучше `0`). |
+| **`parser.progress_batch_posts`** | Обновление UI / partial JSON каждые N постов. |
+| **`output.save_progress_batches`** | Сохранять `output/partial/partial_*.json` по ходу. |
+| **`max_posts_per_run`** | Лимит LLM-вызовов за прогон (`0` = без лимита). |
+| **`use_cache`** | Дисковый кэш в `.cache/ai_extractions/`. |
+| **`reasoning_enabled`** | Для reasoning-моделей; для стабильного JSON лучше **`false`**. |
+
+Подробный план и архитектура: **`zaddai.md`**.
+
+#### Что извлекает AI (RU + EN)
+
+Приоритет полей: **зарплата**, **валюта**, **специализация** (в т.ч. новые роли, не только словарь конфига), **формат работы**, **локация**, **ссылки на отклик** (`application_urls` — hh.ru, careers и т.д.).
+
+Посты «резюме / курсы / не вакансия» отсекаются флагом **`is_job_post`** и не попадают в выдачу.
+
+#### Подготовка OpenRouter
+
+1. Ключ: [https://openrouter.ai/keys](https://openrouter.ai/keys) → в `.env`:
+
+```env
+OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+2. Установите extra с OpenAI SDK:
+
+```powershell
+poetry install --extras ai
+```
+
+3. В `config.yaml`:
+
+```yaml
+ai:
+  enabled: true
+  model: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+  fallback_models:
+    - poolside/laguna-m.1:free
+    - meta-llama/llama-3.3-70b-instruct:free
+```
+
+4. Запуск:
+
+```powershell
+poetry run python -m tg_jobs_parser.cli parse --ai
+```
+
+В Streamlit: sidebar → **«Использовать LLM для разбора текста»**.
+
+В JSON-отчёте (`run_params`) появляется блок **`ai_stats`**: число вызовов, кэш, отсечённые не-вакансии, токены.
+
+> **Приватность:** текст постов уходит на серверы OpenRouter/провайдера модели. Для полностью локального разбора — см. roadmap в `zaddai.md` (Ollama, итерация 2).
+
+#### Лимиты OpenRouter (free)
+
+По ответам API при **429**:
+
+| Лимит | Ориентир |
+|-------|----------|
+| `free-models-per-min` | ~**16** запросов в минуту |
+| `free-models-per-day` | ~**50** запросов в день на аккаунт |
+
+В конфиге по умолчанию `concurrency: 1` и `requests_per_minute: 12` — запросы идут **по одному** с паузой ~5 с. При исчерпании дневного лимита дальнейшие вызовы LLM пропускаются (в режиме `assist` остаются поля из rules). Повторный прогон с **`use_cache: true`** не тратит квоту на уже разобранные посты.
+
+#### OpenAI SDK vs «голый» httpx
+
+Используется **OpenAI SDK**, потому что OpenRouter совместим с OpenAI API: меньше своего кода, встроенные retries и таймауты, нативный `response_format` для JSON. Пакет `httpx` остаётся в проекте для других задач (Telethon/web), но LLM-вызовы идут через `openai`.
+
 ## CLI
 
 Из корня проекта (рядом с `config.yaml`). Предпочтительно (**без предупреждения runpy**):
 
 ```powershell
 python -m tg_jobs_parser.cli parse --config config.yaml
+python -m tg_jobs_parser.cli parse --ai
 python -m tg_jobs_parser.cli analyze --from-json output/vacancies.json
 python -m tg_jobs_parser.cli export --from-json output/vacancies.json --out reexport.xlsx
 python -m tg_jobs_parser.cli run-web
@@ -120,13 +191,13 @@ python -m tg_jobs_parser.cli run-web
 
 Вариант ``python -m tg_jobs_parser.cli.app ...`` тоже работает, но может выдать ``RuntimeWarning`` при старте.
 
-После `pip install -e .` доступна короткая команда:
+После `poetry install` доступна короткая команда:
 
 ```powershell
-tg-jobs-parser parse --config config.yaml
+poetry run tg-jobs-parser parse --config config.yaml
 ```
 
-Логи: консоль + `logs/app.log`.
+Логи: консоль + `logs/app.log` (прогресс LLM: `AI LLM: 100/1500 — @channel [запрос API]`).
 
 ### Параметры `work_formats` в конфиге
 
@@ -140,7 +211,7 @@ tg-jobs-parser parse --config config.yaml
 streamlit run tg_jobs_parser/web/streamlit_app.py
 ```
 
-Поддерживается ввод каналов вручную, выбор специализаций/исключений/дат, best-effort поиск каналов (HTML DuckDuckGo), таблица результатов, графики Plotly, скачивание Excel/JSON.
+Поддерживается ввод каналов вручную, выбор специализаций/исключений/дат, **опциональный LLM (OpenRouter)**, best-effort поиск каналов (HTML DuckDuckGo), таблица результатов, графики Plotly, скачивание Excel/JSON. После прогона с AI в sidebar показывается сводка `ai_stats`.
 
 ## Результаты
 
@@ -157,16 +228,21 @@ streamlit run tg_jobs_parser/web/streamlit_app.py
 pytest
 ```
 
-## Архитектура (расширение под AI)
+## Архитектура
 
-- Извлечение вынесено в модуль `extraction/`: можно заменить/обернуть эвристики **единым интерфейсом** без изменения экспорта/метрик.
-- `parsers/base.py` — общий интерфейс источника постов; реализация чтения каналов — **Telethon**.
+```text
+Telethon → RawPost → extraction/ (rules) → [ai/ OpenRouter] → filters → dedup → export
+```
+
+- **`extraction/`** — быстрые эвристики (всегда).
+- **`ai/`** — опционально: OpenAI SDK → OpenRouter, JSON-схема, кэш, `merge_rules_and_ai`.
+- **`parsers/base.py`** — интерфейс источника; реализация — **Telethon**.
 
 ## Roadmap / следующие шаги
 
 - Расширение **Telethon**: `joinchat`/каналы без `@username`, rate-limit, неинтерактивный вход.
 - Альтернатива **Pyrogram**.
-- **AI/NLP**-модуль структурирования текста поверх этого MVP.
+- **Локальные LLM** (Ollama / LM Studio) через тот же OpenAI-compatible endpoint.
 - **SQLite/PostgreSQL** для хранения прогонов.
 - **Docker**, планировщик задач (Task Scheduler / cron), **бот** для алертов.
 - Расширенный поиск каналов (несколько запросов DuckDuckGo + слияние).

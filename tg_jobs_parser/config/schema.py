@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from tg_jobs_parser.ai.models_catalog import DEFAULT_FALLBACK_MODELS
 
 
 DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
@@ -109,6 +111,110 @@ class SourcesConfig(BaseModel):
     channels: list[str] = Field(default_factory=list)
 
 
+class AiMergeConfig(BaseModel):
+    prefer_ai_for: list[str] = Field(
+        default_factory=lambda: [
+            "detected_specializations",
+            "detected_salary_min",
+            "detected_salary_max",
+            "salary_currency",
+            "work_format",
+            "country",
+            "city",
+            "application_urls",
+        ]
+    )
+    min_confidence: float = Field(default=0.45, ge=0, le=1)
+
+
+class AiConfig(BaseModel):
+    enabled: bool = False
+    mode: str = Field(
+        default="assist",
+        description="assist — AI дополняет/уточняет поля; primary — AI основной источник.",
+    )
+    provider: str = Field(default="openrouter", description="openrouter")
+    model: str = Field(
+        default="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    )
+    fallback_models: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_FALLBACK_MODELS),
+        description="Цепочка запасных free-моделей при ошибке основной (по порядку).",
+    )
+    base_url: str = Field(default="https://openrouter.ai/api/v1")
+    max_input_chars: int = Field(default=6000, ge=500, le=32000)
+    max_posts_per_run: int = Field(
+        default=0,
+        ge=0,
+        description="0 — без лимита LLM-вызовов за прогон.",
+    )
+    skip_if_vacancy_score_below: int = Field(
+        default=0,
+        ge=0,
+        description="Не вызывать LLM для постов с score ниже (0 = все посты).",
+    )
+    concurrency: int = Field(
+        default=1,
+        ge=1,
+        le=16,
+        description="Параллельные LLM-запросы; для OpenRouter :free рекомендуется 1.",
+    )
+    requests_per_minute: float = Field(
+        default=12.0,
+        gt=0,
+        le=60,
+        description="Пауза между запросами (~16/мин лимит free OpenRouter; 12 — запас).",
+    )
+    max_retries_on_429: int = Field(default=0, ge=0, le=10)
+    retry_base_delay_seconds: float = Field(default=5.0, ge=1, le=120)
+    stop_llm_when_rate_limited: bool = Field(
+        default=True,
+        description="При X-RateLimit-Remaining=0 / дневном лимите — отключить LLM до конца прогона (rules).",
+    )
+    use_few_shot: bool = False
+    prompt_version: str = "v1"
+    use_cache: bool = True
+    cache_path: str = ".cache/ai_extractions"
+    request_timeout_seconds: float = 90.0
+    temperature: float = Field(default=0.1, ge=0, le=2)
+    reasoning_enabled: bool = Field(
+        default=False,
+        description="Reasoning-модели OpenRouter: для JSON-экстракции лучше false.",
+    )
+    allow_unknown_specializations: bool = True
+    merge: AiMergeConfig = Field(default_factory=AiMergeConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_fallback_model(cls, data: object) -> object:
+        if isinstance(data, dict) and "fallback_models" not in data:
+            legacy = data.get("fallback_model")
+            if legacy:
+                data = dict(data)
+                data["fallback_models"] = [legacy] if isinstance(legacy, str) else legacy
+        return data
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        allowed = {"assist", "primary"}
+        if v not in allowed:
+            raise ValueError(f"ai.mode must be one of {allowed}")
+        return v
+
+    def resolved_fallback_models(self) -> list[str]:
+        """Запасные модели без дубликатов и без совпадения с ``model``."""
+        primary = self.model.strip()
+        seen = {primary}
+        out: list[str] = []
+        for raw in self.fallback_models:
+            m = raw.strip()
+            if m and m not in seen:
+                seen.add(m)
+                out.append(m)
+        return out
+
+
 class SearchConfig(BaseModel):
     date_from: str | None = Field(
         default=None,
@@ -153,6 +259,12 @@ class ParserConfig(BaseModel):
             "(идём от новых к старым, пока не выйдем за date_from или не упрёмся в этот лимит)."
         ),
     )
+    progress_batch_posts: int = Field(
+        default=25,
+        ge=1,
+        le=500,
+        description="Как часто отдавать снимок прогресса в UI (каждые N постов).",
+    )
     channel_concurrency: int = Field(
         default=4,
         ge=1,
@@ -173,6 +285,11 @@ class OutputConfig(BaseModel):
     excel_filename: str = "vacancies.xlsx"
     json_filename: str = "vacancies.json"
     charts_directory: str = "charts"
+    save_progress_batches: bool = Field(
+        default=True,
+        description="Сохранять partial_*.json по мере обработки (для UI и восстановления).",
+    )
+    partial_batches_subdirectory: str = "partial"
 
 
 class TelegramConfig(BaseModel):
@@ -197,6 +314,7 @@ class AppConfig(BaseModel):
     """Корневая модель конфигурации приложения."""
 
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
+    ai: AiConfig = Field(default_factory=AiConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     filters: FiltersConfig = Field(default_factory=FiltersConfig)
     parser: ParserConfig = Field(default_factory=ParserConfig)

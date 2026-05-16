@@ -12,7 +12,15 @@ import typer
 
 from tg_jobs_parser.analytics.charts import save_matplotlib_charts
 from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import AppConfig, FiltersConfig, OutputConfig, SearchConfig, SourcesConfig, TelegramConfig
+from tg_jobs_parser.config.schema import (
+    AiConfig,
+    AppConfig,
+    FiltersConfig,
+    OutputConfig,
+    SearchConfig,
+    SourcesConfig,
+    TelegramConfig,
+)
 from tg_jobs_parser.exporters.excel_exporter import export_excel
 from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
 from tg_jobs_parser.exporters.json_exporter import export_json, load_parse_result_json
@@ -37,6 +45,7 @@ def _build_config_from_cli(
     output_dir: str | None,
     threshold: int | None,
     telegram_session: str | None,
+    ai_enabled: bool | None = None,
 ) -> AppConfig:
     data = base.model_dump()
     if channels:
@@ -78,6 +87,10 @@ def _build_config_from_cli(
         merged_tg = {**data.get("telegram", {}), **tg_updates}
         data["telegram"] = TelegramConfig(**merged_tg).model_dump()
 
+    if ai_enabled is not None:
+        merged_ai = {**data.get("ai", {}), "enabled": ai_enabled}
+        data["ai"] = AiConfig(**merged_ai).model_dump()
+
     return AppConfig.model_validate(data)
 
 
@@ -112,6 +125,7 @@ def parse(
         help="Путь к файлу сессии Telethon (переопределение конфига).",
     ),
     skip_charts: bool = typer.Option(False, "--skip-charts"),
+    ai: bool = typer.Option(False, "--ai", help="Включить LLM-извлечение (OpenRouter, см. config ai.*)"),
 ) -> None:
     """Запуск парсинга и экспорта Excel/JSON."""
     setup_logging()
@@ -142,7 +156,11 @@ def parse(
         output_dir=output_dir,
         threshold=threshold,
         telegram_session=telegram_session,
+        ai_enabled=ai if ai else None,
     )
+
+    if ai and not cfg.ai.enabled:
+        cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True})})
 
     out_dir = Path(cfg.output.directory)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -152,6 +170,7 @@ def parse(
         "date_from": date_from,
         "date_to": date_to,
         "config_path": str(config_path),
+        "ai": ai,
     }
     result = run_parse(cfg, cli_overrides=overrides)
 
@@ -182,6 +201,16 @@ def parse(
             fg=typer.colors.GREEN,
         )
     )
+    ai_stats = (result.run_params or {}).get("ai_stats")
+    if ai_stats:
+        tin = int(ai_stats.get("tokens_in") or 0)
+        tout = int(ai_stats.get("tokens_out") or 0)
+        typer.echo(
+            typer.style(
+                f"AI токены за прогон: input={tin}, output={tout}, всего={tin + tout}",
+                fg=typer.colors.CYAN,
+            )
+        )
 
 
 @app.command("analyze")

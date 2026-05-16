@@ -36,9 +36,12 @@ _require_streamlit_runtime()
 from tg_jobs_parser.analytics.charts import plotly_daily_line, plotly_grade_bar, plotly_spec_bar
 from tg_jobs_parser.channel_search import search_channels
 from tg_jobs_parser.config.loader import ConfigLoadError, load_config
+from tg_jobs_parser.ai.models_catalog import OPENROUTER_FREE_MODELS
 from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.exporters.excel_exporter import export_excel
 from tg_jobs_parser.exporters.json_exporter import export_json
+from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 from tg_jobs_parser.parse_runner import run_parse
 from tg_jobs_parser.utils.dates import parse_date, resolve_search_date_to
 from tg_jobs_parser.utils.logger import setup_logging
@@ -174,9 +177,144 @@ with st.sidebar:
         help="При ≥1 нужен хоть один признак помимо упоминания контакта: вакансия, зарплата, office/remote и т.д.",
     )
 
+    st.header("AI (OpenRouter)")
+    _ai_cfg = None
+    try:
+        if Path(cfg_path).is_file():
+            _ai_cfg = load_config(cfg_path).ai
+    except ConfigLoadError:
+        pass
+    use_ai = st.checkbox(
+        "Использовать LLM для разбора текста",
+        value=bool(getattr(_ai_cfg, "enabled", False)),
+        help="Нужен OPENROUTER_API_KEY в .env. Посты обрабатываются параллельно до дедупликации.",
+    )
+    _free_opts = list(OPENROUTER_FREE_MODELS)
+    _default_model = getattr(_ai_cfg, "model", _free_opts[0]) if _ai_cfg else _free_opts[0]
+    _model_idx = _free_opts.index(_default_model) if _default_model in _free_opts else 0
+    ai_model_choice = st.selectbox("Основная модель", options=_free_opts, index=_model_idx)
+    _cfg_fallbacks = list(getattr(_ai_cfg, "fallback_models", [])) if _ai_cfg else []
+    _fallback_default = [m for m in _cfg_fallbacks if m in _free_opts and m != ai_model_choice]
+    if not _fallback_default:
+        _fallback_default = [m for m in _free_opts if m != ai_model_choice]
+    ai_fallback_models = st.multiselect(
+        "Fallback-модели (по порядку при ошибке основной)",
+        options=[m for m in _free_opts if m != ai_model_choice],
+        default=_fallback_default,
+        help="Список бесплатных моделей OpenRouter; при сбое основной пробуются по очереди.",
+    )
+
 
 def split_csv(s: str) -> list[str]:
     return [p.strip() for p in s.split(",") if p.strip()]
+
+
+def _vacancies_to_display_df(vacancies: list[Vacancy]) -> pd.DataFrame:
+    rows = []
+    for v in vacancies:
+        d = v.model_dump(mode="python")
+        d["id"] = post_id_display(str(d.get("id") or ""))
+        d["technologies"] = ", ".join(d.get("technologies") or [])
+        d["detected_specializations"] = ", ".join(d.get("detected_specializations") or [])
+        d["application_urls"] = ", ".join(d.get("application_urls") or [])
+        rows.append(d)
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df.index = pd.RangeIndex(start=1, stop=len(df) + 1)
+        for link_col in ("post_url", "source_url"):
+            if link_col in df.columns:
+                df[link_col] = df[link_col].apply(
+                    lambda x: str(x).strip() if x is not None and str(x).strip() else None
+                )
+    return df
+
+
+def _vacancy_table_column_config(columns: list[str]) -> dict:
+    """``LinkColumn`` для URL — иначе Streamlit показывает их обычным текстом."""
+    cfg: dict = {}
+    if "detected_salary_avg" in columns:
+        cfg["detected_salary_avg"] = st.column_config.NumberColumn(
+            "Средняя зарплата",
+            format="%.0f",
+        )
+    if "salary_currency" in columns:
+        cfg["salary_currency"] = st.column_config.TextColumn("Валюта")
+    if "work_format" in columns:
+        cfg["work_format"] = st.column_config.TextColumn("Формат работы")
+    if "post_url" in columns:
+        cfg["post_url"] = st.column_config.LinkColumn(
+            "Пост в Telegram",
+            help="Клик откроет пост в Telegram.",
+            display_text="Открыть пост",
+        )
+    if "source_url" in columns:
+        cfg["source_url"] = st.column_config.LinkColumn(
+            "Канал",
+            display_text="Канал",
+        )
+    if "application_urls" in columns:
+        cfg["application_urls"] = st.column_config.TextColumn("Ссылки отклика")
+    return cfg
+
+
+def _render_live_progress(
+    snap: ParseProgressSnapshot,
+    *,
+    progress_bar: st.delta_generator.DeltaGenerator,
+    status_box: st.delta_generator.DeltaGenerator,
+    table_box: st.delta_generator.DeltaGenerator,
+    partial_caption: st.delta_generator.DeltaGenerator | None = None,
+) -> None:
+    ratio = snap.posts_processed / snap.posts_total if snap.posts_total else 0.0
+    progress_bar.progress(min(1.0, ratio), text=f"Посты {snap.posts_processed}/{snap.posts_total}")
+    lines = [
+        f"**Вакансий найдено (промежуточно):** {snap.vacancies_found}",
+        f"Фаза: `{snap.phase}`",
+    ]
+    if snap.ai_llm_disabled:
+        lines.append(
+            f"**LLM отключён** (дальше только rules): {snap.ai_llm_disabled_reason or 'rate limit'}"
+        )
+    if snap.ai_tokens_in or snap.ai_tokens_out:
+        total_tok = snap.ai_tokens_in + snap.ai_tokens_out
+        tok_label = (
+            "Итого токенов LLM за прогон"
+            if snap.phase == "post_processing_done"
+            else "Токены LLM (на сейчас)"
+        )
+        lines.append(
+            f"**{tok_label}:** input={snap.ai_tokens_in}, "
+            f"output={snap.ai_tokens_out}, всего={total_tok}"
+        )
+    status_box.markdown("\n\n".join(lines))
+    if snap.vacancies:
+        df = _vacancies_to_display_df(snap.vacancies)
+        prefer = [
+            c
+            for c in [
+                "post_url",
+                "source_channel",
+                "post_date",
+                "detected_salary_avg",
+                "salary_currency",
+                "work_format",
+                "detected_specializations",
+                "application_urls",
+                "cleaned_text",
+            ]
+            if c in df.columns
+        ]
+        cols = prefer if prefer else list(df.columns)
+        table_box.dataframe(
+            df[cols],
+            width="stretch",
+            height=min(520, 80 + 36 * len(df)),
+            column_config=_vacancy_table_column_config(cols),
+        )
+    else:
+        table_box.caption("Вакансий пока нет — таблица обновится по мере обработки.")
+    if partial_caption is not None and snap.extra.get("partial_path"):
+        partial_caption.caption(f"Сохранён батч: `{snap.extra['partial_path']}`")
 
 
 @st.dialog("Подробная вакансия", width="large")
@@ -208,6 +346,8 @@ def _show_vacancy_dialog(v, index_1based: int) -> None:
         meta.append(f"Компания: {v.company}")
     if v.contact:
         meta.append(f"Контакт: {v.contact}")
+    if getattr(v, "application_urls", None):
+        meta.append("Ссылки отклика: " + ", ".join(v.application_urls[:5]))
     if meta:
         st.caption(" • ".join(meta))
 
@@ -223,6 +363,7 @@ def _show_vacancy_dialog(v, index_1based: int) -> None:
 
 def rebuild_config_inline() -> "AppConfig":
     from tg_jobs_parser.config.schema import (
+        AiConfig,
         AppConfig,
         FiltersConfig,
         OutputConfig,
@@ -263,12 +404,26 @@ def rebuild_config_inline() -> "AppConfig":
     data["output"] = OutputConfig(**data.get("output", {})).model_dump()
     session_file = (telethon_session_path or "").strip() or base.telegram.telethon_session_file
     data["telegram"] = TelegramConfig(telethon_session_file=session_file).model_dump()
+    ai_base = dict(data.get("ai", {}))
+    if use_ai:
+        ai_base["enabled"] = True
+        ai_base["model"] = ai_model_choice
+        ai_base["fallback_models"] = [m for m in ai_fallback_models if m != ai_model_choice]
+    else:
+        ai_base["enabled"] = False
+    data["ai"] = AiConfig(**ai_base).model_dump()
     return AppConfig.model_validate(data)
 
 
 tab_run, tab_results = st.tabs(["Запуск", "Последний результат"])
 
 with tab_run:
+    st.subheader("Прогресс в реальном времени")
+    live_progress = st.progress(0.0, text="Нажмите «Запустить парсинг»")
+    live_status = st.empty()
+    live_table = st.empty()
+    live_partial = st.empty()
+
     # Виджеты (multiselect колонок и др.) вызывают полный rerun скрипта; результат должен жить
     # вне «if st.button», иначе после любого изменения таблица пропадает (кнопка в новом прогоне False).
     if st.button("Запустить парсинг", type="primary"):
@@ -281,8 +436,20 @@ with tab_run:
             st.exception(e)
             st.stop()
 
-        with st.spinner("Парсинг..."):
-            result = run_parse(cfg_inline, cli_overrides={"ui": True})
+        def _on_progress(snap: ParseProgressSnapshot) -> None:
+            _render_live_progress(
+                snap,
+                progress_bar=live_progress,
+                status_box=live_status,
+                table_box=live_table,
+                partial_caption=live_partial,
+            )
+
+        result = run_parse(
+            cfg_inline,
+            cli_overrides={"ui": True},
+            progress_callback=_on_progress,
+        )
         st.session_state["last_result"] = result
 
         out_dir = Path(cfg_inline.output.directory)
@@ -307,19 +474,27 @@ with tab_run:
         if result.parse_warnings:
             st.warning(result.parse_warnings)
 
+        ai_stats = (result.run_params or {}).get("ai_stats")
+        if ai_stats:
+            tin = int(ai_stats.get("tokens_in") or 0)
+            tout = int(ai_stats.get("tokens_out") or 0)
+            tsum = int(ai_stats.get("tokens_total") or tin + tout)
+            t1, t2, t3 = st.columns(3)
+            t1.metric("AI tokens (input)", f"{tin:,}".replace(",", " "))
+            t2.metric("AI tokens (output)", f"{tout:,}".replace(",", " "))
+            t3.metric("AI tokens (всего)", f"{tsum:,}".replace(",", " "))
+            st.info(
+                f"AI: вызовов {ai_stats.get('calls', 0)}, кэш {ai_stats.get('cache_hits', 0)}, "
+                f"отсечено не-вакансий {ai_stats.get('dropped_not_job', 0)}, "
+                f"ошибок {ai_stats.get('errors', 0)}."
+            )
+
         st.success(
             f"Постов: {result.posts_fetched}; вакансий после фильтров: {len(result.vacancies_all)}; "
             f"уникальных: {result.metrics.unique_vacancies}; дубликатов: {result.metrics.duplicate_count}"
         )
 
-        rows = []
-        for v in result.vacancies_unique:
-            d = v.model_dump(mode="python")
-            d["id"] = post_id_display(str(d.get("id") or ""))
-            d["technologies"] = ", ".join(d["technologies"])
-            d["detected_specializations"] = ", ".join(d["detected_specializations"])
-            rows.append(d)
-        df = pd.DataFrame(rows)
+        df = _vacancies_to_display_df(result.vacancies_unique)
         # Нумерация строк в st.dataframe берётся из индекса — сдвигаем на 1, чтобы строки
         # отображались с «1», а не с «0».
         if not df.empty:
@@ -350,32 +525,7 @@ with tab_run:
                 "Кликните по строке таблицы — откроется широкое окно с полным текстом вакансии и кнопками-ссылками."
             )
             if show_cols:
-                _col_cfg: dict = {}
-                if "detected_salary_avg" in show_cols:
-                    _col_cfg["detected_salary_avg"] = st.column_config.NumberColumn(
-                        "Средняя зарплата",
-                        help="Извлечённое среднее (min/max или одно значение), без пересчёта валют.",
-                        format="%.0f",
-                    )
-                if "salary_currency" in show_cols:
-                    _col_cfg["salary_currency"] = st.column_config.TextColumn("Валюта")
-                if "work_format" in show_cols:
-                    _col_cfg["work_format"] = st.column_config.TextColumn(
-                        "Формат работы",
-                        help="remote | hybrid | office | relocation | unknown",
-                    )
-                if "post_url" in show_cols:
-                    _col_cfg["post_url"] = st.column_config.LinkColumn(
-                        "Пост в Telegram",
-                        help="Прямая ссылка на сообщение — клик откроет пост в Telegram.",
-                        display_text="Открыть пост",
-                    )
-                if "source_url" in show_cols:
-                    _col_cfg["source_url"] = st.column_config.LinkColumn(
-                        "Канал",
-                        help="Ссылка на превью канала (t.me/s/...).",
-                        display_text="Канал",
-                    )
+                _col_cfg = _vacancy_table_column_config(show_cols)
                 table_event = st.dataframe(
                     df[show_cols],
                     width="stretch",

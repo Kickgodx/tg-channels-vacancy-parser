@@ -28,10 +28,32 @@ sources:
     - godevjob
     - fordev
     - DarikaINITVacancies
-    
+
+# Опциональный AI (OpenRouter). Включите enabled: true и задайте OPENROUTER_API_KEY в .env
+ai:
+  enabled: false
+  mode: assist
+  provider: openrouter
+  model: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+  fallback_models:
+    - poolside/laguna-m.1:free
+    - z-ai/glm-4.5-air:free
+    # - openai/gpt-oss-120b:free reasoning only
+    # - baidu/cobuddy:free reasoning only
+    # - qwen/qwen3-coder:free
+  max_posts_per_run: 0
+  skip_if_vacancy_score_below: 0
+  concurrency: 2
+  requests_per_minute: 12
+  max_retries_on_429: 0
+  retry_base_delay_seconds: 5
+  stop_llm_when_rate_limited: true
+  use_cache: true
+  reasoning_enabled: false
+  allow_unknown_specializations: true
 
 search:
-  date_from: "2026-04-28"
+  date_from: "2026-05-05"
   # today / сегодня / пусто — верхняя граница = сегодня при каждом запуске; иначе ISO-дата
   date_to: today
   max_days: 365
@@ -63,6 +85,7 @@ filters:
     - any
 
 parser:
+  progress_batch_posts: 25
   vacancy_score_threshold: 2
   # Минимум «содержательных» баллов (всё кроме признаков email/@). 1 — не брать только @упоминания.
   vacancy_min_substantive_score: 1
@@ -88,3 +111,5 @@ output:
   excel_filename: vacancies.xlsx
   json_filename: vacancies.json
   charts_directory: charts
+  save_progress_batches: true
+  partial_batches_subdirectory: partial

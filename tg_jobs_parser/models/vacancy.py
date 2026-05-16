@@ -41,6 +41,16 @@ class Vacancy(BaseModel):
     required_experience: str | None = None
     employment_type: str | None = None
 
+    application_urls: list[str] = Field(
+        default_factory=list,
+        description="Ссылки на отклик (hh.ru, careers, формы и т.д.), не t.me поста.",
+    )
+    extraction_source: str = Field(
+        default="rules",
+        description="rules | ai | hybrid",
+    )
+    ai_confidence: float | None = Field(default=None, ge=0, le=1)
+
     vacancy_score: int = 0
     vacancy_substantive_score: int = Field(
         default=0,
