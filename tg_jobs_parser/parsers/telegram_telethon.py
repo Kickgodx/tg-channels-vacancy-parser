@@ -64,7 +64,7 @@ class TelegramTelethonParser(BaseChannelParser):
     def fetch_posts(self, channel_username: str) -> tuple[list[RawPost], str | None]:
         if err := telethon_import_error():
             raise RuntimeError(
-                "Пакет telethon не установлен. Установите: pip install telethon python-dotenv"
+                "Пакет telethon не установлен. Установите: poetry install"
             ) from err
 
         username = normalize_channel_username(channel_username)
@@ -84,7 +84,7 @@ class TelegramTelethonParser(BaseChannelParser):
     ) -> list[tuple[str, list[RawPost], str | None]]:
         if err := telethon_import_error():
             raise RuntimeError(
-                "Пакет telethon не установлен. Установите: pip install telethon python-dotenv"
+                "Пакет telethon не установлен. Установите: poetry install"
             ) from err
 
         usernames: list[str] = []

@@ -35,6 +35,9 @@ dist/
 build/
 *.egg-info/
 
+# --- AI-кэш LLM ---
+.cache/
+
 # --- проект: артефакты запуска (не коммитить выгрузки и сессии Telegram) ---
 output/
 logs/
