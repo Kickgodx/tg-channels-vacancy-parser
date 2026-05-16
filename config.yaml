@@ -4,9 +4,6 @@ telegram:
 sources:
   channels:
     - qa_jobs
-    # - gogetajob
-    # - jobgolang
-    # - godevjob
     - qajobsoffers
     - relocatesme
     - EkleftJob
@@ -20,6 +17,18 @@ sources:
     - zrabota
     - Getitrussia
     - Remoteit
+    # Go
+    - gogetajob
+    - jobgolang
+    - godevjob
+    - rabota_golang
+    - Remoteit
+    - goutstaff
+    - GolangJobsit
+    - godevjob
+    - fordev
+    - DarikaINITVacancies
+    
 
 search:
   date_from: "2026-04-28"
