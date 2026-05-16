@@ -25,7 +25,7 @@ from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
-from tg_jobs_parser.utils.dates import clamp_range_days, parse_date
+from tg_jobs_parser.utils.dates import clamp_range_days, parse_date, resolve_search_date_to
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
 from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
 from tg_jobs_parser.utils.logger import get_logger
@@ -150,7 +150,7 @@ def run_parse(config: AppConfig, cli_overrides: dict | None = None) -> ParseResu
     channel_fetcher = _channel_parser(config)
 
     date_from = parse_date(config.search.date_from)
-    date_to = parse_date(config.search.date_to)
+    date_to = resolve_search_date_to(config.search.date_to)
 
     all_warnings: list[str] = []
 

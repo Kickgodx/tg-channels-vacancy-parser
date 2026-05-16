@@ -110,8 +110,16 @@ class SourcesConfig(BaseModel):
 
 
 class SearchConfig(BaseModel):
-    date_from: str | None = None
-    date_to: str | None = None
+    date_from: str | None = Field(
+        default=None,
+        description="Нижняя граница (ISO YYYY-MM-DD). Пусто — без явной нижней границы в конфиге.",
+    )
+    date_to: str | None = Field(
+        default=None,
+        description=(
+            "Верхняя граница: ISO-дата, либо today/сегодня, либо пусто — при запуске подставляется сегодня."
+        ),
+    )
     max_days: int = 365
 
 

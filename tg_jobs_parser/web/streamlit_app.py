@@ -40,7 +40,7 @@ from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.exporters.excel_exporter import export_excel
 from tg_jobs_parser.exporters.json_exporter import export_json
 from tg_jobs_parser.parse_runner import run_parse
-from tg_jobs_parser.utils.dates import parse_date
+from tg_jobs_parser.utils.dates import parse_date, resolve_search_date_to
 from tg_jobs_parser.utils.logger import setup_logging
 from tg_jobs_parser.utils.text import post_id_display
 
@@ -56,18 +56,20 @@ def default_config_path() -> Path:
 
 
 def _date_range_defaults(path_str: str) -> tuple[date, date]:
-    """Начальные date_from / date_to из YAML; иначе сегодня (для ``st.date_input``)."""
+    """Начальные date_from / date_to из YAML; date_to без даты → сегодня."""
+    t = date.today()
     try:
         p = Path(path_str)
         if p.is_file():
             c = load_config(p)
             df = parse_date(c.search.date_from)
-            dt = parse_date(c.search.date_to)
-            if df and dt:
+            dt = resolve_search_date_to(c.search.date_to)
+            if df:
                 return df, dt
+            if c.search.date_to is not None or c.search.date_from is not None:
+                return t, dt
     except (ConfigLoadError, OSError, ValueError):
         pass
-    t = date.today()
     return t, t
 
 

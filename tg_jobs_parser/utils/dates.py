@@ -20,10 +20,26 @@ def clamp_range_days(dt_from: date, dt_to: date, max_days: int) -> tuple[date, d
     return dt_from, dt_from + timedelta(days=max_days - 1)
 
 
+_TODAY_ALIASES = frozenset({"today", "сегодня", "сейчас", "now"})
+
+
 def parse_date(s: str | None) -> date | None:
     if not s:
         return None
     return date.fromisoformat(s.strip())
+
+
+def resolve_search_date_to(s: str | None) -> date | None:
+    """
+    Верхняя граница поиска: None, пустая строка, ``today`` / ``сегодня`` → сегодня;
+    иначе ISO ``YYYY-MM-DD``.
+    """
+    if not s or not str(s).strip():
+        return date.today()
+    raw = str(s).strip()
+    if raw.lower() in _TODAY_ALIASES:
+        return date.today()
+    return date.fromisoformat(raw)
 
 
 def date_in_range(d: datetime | date | None, start: date, end: date) -> bool:

@@ -23,7 +23,8 @@ sources:
 
 search:
   date_from: "2026-04-28"
-  date_to: "2026-05-12"
+  # today / сегодня / пусто — верхняя граница = сегодня при каждом запуске; иначе ISO-дата
+  date_to: today
   max_days: 365
 
 filters:
