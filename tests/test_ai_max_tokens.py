@@ -17,6 +17,7 @@ def search_context() -> SearchContext:
         exclude_keywords=[],
         allowed_specializations=["Go"],
         allowed_work_formats=["remote"],
+        any_specialization=False,
     )
 
 
