@@ -29,6 +29,7 @@ from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_progress import (
     ParseProgressCallback,
     ParseProgressSnapshot,
+    clear_partial_batches,
     save_partial_batch,
 )
 from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
@@ -225,6 +226,9 @@ def run_parse(
     partial_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     if config.output.save_progress_batches:
         partial_dir = Path(config.output.directory) / config.output.partial_batches_subdirectory
+        removed = clear_partial_batches(partial_dir)
+        if removed:
+            _LOG.info("Partial-батчи: удалено %s старых файлов из %s", removed, partial_dir)
 
     channels_unique: list[str] = []
     for ch in config.sources.channels:

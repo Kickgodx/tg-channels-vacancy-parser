@@ -31,6 +31,20 @@ class ParseProgressSnapshot:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+def clear_partial_batches(directory: Path) -> int:
+    """Удалить ``partial_*.json`` перед новым прогоном. Возвращает число удалённых файлов."""
+    if not directory.is_dir():
+        return 0
+    removed = 0
+    for path in directory.glob("partial_*.json"):
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def save_partial_batch(
     directory: Path,
     snapshot: ParseProgressSnapshot,
