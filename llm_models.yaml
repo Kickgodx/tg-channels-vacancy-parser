@@ -1,0 +1,55 @@
+# Единый каталог LLM (OpenRouter). Редактируйте только этот файл.
+# config.yaml: ai.model и ai.fallback_models — только id из списка models ниже.
+#
+# cost: USD за 1M токенов (input/output), напр. "0.25/1.5"; для free — "0/0"
+
+default_model: deepseek/deepseek-v4-flash
+
+default_fallbacks:
+  - google/gemini-2.5-flash-lite
+  - mistralai/mistral-small-24b-instruct-2501
+  - mistralai/mistral-small-3.2-24b-instruct
+  - meta-llama/llama-3.3-70b-instruct
+  - microsoft/phi-4
+  - google/gemini-3.1-flash-lite
+
+models:
+  - id: google/gemini-3.1-flash-lite
+    name: Gemini 3.1 Flash Lite
+    cost: "0.25/1.5"
+  - id: google/gemini-2.5-flash-lite
+    name: Gemini 2.5 Flash Lite
+    cost: "0.1/0.4"
+  - id: deepseek/deepseek-v4-flash
+    name: DeepSeek V4 Flash
+    cost: "0.11/0.224"
+  - id: qwen/qwen3.5-flash-02-23
+    name: Qwen3.5 Flash 02-23
+    cost: "0.065/0.26"
+  - id: deepseek/deepseek-chat
+    name: DeepSeek Chat V3
+    cost: "0.32/0.89"
+  - id: deepseek/deepseek-v3.2
+    name: DeepSeek V3.2
+    cost: "0.25/0.38"
+  - id: openai/gpt-oss-20b
+    name: GPT-OSS 20B
+    cost: "0.03/0.14"
+  - id: openai/gpt-oss-120b
+    name: GPT-OSS 120B
+    cost: "0.04/0.18"
+  - id: mistralai/mistral-small-24b-instruct-2501
+    name: Mistral Small 3 24B Instruct 2501
+    cost: "0.05/0.08"
+  - id: mistralai/mistral-small-3.2-24b-instruct
+    name: Mistral Small 3.2 24B Instruct
+    cost: "0.075/0.2"
+  - id: mistralai/mistral-small-2603
+    name: Mistral Small 4
+    cost: "0.15/0.6"
+  - id: meta-llama/llama-3.3-70b-instruct
+    name: Llama 3.3 70B Instruct
+    cost: "0.1/0.32"
+  - id: microsoft/phi-4
+    name: Phi-4
+    cost: "0.065/0.14"

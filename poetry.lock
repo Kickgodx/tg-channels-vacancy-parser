@@ -2813,11 +2813,10 @@ files = [
 ]
 
 [extras]
-ai = ["openai"]
 dev = ["pytest"]
 telethon = ["cryptg"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "877ef15783b78576759ed99776e327d52a8ec3bd27c9801307c5ea6e8c3d7ffd"
+content-hash = "1a6ac83616ac36bdb3526b8ae8cb50ff96a590f2507cde47083a5497306c9300"

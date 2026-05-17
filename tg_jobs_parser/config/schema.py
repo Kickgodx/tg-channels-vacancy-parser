@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from tg_jobs_parser.ai.models_catalog import DEFAULT_FALLBACK_MODELS
+from tg_jobs_parser.ai.models_catalog import LlmModelEntry
 
 
 DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
@@ -135,11 +135,16 @@ class AiConfig(BaseModel):
     )
     provider: str = Field(default="openrouter", description="openrouter")
     model: str = Field(
-        default="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        default="",
+        description="Id основной модели (из llm_models.yaml). Пусто — default_model из реестра.",
+    )
+    llm_models_path: str | None = Field(
+        default=None,
+        description="Путь к llm_models.yaml; по умолчанию — рядом с config.yaml или корень проекта.",
     )
     fallback_models: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_FALLBACK_MODELS),
-        description="Цепочка запасных free-моделей при ошибке основной (по порядку).",
+        default_factory=list,
+        description="Запасные модели (id из llm_models.yaml). Пусто — default_fallbacks из реестра.",
     )
     base_url: str = Field(default="https://openrouter.ai/api/v1")
     max_input_chars: int = Field(default=6000, ge=500, le=32000)
@@ -196,11 +201,16 @@ class AiConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def migrate_fallback_model(cls, data: object) -> object:
-        if isinstance(data, dict) and "fallback_models" not in data:
+        if not isinstance(data, dict):
+            return data
+        if "fallback_models" not in data:
             legacy = data.get("fallback_model")
             if legacy:
                 data = dict(data)
                 data["fallback_models"] = [legacy] if isinstance(legacy, str) else legacy
+        if "models" in data:
+            data = dict(data)
+            data.pop("models", None)
         return data
 
     @field_validator("mode")
@@ -324,6 +334,10 @@ class AppConfig(BaseModel):
 
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     ai: AiConfig = Field(default_factory=AiConfig)
+    llm_model_catalog: list[LlmModelEntry] = Field(
+        default_factory=list,
+        description="Каталог из llm_models.yaml (заполняется при load_config).",
+    )
     search: SearchConfig = Field(default_factory=SearchConfig)
     filters: FiltersConfig = Field(default_factory=FiltersConfig)
     parser: ParserConfig = Field(default_factory=ParserConfig)

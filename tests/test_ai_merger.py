@@ -47,6 +47,18 @@ def test_merge_ai_salary_and_specs():
     assert out.extraction_source == "hybrid"
 
 
+def test_parse_extraction_coerces_list_required_experience():
+    from tg_jobs_parser.ai.clients.openrouter import _parse_extraction
+
+    raw = """{
+        "is_job_post": true,
+        "required_experience": ["3 years of QA experience", "Redis and Hazelcast"],
+        "confidence": 0.8
+    }"""
+    ext = _parse_extraction(raw)
+    assert ext.required_experience == "3 years of QA experience; Redis and Hazelcast"
+
+
 def test_openrouter_parse_json_fence():
     from tg_jobs_parser.ai.clients.openrouter import _parse_extraction
 
