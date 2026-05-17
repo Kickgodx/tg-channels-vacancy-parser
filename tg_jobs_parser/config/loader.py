@@ -8,6 +8,11 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from tg_jobs_parser.ai.llm_models_registry import (
+    LlmModelsLoadError,
+    apply_ai_defaults_from_registry,
+    load_llm_models_registry,
+)
 from tg_jobs_parser.config.schema import AppConfig
 
 
@@ -29,7 +34,20 @@ def load_config(path: str | Path) -> AppConfig:
     if not isinstance(raw, dict):
         raise ConfigLoadError("Корень YAML должен быть объектом (mapping).")
     try:
-        return AppConfig.model_validate(raw)
+        ai_raw = raw.get("ai")
+        ai_dict = dict(ai_raw) if isinstance(ai_raw, dict) else {}
+        explicit_models = ai_dict.get("llm_models_path")
+        try:
+            registry = load_llm_models_registry(
+                path,
+                models_path=explicit_models,
+            )
+        except LlmModelsLoadError as e:
+            raise ConfigLoadError(str(e)) from e
+        raw = dict(raw)
+        raw["ai"] = apply_ai_defaults_from_registry(ai_dict, registry)
+        cfg = AppConfig.model_validate(raw)
+        return cfg.model_copy(update={"llm_model_catalog": registry.catalog()})
     except ValidationError as e:
         raise ConfigLoadError(str(e)) from e
 

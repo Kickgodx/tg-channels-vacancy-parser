@@ -12,6 +12,38 @@ _VALID_WORK_FORMATS = frozenset(
 )
 
 
+def _coerce_optional_str(v: object) -> str | None:
+    """Строковые поля: модели иногда отдают list вместо str."""
+    if v is None:
+        return None
+    if isinstance(v, list):
+        parts = [str(x).strip() for x in v if x is not None and str(x).strip()]
+        return "; ".join(parts) if parts else None
+    if isinstance(v, dict):
+        return None
+    s = str(v).strip()
+    return s or None
+
+
+def _coerce_str_list(v: object) -> list[str]:
+    if v is None:
+        return []
+    if isinstance(v, str):
+        s = v.strip()
+        return [s] if s else []
+    if isinstance(v, list):
+        out: list[str] = []
+        for x in v:
+            if x is None:
+                continue
+            s = str(x).strip()
+            if s:
+                out.append(s)
+        return out
+    s = str(v).strip()
+    return [s] if s else []
+
+
 class VacancyAIExtraction(BaseModel):
     is_job_post: bool = True
     rejection_reason: str | None = None
@@ -33,6 +65,31 @@ class VacancyAIExtraction(BaseModel):
 
     confidence: float = Field(default=0.5, ge=0, le=1)
     notes: str | None = None
+
+    @field_validator(
+        "rejection_reason",
+        "country",
+        "city",
+        "company",
+        "contact",
+        "required_experience",
+        "employment_type",
+        "notes",
+        mode="before",
+    )
+    @classmethod
+    def norm_optional_str_fields(cls, v: object) -> str | None:
+        return _coerce_optional_str(v)
+
+    @field_validator(
+        "detected_specializations",
+        "technologies",
+        "application_urls",
+        mode="before",
+    )
+    @classmethod
+    def norm_str_list_fields(cls, v: object) -> list[str]:
+        return _coerce_str_list(v)
 
     @field_validator("detected_grade", mode="before")
     @classmethod

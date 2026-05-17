@@ -34,30 +34,23 @@ ai:
   enabled: false
   mode: assist
   provider: openrouter
+  # id из llm_models.yaml; fallback — default_fallbacks из того же файла (в UI можно сменить)
   model: deepseek/deepseek-v4-flash
-  fallback_models:
-    - google/gemini-3.1-flash-lite
-    - deepseek/deepseek-v4-flash
-    - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
-    - poolside/laguna-m.1:free
-    - z-ai/glm-4.5-air:free
-    - deepseek/deepseek-v4-flash:free
-    # - qwen/qwen3-coder:free
   max_posts_per_run: 0
   skip_if_vacancy_score_below: 1
   concurrency: 4
-  requests_per_minute: 100
+  requests_per_minute: 240
   max_retries_on_429: 0
   retry_base_delay_seconds: 5
   stop_llm_when_rate_limited: true
   use_cache: true
   reasoning_enabled: false
-  max_completion_tokens: 5000
+  max_completion_tokens: 8192
   allow_unknown_specializations: true
   use_few_shot: true
 
 search:
-  date_from: "2026-05-05"
+  date_from: "2026-05-01"
   # today / сегодня / пусто — верхняя граница = сегодня при каждом запуске; иначе ISO-дата
   date_to: today
   max_days: 365
