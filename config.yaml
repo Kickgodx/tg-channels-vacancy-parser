@@ -35,8 +35,9 @@ ai:
   mode: assist
   provider: openrouter
   model: google/gemini-3.1-flash-lite
-  # model: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
   fallback_models:
+    - deepseek/deepseek-v4-flash
+    - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
     - poolside/laguna-m.1:free
     - z-ai/glm-4.5-air:free
     - deepseek/deepseek-v4-flash:free
