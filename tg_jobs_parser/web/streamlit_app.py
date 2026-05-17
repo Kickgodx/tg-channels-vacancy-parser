@@ -38,8 +38,16 @@ from tg_jobs_parser.channel_search import search_channels
 from tg_jobs_parser.config.loader import ConfigLoadError, load_config
 from tg_jobs_parser.ai.models_catalog import (
     OPENROUTER_FREE_MODELS,
+    ai_config_signature,
+    dedupe_model_ids,
     merge_openrouter_model_options,
 )
+
+_AI_CONFIG_SIG_KEY = "ai_config_signature"
+_AI_PRIMARY_MODEL_KEY = "ai_primary_model"
+_AI_FALLBACK_MODELS_KEY = "ai_fallback_models"
+_USE_AI_KEY = "use_ai_llm"
+_AI_MODELS_FROM_CONFIG_KEY = "ai_models_from_config"
 from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.exporters.excel_exporter import export_excel
 from tg_jobs_parser.exporters.json_exporter import export_json
@@ -181,45 +189,105 @@ with st.sidebar:
     )
 
     st.header("AI (OpenRouter)")
+    _cfg_file = Path(cfg_path)
     _ai_cfg = None
+    _ai_load_err: str | None = None
     try:
-        if Path(cfg_path).is_file():
+        if _cfg_file.is_file():
             _ai_cfg = load_config(cfg_path).ai
-    except ConfigLoadError:
-        pass
+    except ConfigLoadError as e:
+        _ai_load_err = str(e)
+
+    if _USE_AI_KEY not in st.session_state:
+        st.session_state[_USE_AI_KEY] = bool(getattr(_ai_cfg, "enabled", False))
+    if _AI_MODELS_FROM_CONFIG_KEY not in st.session_state:
+        st.session_state[_AI_MODELS_FROM_CONFIG_KEY] = True
+
     use_ai = st.checkbox(
         "Использовать LLM для разбора текста",
-        value=bool(getattr(_ai_cfg, "enabled", False)),
-        help="Нужен OPENROUTER_API_KEY в .env. Посты обрабатываются параллельно до дедупликации.",
+        key=_USE_AI_KEY,
+        help="Нужен OPENROUTER_API_KEY в .env. Включение здесь действует на этот запуск, даже если в config.yaml ai.enabled: false.",
     )
+    _cfg_enabled = bool(getattr(_ai_cfg, "enabled", False))
+    if not _cfg_enabled and not use_ai:
+        st.caption("В config.yaml `ai.enabled: false` — включите чекбокс выше для LLM в этом прогоне.")
+    elif not _cfg_enabled and use_ai:
+        st.caption("LLM включён в UI; в config.yaml по-прежнему `ai.enabled: false`.")
+
+    ai_models_from_config = st.checkbox(
+        "Модели из config.yaml (не переопределять в UI)",
+        key=_AI_MODELS_FROM_CONFIG_KEY,
+        help="При включении в прогон идут ai.model и ai.fallback_models из файла на диске.",
+    )
+
+    if not _cfg_file.is_file():
+        st.warning(f"config не найден: `{cfg_path}` — модели только из каталога UI.")
+    elif _ai_load_err:
+        st.error(f"Ошибка чтения AI из config: {_ai_load_err}")
+
     _cfg_model = (getattr(_ai_cfg, "model", None) or "").strip() if _ai_cfg else ""
-    _cfg_fallbacks = list(getattr(_ai_cfg, "fallback_models", [])) if _ai_cfg else []
+    _cfg_fallbacks = dedupe_model_ids(list(getattr(_ai_cfg, "fallback_models", [])) if _ai_cfg else [])
     _model_opts = merge_openrouter_model_options(_cfg_model or None, _cfg_fallbacks)
     if not _model_opts:
         _model_opts = list(merge_openrouter_model_options(None, None))
-    _model_idx = _model_opts.index(_cfg_model) if _cfg_model in _model_opts else 0
-    _model_key = f"ai_primary|{cfg_path}|{_cfg_model}"
+
+    _sig = ai_config_signature(cfg_path, _cfg_model, _cfg_fallbacks)
+    if st.button("Сбросить AI к config.yaml", key="btn_reset_ai_models"):
+        st.session_state.pop(_AI_CONFIG_SIG_KEY, None)
+        st.session_state.pop(_AI_PRIMARY_MODEL_KEY, None)
+        st.session_state.pop(_AI_FALLBACK_MODELS_KEY, None)
+        st.session_state[_USE_AI_KEY] = _cfg_enabled
+    if st.session_state.get(_AI_CONFIG_SIG_KEY) != _sig:
+        st.session_state[_AI_CONFIG_SIG_KEY] = _sig
+        _primary_default = (
+            _cfg_model
+            if _cfg_model in _model_opts
+            else (_model_opts[0] if _model_opts else "")
+        )
+        st.session_state[_AI_PRIMARY_MODEL_KEY] = _primary_default
+        st.session_state[_AI_FALLBACK_MODELS_KEY] = [
+            m for m in _cfg_fallbacks if m in _model_opts and m != st.session_state[_AI_PRIMARY_MODEL_KEY]
+        ]
+
+    if _cfg_model:
+        st.caption(
+            f"**config.yaml:** `{_cfg_file.resolve()}` → model=`{_cfg_model}`"
+            + (
+                f", fallback: {len(_cfg_fallbacks)} шт."
+                if _cfg_fallbacks
+                else ""
+            )
+        )
+
     ai_model_choice = st.selectbox(
-        "Основная модель",
+        "Основная модель (ручной выбор, если снят чекбокс выше)",
         options=_model_opts,
-        index=_model_idx,
-        key=_model_key,
-        help="По умолчанию — ai.model из config.yaml; ниже — каталог free-моделей OpenRouter.",
+        key=_AI_PRIMARY_MODEL_KEY,
+        disabled=ai_models_from_config,
+        help="Список: config + fallback + каталог. При «Модели из config» используется только YAML.",
     )
-    _fallback_opts = [m for m in _model_opts if m != ai_model_choice]
-    for m in _cfg_fallbacks:
-        if m and m != ai_model_choice and m not in _fallback_opts:
-            _fallback_opts.append(m)
-    _fallback_default = [m for m in _cfg_fallbacks if m in _fallback_opts and m != ai_model_choice]
+    _fallback_opts = dedupe_model_ids(
+        [m for m in _model_opts if m != ai_model_choice] + _cfg_fallbacks
+    )
+    _fallback_opts = [m for m in _fallback_opts if m != ai_model_choice]
     ai_fallback_models = st.multiselect(
-        "Fallback-модели (по порядку при ошибке основной)",
+        "Fallback-модели (ручной выбор)",
         options=_fallback_opts,
-        default=_fallback_default,
-        key=f"ai_fallback|{cfg_path}|{ai_model_choice}",
-        help="По умолчанию — ai.fallback_models из config.yaml.",
+        key=_AI_FALLBACK_MODELS_KEY,
+        disabled=ai_models_from_config,
     )
+    _run_model = _cfg_model if ai_models_from_config and _cfg_model else ai_model_choice
+    _run_fallbacks = _cfg_fallbacks if ai_models_from_config else ai_fallback_models
+    if use_ai:
+        _fb_suffix = ""
+        if _run_fallbacks:
+            if len(_run_fallbacks) > 3:
+                _fb_suffix = f" → fallback: {', '.join(_run_fallbacks[:3])}…"
+            else:
+                _fb_suffix = f" → fallback: {', '.join(_run_fallbacks)}"
+        st.caption(f"**В прогоне:** `{_run_model}`{_fb_suffix}")
     if _cfg_model and _cfg_model not in OPENROUTER_FREE_MODELS:
-        st.caption(f"Основная модель из config.yaml (вне каталога free): `{_cfg_model}`")
+        st.caption("Основная модель из config вне встроенного каталога — она всё равно в списке выше.")
 
 
 def split_csv(s: str) -> list[str]:
@@ -428,10 +496,16 @@ def rebuild_config_inline() -> "AppConfig":
     ai_base = dict(data.get("ai", {}))
     if use_ai:
         ai_base["enabled"] = True
-        ai_base["model"] = ai_model_choice
-        if ai_fallback_models:
-            ai_base["fallback_models"] = [m for m in ai_fallback_models if m != ai_model_choice]
-        # пустой multiselect — не затираем fallback_models из config.yaml
+        if not ai_models_from_config:
+            ai_base["model"] = ai_model_choice
+            if ai_fallback_models:
+                ai_base["fallback_models"] = [
+                    m for m in ai_fallback_models if m != ai_model_choice
+                ]
+        else:
+            ai_base["fallback_models"] = dedupe_model_ids(
+                [m for m in ai_base.get("fallback_models", []) if m != ai_base.get("model")]
+            )
     else:
         ai_base["enabled"] = False
     data["ai"] = AiConfig(**ai_base).model_dump()

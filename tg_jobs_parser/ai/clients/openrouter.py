@@ -181,6 +181,7 @@ class OpenRouterClient:
             "model": use_model,
             "messages": messages,
             "temperature": self._ai.temperature,
+            "max_tokens": self._ai.max_completion_tokens,
         }
         extra_body: dict[str, Any] | None = None
         if self._ai.reasoning_enabled:
