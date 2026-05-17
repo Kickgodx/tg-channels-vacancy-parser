@@ -162,8 +162,11 @@ class AiConfig(BaseModel):
     requests_per_minute: float = Field(
         default=12.0,
         gt=0,
-        le=60,
-        description="Пауза между запросами (~16/мин лимит free OpenRouter; 12 — запас).",
+        le=300,
+        description=(
+            "Целевой темп запросов (пауза между вызовами). "
+            "Free OpenRouter: ~16/мин — ставьте 12; платные тарифы — выше."
+        ),
     )
     max_retries_on_429: int = Field(default=0, ge=0, le=10)
     retry_base_delay_seconds: float = Field(default=5.0, ge=1, le=120)
@@ -176,6 +179,12 @@ class AiConfig(BaseModel):
     use_cache: bool = True
     cache_path: str = ".cache/ai_extractions"
     request_timeout_seconds: float = 90.0
+    max_completion_tokens: int = Field(
+        default=5000,
+        ge=64,
+        le=32000,
+        description="Лимит выходных токенов на один запрос (OpenRouter max_tokens).",
+    )
     temperature: float = Field(default=0.1, ge=0, le=2)
     reasoning_enabled: bool = Field(
         default=False,

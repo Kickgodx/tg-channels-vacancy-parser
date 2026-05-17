@@ -34,8 +34,9 @@ ai:
   enabled: false
   mode: assist
   provider: openrouter
-  model: google/gemini-3.1-flash-lite
+  model: deepseek/deepseek-v4-flash
   fallback_models:
+    - google/gemini-3.1-flash-lite
     - deepseek/deepseek-v4-flash
     - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
     - poolside/laguna-m.1:free
@@ -43,14 +44,15 @@ ai:
     - deepseek/deepseek-v4-flash:free
     # - qwen/qwen3-coder:free
   max_posts_per_run: 0
-  skip_if_vacancy_score_below: 2
-  concurrency: 2
-  requests_per_minute: 50
+  skip_if_vacancy_score_below: 1
+  concurrency: 4
+  requests_per_minute: 100
   max_retries_on_429: 0
   retry_base_delay_seconds: 5
   stop_llm_when_rate_limited: true
   use_cache: true
   reasoning_enabled: false
+  max_completion_tokens: 5000
   allow_unknown_specializations: true
   use_few_shot: true
 
@@ -88,7 +90,7 @@ filters:
 
 parser:
   progress_batch_posts: 25
-  vacancy_score_threshold: 2
+  vacancy_score_threshold: 1
   # Минимум «содержательных» баллов (всё кроме признаков email/@). 1 — не брать только @упоминания.
   vacancy_min_substantive_score: 1
   # Лимит сообщений с канала: для Telethon при заданных date_from/date_to — сколько сообщений подряд
