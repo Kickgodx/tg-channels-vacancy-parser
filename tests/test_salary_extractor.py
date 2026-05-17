@@ -70,6 +70,17 @@ def test_russian_phone_not_salary():
     assert r.min_value is None and r.max_value is None
 
 
+def test_job_url_id_is_not_salary():
+    """Регресс: id вакансии в URL не должен быть зарплатой."""
+    text = (
+        "Golang backend developer. Контакты: https://job.2gis.ru/software/76348/ "
+        "Опыт от 5 лет."
+    )
+    r = extract_salary(text)
+    assert r.min_value is None
+    assert r.max_value is None
+
+
 def test_experience_range_is_not_salary():
     """Диапазон 'опыт 3-5 лет' без валюты — не зарплата."""
     r = extract_salary("Требуется senior, опыт 3-5 лет работы с PostgreSQL.")

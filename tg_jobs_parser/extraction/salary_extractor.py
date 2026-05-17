@@ -18,6 +18,9 @@ class SalaryResult(NamedTuple):
 # Маскируем их пробелами, чтобы цифры из контактов не попадали в кандидаты на зарплату.
 _PHONE_NUMBER = re.compile(r"(?:\+\d|\b8)[\d\s\-()]{7,}\d")
 
+# URL (в т.ч. id вакансии в path: …/software/76348/) — не источник зарплаты.
+_URL = re.compile(r"https?://\S+", re.I)
+
 # Случаи, когда зарплата прямо помечена как «не указана»: её нельзя восстанавливать
 # из случайных чисел в тексте.
 _NEGOTIABLE = re.compile(
@@ -114,9 +117,9 @@ def extract_salary(text: str) -> SalaryResult:
     if _NEGOTIABLE.search(low):
         return SalaryResult(None, None, None, None)
 
-    # Чистим телефоны и Telegram-id перед поиском чисел: их длинные цифровые
-    # последовательности не должны проходить как «одиночная зарплата».
+    # Чистим телефоны и URL перед поиском чисел: id в ссылке не должен быть «зарплатой».
     cleaned = _PHONE_NUMBER.sub(" ", low)
+    cleaned = _URL.sub(" ", cleaned)
 
     low_compact = re.sub(r"(\d+)\s*к\b", r"\1k", cleaned)
     low_compact = re.sub(r"(\d+)\s*k\b", r"\1k", low_compact)

@@ -10,6 +10,10 @@ from tg_jobs_parser.models.vacancy import Vacancy
 
 _URL_RE = re.compile(r"https?://[^\s\]\)\"'<>]+", re.I)
 
+_SALARY_FIELDS = frozenset(
+    {"detected_salary_min", "detected_salary_max", "salary_currency", "detected_salary_avg"}
+)
+
 
 def _normalize_urls(urls: list[str]) -> list[str]:
     out: list[str] = []
@@ -88,6 +92,9 @@ def merge_rules_and_ai(
         ("company", ai.company, vacancy.company),
         ("contact", ai.contact, vacancy.contact),
     ):
+        if ai_cfg.mode == "primary" and fld in _SALARY_FIELDS:
+            updates[fld] = ai_val
+            continue
         if _use_ai(fld) and ai_val is not None:
             updates[fld] = ai_val
         elif rules_val is None and ai_val is not None:
@@ -111,7 +118,9 @@ def merge_rules_and_ai(
 
     smin = updates.get("detected_salary_min", vacancy.detected_salary_min)
     smax = updates.get("detected_salary_max", vacancy.detected_salary_max)
-    if smin is not None and smax is not None:
+    if smin is None and smax is None:
+        updates["detected_salary_avg"] = None
+    elif smin is not None and smax is not None:
         updates["detected_salary_avg"] = (float(smin) + float(smax)) / 2
     elif smin is not None:
         updates["detected_salary_avg"] = float(smin)

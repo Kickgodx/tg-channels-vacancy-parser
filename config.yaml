@@ -32,14 +32,14 @@ sources:
 # Опциональный AI (OpenRouter). Включите enabled: true и задайте OPENROUTER_API_KEY в .env
 ai:
   enabled: false
-  mode: assist
+  mode: primary
   provider: openrouter
   # id из llm_models.yaml; fallback — default_fallbacks из того же файла (в UI можно сменить)
-  model: deepseek/deepseek-v4-flash
+  model: mistralai/mistral-small-24b-instruct-2501
   max_posts_per_run: 0
   skip_if_vacancy_score_below: 1
-  concurrency: 4
-  requests_per_minute: 240
+  concurrency: 8
+  requests_per_minute: 480
   max_retries_on_429: 0
   retry_base_delay_seconds: 5
   stop_llm_when_rate_limited: true
