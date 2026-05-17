@@ -17,7 +17,7 @@ class LlmModelsRegistry(BaseModel):
     """Содержимое ``llm_models.yaml``."""
 
     default_model: str = Field(
-        default="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        default="deepseek/deepseek-v4-flash",
         min_length=1,
     )
     default_fallbacks: list[str] = Field(default_factory=list)

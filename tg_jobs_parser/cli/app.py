@@ -263,6 +263,15 @@ def export_cmd(
     typer.echo(typer.style(f"Excel сохранён: {out.resolve()}", fg=typer.colors.GREEN))
 
 
+def _terminate_streamlit(proc: subprocess.Popen[bytes]) -> None:
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=3)
+
+
 @app.command("run-web")
 def run_web(
     port: int = typer.Option(8501, "--port"),
@@ -270,6 +279,14 @@ def run_web(
     """Запуск Streamlit UI."""
     here = Path(__file__).resolve().parent.parent / "web" / "streamlit_app.py"
     cmd = [sys.executable, "-m", "streamlit", "run", str(here), "--server.port", str(port)]
+    if sys.platform == "win32":
+        proc = subprocess.Popen(cmd)
+        try:
+            raise SystemExit(proc.wait())
+        except KeyboardInterrupt:
+            typer.echo("Остановка Streamlit…", err=True)
+            _terminate_streamlit(proc)
+            raise SystemExit(0) from None
     raise SystemExit(subprocess.call(cmd))
 
 

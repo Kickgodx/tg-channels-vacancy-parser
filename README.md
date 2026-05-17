@@ -105,12 +105,13 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 |------|------------|
 | **`enabled`** | Включить LLM-разбор. |
 | **`mode`** | `assist` — AI уточняет поля поверх rules; `primary` — AI основной источник (rules — fallback при ошибке). |
-| **`model`** | Основная модель OpenRouter. |
-| **`fallback_models`** | Список запасных free-моделей (пробуются по порядку при ошибке основной). |
-| **`concurrency`** | Параллельные LLM-запросы (**для `:free` моделей — `1`**, иначе 429). |
-| **`requests_per_minute`** | Пауза между запросами (по умолчанию **12**; лимит OpenRouter free ≈ **16/мин**). |
+| **`model`** | Id основной модели из **`llm_models.yaml`**. |
+| **`fallback_models`** | Запасные id (порядок = приоритет); пусто — `default_fallbacks` из реестра. |
+| **`concurrency`** | Параллельные LLM-запросы. |
+| **`requests_per_minute`** | Темп запросов (пауза между стартами вызовов). |
 | **`stop_llm_when_rate_limited`** | При `X-RateLimit-Remaining: 0` — **отключить LLM** до конца прогона (только rules). |
-| **`max_retries_on_429`** | Повторы при 429 (для free лучше `0`). |
+| **`max_retries_on_429`** | Повторы при 429. |
+| **`max_completion_tokens`** | Лимит выходных токенов на запрос (`max_tokens` в API). |
 | **`parser.progress_batch_posts`** | Обновление UI / partial JSON каждые N постов. |
 | **`output.save_progress_batches`** | Сохранять `output/partial/partial_*.json` по ходу. |
 | **`max_posts_per_run`** | Лимит LLM-вызовов за прогон (`0` = без лимита). |
@@ -139,15 +140,12 @@ OPENROUTER_API_KEY=sk-or-v1-...
 poetry install --extras ai
 ```
 
-3. В `config.yaml`:
+3. Каталог моделей — **`llm_models.yaml`** (id, название, цена). В `config.yaml` — только выбор id:
 
 ```yaml
 ai:
   enabled: true
-  model: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
-  fallback_models:
-    - poolside/laguna-m.1:free
-    - meta-llama/llama-3.3-70b-instruct:free
+  model: deepseek/deepseek-v4-flash
 ```
 
 4. Запуск:
@@ -162,16 +160,9 @@ poetry run python -m tg_jobs_parser.cli parse --ai
 
 > **Приватность:** текст постов уходит на серверы OpenRouter/провайдера модели. Для полностью локального разбора — см. roadmap в `zaddai.md` (Ollama, итерация 2).
 
-#### Лимиты OpenRouter (free)
+#### Лимиты API
 
-По ответам API при **429**:
-
-| Лимит | Ориентир |
-|-------|----------|
-| `free-models-per-min` | ~**16** запросов в минуту |
-| `free-models-per-day` | ~**50** запросов в день на аккаунт |
-
-В конфиге по умолчанию `concurrency: 1` и `requests_per_minute: 12` — запросы идут **по одному** с паузой ~5 с. При исчерпании дневного лимита дальнейшие вызовы LLM пропускаются (в режиме `assist` остаются поля из rules). Повторный прогон с **`use_cache: true`** не тратит квоту на уже разобранные посты.
+При **429** / `X-RateLimit-Remaining: 0` срабатывает `stop_llm_when_rate_limited` — LLM отключается до конца прогона (дальше rules). Темп задаётся `requests_per_minute` и `concurrency`. Повторный прогон с **`use_cache: true`** не вызывает API для уже разобранных постов.
 
 #### OpenAI SDK vs «голый» httpx
 

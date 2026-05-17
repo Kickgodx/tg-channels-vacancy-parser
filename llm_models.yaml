@@ -1,7 +1,7 @@
 # Единый каталог LLM (OpenRouter). Редактируйте только этот файл.
 # config.yaml: ai.model и ai.fallback_models — только id из списка models ниже.
 #
-# cost: USD за 1M токенов (input/output), напр. "0.25/1.5"; для free — "0/0"
+# cost: USD за 1M токенов (input/output), напр. "0.25/1.5"
 
 default_model: deepseek/deepseek-v4-flash
 
@@ -23,7 +23,7 @@ models:
   - id: deepseek/deepseek-v4-flash
     name: DeepSeek V4 Flash
     cost: "0.11/0.224"
-  - id: qwen/qwen3.5-flash-02-23
+  - id: qwen/qwen3.5-flash-02-23 # thinking
     name: Qwen3.5 Flash 02-23
     cost: "0.065/0.26"
   - id: deepseek/deepseek-chat
@@ -35,7 +35,7 @@ models:
   - id: openai/gpt-oss-20b
     name: GPT-OSS 20B
     cost: "0.03/0.14"
-  - id: openai/gpt-oss-120b
+  - id: openai/gpt-oss-120b # fast thinking (3 sec)
     name: GPT-OSS 120B
     cost: "0.04/0.18"
   - id: mistralai/mistral-small-24b-instruct-2501
@@ -53,3 +53,6 @@ models:
   - id: microsoft/phi-4
     name: Phi-4
     cost: "0.065/0.14"
+  - id: anthropic/claude-3-haiku
+    name: Claude 3 Haiku
+    cost: "0.25/1.25"
