@@ -48,6 +48,7 @@ from tg_jobs_parser.ai.llm_models_registry import (
 from tg_jobs_parser.ai.models_catalog import catalog_model_ids, label_for_model_id
 
 _AI_CONFIG_SIG_KEY = "ai_config_signature"
+_ANY_SPEC_KEY = "filter_any_specialization"
 _AI_PRIMARY_MODEL_KEY = "ai_primary_model"
 _AI_FALLBACK_MODELS_KEY = "ai_fallback_models"
 _USE_AI_KEY = "use_ai_llm"
@@ -141,7 +142,22 @@ with st.sidebar:
 
     st.header("Фильтры")
     all_specs = list(DEFAULT_SPECIALIZATIONS.keys())
-    chosen_specs = st.multiselect("Специализации", options=all_specs, default=["Python", "Backend", "QA"])
+    any_specialization = st.checkbox(
+        "Любая IT-специализация",
+        key=_ANY_SPEC_KEY,
+        help=(
+            "Не отсекать посты по списку ролей. Для LLM (в т.ч. mode primary): "
+            "не помечать вакансию как не-вакансию только из‑за PHP/Rust/… вне target list."
+        ),
+    )
+    if any_specialization:
+        st.caption("Активен режим «любая IT-роль» — multiselect ниже не влияет на прогон.")
+    chosen_specs = st.multiselect(
+        "Специализации (если не «любая IT»)",
+        options=all_specs,
+        default=["Python", "Backend", "QA"],
+        disabled=any_specialization,
+    )
 
     exclusions_text = ""
     try:
@@ -491,8 +507,19 @@ def rebuild_config_inline() -> "AppConfig":
     ex_lines = [x.strip() for x in exclusions_input.splitlines() if x.strip()]
     ex_kw = ex_lines if ex_lines else base.filters.exclude_keywords
 
+    if any_specialization:
+        _specs: list[str] = []
+        _any_spec = True
+    elif chosen_specs:
+        _specs = list(chosen_specs)
+        _any_spec = False
+    else:
+        _specs = list(base.filters.specializations)
+        _any_spec = bool(getattr(base.filters, "any_specialization", False))
+
     data["filters"] = FiltersConfig(
-        specializations=chosen_specs if chosen_specs else base.filters.specializations,
+        specializations=_specs,
+        any_specialization=_any_spec,
         exclude_keywords=ex_kw,
         countries=split_csv(countries),
         cities=split_csv(cities),

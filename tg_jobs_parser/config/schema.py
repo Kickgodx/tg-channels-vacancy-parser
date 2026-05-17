@@ -247,6 +247,13 @@ class SearchConfig(BaseModel):
 
 class FiltersConfig(BaseModel):
     specializations: list[str] = Field(default_factory=list)
+    any_specialization: bool = Field(
+        default=False,
+        description=(
+            "Любая IT-роль: не фильтровать посты по списку specializations; "
+            "LLM не отклоняет вакансию только из-за стека вне target_specializations."
+        ),
+    )
     exclude_keywords: list[str] = Field(default_factory=list)
     countries: list[str] = Field(default_factory=list)
     cities: list[str] = Field(default_factory=list)
