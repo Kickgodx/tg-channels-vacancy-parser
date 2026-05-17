@@ -47,6 +47,30 @@ def test_merge_ai_salary_and_specs():
     assert out.extraction_source == "hybrid"
 
 
+def test_primary_clears_rules_salary_when_ai_null():
+    cfg = AppConfig()
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"})})
+    v = _vacancy(
+        detected_salary_min=76348.0,
+        detected_salary_max=None,
+        detected_salary_avg=76348.0,
+        salary_currency=None,
+    )
+    ai = VacancyAIExtraction(
+        is_job_post=True,
+        detected_specializations=["Go"],
+        salary_min=None,
+        salary_max=None,
+        salary_currency=None,
+        confidence=0.95,
+    )
+    out = merge_rules_and_ai(v, ai, cfg)
+    assert out.detected_salary_min is None
+    assert out.detected_salary_max is None
+    assert out.detected_salary_avg is None
+    assert out.extraction_source == "ai"
+
+
 def test_parse_extraction_coerces_list_required_experience():
     from tg_jobs_parser.ai.clients.openrouter import _parse_extraction
 

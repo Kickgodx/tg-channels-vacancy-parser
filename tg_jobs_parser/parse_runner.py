@@ -365,6 +365,12 @@ def run_parse(
         if ai_service is not None:
             ai_service.log_batch_finished()
             all_warnings.append(ai_service.stats.format_token_summary())
+            cost_summary = ai_service.stats.format_cost_summary(
+                config.llm_model_catalog,
+                config.ai.model,
+            )
+            if cost_summary:
+                all_warnings.append(cost_summary)
             if ai_service._client.rate_limiter.llm_disabled:
                 all_warnings.append(
                     f"AI: LLM отключён ({ai_service._client.rate_limiter.llm_disabled_reason}). "
@@ -399,7 +405,10 @@ def run_parse(
 
         run_params = config.to_serializable_dict()
         if ai_service is not None:
-            run_params["ai_stats"] = ai_service.stats.to_dict()
+            run_params["ai_stats"] = ai_service.stats.to_dict(
+                catalog=config.llm_model_catalog,
+                primary_model=config.ai.model,
+            )
         if cli_overrides:
             run_params["cli_overrides"] = cli_overrides
 

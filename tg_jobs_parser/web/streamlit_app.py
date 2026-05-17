@@ -617,6 +617,18 @@ with tab_run:
             t1.metric("AI tokens (input)", f"{tin:,}".replace(",", " "))
             t2.metric("AI tokens (output)", f"{tout:,}".replace(",", " "))
             t3.metric("AI tokens (всего)", f"{tsum:,}".replace(",", " "))
+            _cost_in = ai_stats.get("cost_usd_input")
+            _cost_out = ai_stats.get("cost_usd_output")
+            _cost_tot = ai_stats.get("cost_usd_total")
+            if _cost_tot is not None:
+                def _usd(v: object) -> str:
+                    x = float(v or 0)
+                    return f"${x:.4f}" if 0 < x < 0.01 else f"${x:.2f}"
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Стоимость input (USD)", _usd(_cost_in))
+                c2.metric("Стоимость output (USD)", _usd(_cost_out))
+                c3.metric("Стоимость всего (USD)", _usd(_cost_tot))
             skipped = int(ai_stats.get("skipped_score") or 0)
             _ai_rp = (result.run_params or {}).get("ai") or {}
             _model_rp = (_ai_rp.get("model") or "").strip()

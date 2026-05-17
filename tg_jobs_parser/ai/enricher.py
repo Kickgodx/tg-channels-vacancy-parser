@@ -8,9 +8,11 @@ from pathlib import Path
 
 from tg_jobs_parser.ai.cache import AIExtractionCache
 from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
+from tg_jobs_parser.ai.models_catalog import LlmModelEntry
 from tg_jobs_parser.ai.rate_limit import LlmQuotaExhausted
 from tg_jobs_parser.ai.merger import merge_rules_and_ai
 from tg_jobs_parser.ai.search_context import SearchContext, build_search_context
+from tg_jobs_parser.ai.token_cost import TokenCostEstimate, estimate_run_cost
 from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.utils.logger import get_logger
@@ -30,11 +32,39 @@ class RunAIStats:
     tokens_out: int = 0
     rate_limit_skipped: int = 0
     llm_disabled_mid_run: bool = False
+    _tokens_by_model: dict[str, list[int]] = field(default_factory=dict, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
     def tokens_total(self) -> int:
         return self.tokens_in + self.tokens_out
+
+    def record_api_tokens(self, model: str, prompt_tokens: int, completion_tokens: int) -> None:
+        """Учёт токенов одного API-вызова (не кэш), с разбивкой по модели."""
+        mid = (model or "").strip() or "unknown"
+        with self._lock:
+            self.tokens_in += prompt_tokens
+            self.tokens_out += completion_tokens
+            bucket = self._tokens_by_model.setdefault(mid, [0, 0])
+            bucket[0] += prompt_tokens
+            bucket[1] += completion_tokens
+
+    def tokens_by_model(self) -> dict[str, tuple[int, int]]:
+        with self._lock:
+            return {m: (v[0], v[1]) for m, v in self._tokens_by_model.items()}
+
+    def estimate_cost(
+        self,
+        catalog: list[LlmModelEntry],
+        primary_model: str,
+    ) -> TokenCostEstimate | None:
+        return estimate_run_cost(
+            tokens_by_model=self.tokens_by_model(),
+            tokens_in=self.tokens_in,
+            tokens_out=self.tokens_out,
+            catalog=catalog,
+            primary_model=primary_model,
+        )
 
     def format_token_summary(self) -> str:
         """Строка для лога / UI: суммарные токены за текущий прогон."""
@@ -43,8 +73,21 @@ class RunAIStats:
             f"output={self.tokens_out}, всего={self.tokens_total}"
         )
 
-    def to_dict(self) -> dict:
-        return {
+    def format_cost_summary(
+        self,
+        catalog: list[LlmModelEntry],
+        primary_model: str,
+    ) -> str | None:
+        est = self.estimate_cost(catalog, primary_model)
+        return est.format_line() if est else None
+
+    def to_dict(
+        self,
+        *,
+        catalog: list[LlmModelEntry] | None = None,
+        primary_model: str = "",
+    ) -> dict:
+        data = {
             "calls": self.calls,
             "cache_hits": self.cache_hits,
             "errors": self.errors,
@@ -57,6 +100,11 @@ class RunAIStats:
             "tokens_out": self.tokens_out,
             "tokens_total": self.tokens_total,
         }
+        if catalog:
+            est = self.estimate_cost(catalog, primary_model)
+            if est:
+                data.update(est.to_dict())
+        return data
 
 
 class AIEnrichmentService:
@@ -161,10 +209,12 @@ class AIEnrichmentService:
                 if self._ai.mode == "primary":
                     return None
                 return vacancy
-            with self.stats._lock:
-                self.stats.tokens_in += usage.prompt_tokens
-                self.stats.tokens_out += usage.completion_tokens
             cache_model = (usage.model or self._ai.model).strip() or self._ai.model
+            self.stats.record_api_tokens(
+                cache_model,
+                usage.prompt_tokens,
+                usage.completion_tokens,
+            )
             self._cache.put(
                 text=text,
                 model=cache_model,
@@ -215,6 +265,12 @@ class AIEnrichmentService:
             rl.rate_limit_retries,
         )
         _LOG.info(self.stats.format_token_summary())
+        cost_line = self.stats.format_cost_summary(
+            self._config.llm_model_catalog,
+            self._ai.model,
+        )
+        if cost_line:
+            _LOG.info(cost_line)
 
 
 def enrich_vacancy_with_ai(

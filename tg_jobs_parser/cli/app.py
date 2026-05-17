@@ -211,6 +211,16 @@ def parse(
                 fg=typer.colors.CYAN,
             )
         )
+        if ai_stats.get("cost_usd_total") is not None:
+            typer.echo(
+                typer.style(
+                    "AI стоимость (USD): "
+                    f"input=${float(ai_stats.get('cost_usd_input') or 0):.4f}, "
+                    f"output=${float(ai_stats.get('cost_usd_output') or 0):.4f}, "
+                    f"всего=${float(ai_stats.get('cost_usd_total') or 0):.4f}",
+                    fg=typer.colors.CYAN,
+                )
+            )
         typer.echo(
             typer.style(
                 f"AI: вызовов {ai_stats.get('calls', 0)}, кэш {ai_stats.get('cache_hits', 0)}, "

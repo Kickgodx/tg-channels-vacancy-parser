@@ -13,6 +13,7 @@ Rules:
 - If the post is a resume, course ad, spam, or discussion without hiring — set is_job_post=false and rejection_reason briefly.
 - If SEARCH_CONTEXT sets ANY_IT_SPECIALIZATION=true — do not reject an IT job only because the role/stack is outside target_specializations (e.g. PHP, Ruby, .NET are valid).
 - Do NOT invent salary, company, or URLs: use null/[] when absent in text.
+- Numbers in URLs (vacancy id in path, e.g. /76348/) are NOT salary — salary_min/max must be null if pay is not stated in prose.
 - detected_specializations: canonical role names; you MAY add a new role name if clearly stated (e.g. Rust) even if not in ALLOWED list.
 - work_format: one of remote, hybrid, office, relocation, unknown (or null).
 - detected_grade: intern, junior, middle, senior, lead, principal, unknown.

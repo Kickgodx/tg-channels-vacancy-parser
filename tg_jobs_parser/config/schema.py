@@ -167,7 +167,7 @@ class AiConfig(BaseModel):
     requests_per_minute: float = Field(
         default=12.0,
         gt=0,
-        le=300,
+        le=500,
         description="Целевой темп запросов (пауза между вызовами к API).",
     )
     max_retries_on_429: int = Field(default=0, ge=0, le=10)
