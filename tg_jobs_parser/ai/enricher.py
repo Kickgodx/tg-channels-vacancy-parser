@@ -74,16 +74,19 @@ class AIEnrichmentService:
         self._progress_done: int = 0
         self._daily_limit_hit = False
 
+    def close(self) -> None:
+        self._client.close()
+
     def begin_batch(self, total_posts: int) -> None:
         """Задать размер батча для логов вида ``AI LLM: 100/1500``."""
         self._progress_total = max(0, total_posts)
         self._progress_done = 0
         if self._progress_total:
             _LOG.info(
-                "AI LLM: старт %s постов | модель %s | concurrency=%s | ~%.0f req/min "
-                "(OpenRouter free: ~16/мин, ~50/день).",
+                "AI LLM: старт %s постов | модель %s | кэш %s | concurrency=%s | ~%.0f req/min.",
                 self._progress_total,
                 self._ai.model,
+                "вкл" if self._ai.use_cache else "выкл",
                 self._ai.concurrency,
                 self._ai.requests_per_minute,
             )
@@ -126,7 +129,10 @@ class AIEnrichmentService:
             with self.stats._lock:
                 self.stats.cache_hits += 1
             extraction = cached
-            self._log_llm_progress(vacancy, phase="кэш")
+            self._log_llm_progress(
+                vacancy,
+                phase=f"кэш ({self._ai.model})",
+            )
         else:
             if self._daily_limit_hit or self._client.rate_limiter.llm_disabled:
                 self._daily_limit_hit = True
@@ -158,9 +164,10 @@ class AIEnrichmentService:
             with self.stats._lock:
                 self.stats.tokens_in += usage.prompt_tokens
                 self.stats.tokens_out += usage.completion_tokens
+            cache_model = (usage.model or self._ai.model).strip() or self._ai.model
             self._cache.put(
                 text=text,
-                model=self._ai.model,
+                model=cache_model,
                 prompt_version=self._ai.prompt_version,
                 mode=self._ai.mode,
                 extraction=extraction,

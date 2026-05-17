@@ -1,4 +1,4 @@
-"""Ограничение частоты запросов к OpenRouter (free tier)."""
+"""Ограничение частоты запросов к OpenRouter."""
 
 from __future__ import annotations
 
@@ -66,9 +66,7 @@ class OpenRouterRateLimiter:
     """
     Сериализация запросов и отключение LLM при исчерпании квоты.
 
-    OpenRouter free (из 429):
-    - ``free-models-per-min`` — ~16 req/min;
-    - ``free-models-per-day`` — ~50 req/day.
+    При 429 учитываются заголовки ``X-RateLimit-*`` и текст ошибки (в т.ч. дневная квота).
     """
 
     def __init__(
@@ -150,7 +148,7 @@ class OpenRouterRateLimiter:
             raise LlmQuotaExhausted(self.llm_disabled_reason or "rate limit") from error
 
         if "per-day" in msg or "per day" in msg:
-            self.disable_llm_for_run("дневной лимит free-моделей", reset_epoch_ms=reset_ms)
+            self.disable_llm_for_run("дневной лимит API", reset_epoch_ms=reset_ms)
             raise LlmQuotaExhausted(self.llm_disabled_reason or "daily limit") from error
 
     def acquire(self) -> None:

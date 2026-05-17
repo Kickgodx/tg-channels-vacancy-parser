@@ -44,6 +44,21 @@ def telegram_api_credentials() -> tuple[int, str]:
     return api_id, api_hash
 
 
+def _asyncio_run(coro):
+    from tg_jobs_parser.utils.asyncio_windows import install_windows_asyncio_cleanup_helpers
+
+    install_windows_asyncio_cleanup_helpers()
+    return asyncio.run(coro)
+
+
+async def _disconnect_client(client) -> None:
+    try:
+        if getattr(client, "is_connected", lambda: True)():
+            await client.disconnect()
+    except (ConnectionResetError, OSError, asyncio.CancelledError):
+        pass
+
+
 def _combine_utc(d, end_of_day: bool = False) -> datetime:
     if end_of_day:
         return datetime(d.year, d.month, d.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
@@ -72,7 +87,7 @@ class TelegramTelethonParser(BaseChannelParser):
             return [], "Пустое имя канала."
 
         try:
-            return asyncio.run(self._fetch_single_with_own_client(username))
+            return _asyncio_run(self._fetch_single_with_own_client(username))
         except RuntimeError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -100,7 +115,7 @@ class TelegramTelethonParser(BaseChannelParser):
         if not usernames:
             return out_placeholder
 
-        results = asyncio.run(self._fetch_many_async(usernames))
+        results = _asyncio_run(self._fetch_many_async(usernames))
         return out_placeholder + results
 
     async def _fetch_single_with_own_client(
@@ -118,7 +133,7 @@ class TelegramTelethonParser(BaseChannelParser):
             await self._start_client(client)
             return await self._iter_channel(client, username)
         finally:
-            await client.disconnect()
+            await _disconnect_client(client)
 
     async def _fetch_many_async(
         self, usernames: list[str]
@@ -155,7 +170,7 @@ class TelegramTelethonParser(BaseChannelParser):
             tasks = [asyncio.create_task(_one(u)) for u in usernames]
             return list(await asyncio.gather(*tasks))
         finally:
-            await client.disconnect()
+            await _disconnect_client(client)
 
     async def _start_client(self, client) -> None:
         """Один client.start() с подгрузкой телефона/2FA из .env (если есть)."""

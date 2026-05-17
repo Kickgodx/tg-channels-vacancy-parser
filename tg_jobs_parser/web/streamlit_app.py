@@ -33,6 +33,10 @@ def _require_streamlit_runtime() -> None:
 
 _require_streamlit_runtime()
 
+from tg_jobs_parser.utils.asyncio_windows import install_windows_asyncio_cleanup_helpers
+
+install_windows_asyncio_cleanup_helpers()
+
 from tg_jobs_parser.analytics.charts import plotly_daily_line, plotly_grade_bar, plotly_spec_bar
 from tg_jobs_parser.channel_search import search_channels
 from tg_jobs_parser.config.loader import ConfigLoadError, load_config
@@ -47,6 +51,7 @@ _AI_CONFIG_SIG_KEY = "ai_config_signature"
 _AI_PRIMARY_MODEL_KEY = "ai_primary_model"
 _AI_FALLBACK_MODELS_KEY = "ai_fallback_models"
 _USE_AI_KEY = "use_ai_llm"
+_IGNORE_LLM_CACHE_KEY = "ignore_llm_cache_run"
 from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.exporters.excel_exporter import export_excel
 from tg_jobs_parser.exporters.json_exporter import export_json
@@ -279,6 +284,11 @@ with st.sidebar:
         key=_AI_FALLBACK_MODELS_KEY,
         disabled=not _fallback_opts,
     )
+    ignore_llm_cache = st.checkbox(
+        "Не использовать кэш LLM в этом прогоне",
+        key=_IGNORE_LLM_CACHE_KEY,
+        help="Все посты пойдут в API (если не отсечены по score). Кэш на диске не удаляется.",
+    )
     if use_ai and ai_model_choice:
         _fb_suffix = ""
         if ai_fallback_models:
@@ -286,7 +296,10 @@ with st.sidebar:
                 _fb_suffix = f" → fallback: {', '.join(ai_fallback_models[:3])}…"
             else:
                 _fb_suffix = f" → fallback: {', '.join(ai_fallback_models)}"
-        st.caption(f"**В прогоне:** {_fmt_model(ai_model_choice)}{_fb_suffix}")
+        _cache_note = "без кэша" if ignore_llm_cache else "с кэшем"
+        st.caption(
+            f"**В прогоне:** {_fmt_model(ai_model_choice)}{_fb_suffix} ({_cache_note})"
+        )
 
 
 def split_csv(s: str) -> list[str]:
@@ -501,6 +514,8 @@ def rebuild_config_inline() -> "AppConfig":
             ai_base["fallback_models"] = [
                 m for m in ai_fallback_models if m != ai_model_choice
             ]
+        if ignore_llm_cache:
+            ai_base["use_cache"] = False
     else:
         ai_base["enabled"] = False
     data["ai"] = AiConfig(**ai_base).model_dump()
@@ -576,7 +591,11 @@ with tab_run:
             t2.metric("AI tokens (output)", f"{tout:,}".replace(",", " "))
             t3.metric("AI tokens (всего)", f"{tsum:,}".replace(",", " "))
             skipped = int(ai_stats.get("skipped_score") or 0)
+            _ai_rp = (result.run_params or {}).get("ai") or {}
+            _model_rp = (_ai_rp.get("model") or "").strip()
+            _model_line = f"Модель прогона: `{_model_rp}`.\n\n" if _model_rp else ""
             st.info(
+                f"{_model_line}"
                 f"AI: вызовов {ai_stats.get('calls', 0)}, кэш {ai_stats.get('cache_hits', 0)}, "
                 f"без LLM (низкий score) {skipped}, "
                 f"отсечено не-вакансий {ai_stats.get('dropped_not_job', 0)}, "

@@ -12,7 +12,7 @@ class LlmModelEntry(BaseModel):
     name: str = Field(min_length=1, description="Название в UI")
     cost: str = Field(
         default="",
-        description="USD за 1M токенов input/output, напр. 0.25/1.5 или 0/0 (free)",
+        description="USD за 1M токенов input/output, напр. 0.25/1.5",
     )
 
     def ui_label(self) -> str:

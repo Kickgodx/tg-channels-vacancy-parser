@@ -162,16 +162,13 @@ class AiConfig(BaseModel):
         default=1,
         ge=1,
         le=16,
-        description="Параллельные LLM-запросы; для OpenRouter :free рекомендуется 1.",
+        description="Параллельные LLM-запросы к OpenRouter.",
     )
     requests_per_minute: float = Field(
         default=12.0,
         gt=0,
         le=300,
-        description=(
-            "Целевой темп запросов (пауза между вызовами). "
-            "Free OpenRouter: ~16/мин — ставьте 12; платные тарифы — выше."
-        ),
+        description="Целевой темп запросов (пауза между вызовами к API).",
     )
     max_retries_on_429: int = Field(default=0, ge=0, le=10)
     retry_base_delay_seconds: float = Field(default=5.0, ge=1, le=120)

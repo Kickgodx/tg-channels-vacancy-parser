@@ -86,6 +86,18 @@ class OpenRouterClient:
     def rate_limiter(self) -> OpenRouterRateLimiter:
         return self._rate_limiter
 
+    def close(self) -> None:
+        """Закрыть HTTP-клиент OpenAI/httpx (меньше зависаний при выходе из UI)."""
+        if self._sdk is None:
+            return
+        try:
+            close_fn = getattr(self._sdk, "close", None)
+            if callable(close_fn):
+                close_fn()
+        except Exception:
+            pass
+        self._sdk = None
+
     def _get_sdk(self) -> Any:
         if self._sdk is None:
             self._sdk = self._build_sdk_client()

@@ -7,6 +7,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,6 +37,10 @@ from tg_jobs_parser.utils.dates import clamp_range_days, parse_date, resolve_sea
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
 from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
 from tg_jobs_parser.utils.logger import get_logger
+from tg_jobs_parser.utils.thread_pool import DaemonThreadPoolExecutor
+
+if TYPE_CHECKING:
+    from tg_jobs_parser.ai.enricher import AIEnrichmentService
 
 _LOG = get_logger(__name__)
 
@@ -249,7 +254,7 @@ def run_parse(
         fetch_elapsed,
     )
 
-    ai_service = None
+    ai_service: AIEnrichmentService | None = None
     if config.ai.enabled:
         from tg_jobs_parser.ai.enricher import AIEnrichmentService
 
@@ -272,69 +277,55 @@ def run_parse(
             all_warnings.append(f"AI не запущен: {e}")
             _LOG.error("AI не инициализирован: %s", e)
 
-    def _process_one(post: RawPost) -> Vacancy | None:
-        v = raw_post_to_vacancy_rules(
-            post, config, spec_map=specs_map, tech_list=tech_list, wf_map=wf_map
-        )
-        if ai_service is not None:
-            v = ai_service.enrich(v)
-            if v is None:
+    try:
+
+        def _process_one(post: RawPost) -> Vacancy | None:
+            v = raw_post_to_vacancy_rules(
+                post, config, spec_map=specs_map, tech_list=tech_list, wf_map=wf_map
+            )
+            if ai_service is not None:
+                v = ai_service.enrich(v)
+                if v is None:
+                    return None
+            elif v.vacancy_score < threshold:
                 return None
-        elif v.vacancy_score < threshold:
-            return None
-        if not apply_post_filters(v, config, specs_map, exclude_keywords=exclude_kw):
-            return None
-        return v
+            if not apply_post_filters(v, config, specs_map, exclude_keywords=exclude_kw):
+                return None
+            return v
 
-    def _emit_progress(posts_processed: int, *, phase: str = "processing") -> None:
-        if not progress_callback and not partial_dir:
-            return
-        rl = ai_service._client.rate_limiter if ai_service is not None else None
-        snap = ParseProgressSnapshot(
-            posts_processed=posts_processed,
-            posts_total=len(all_posts),
-            vacancies_found=len(candidates),
-            vacancies=list(candidates),
-            phase=phase,
-            ai_llm_disabled=bool(rl and rl.llm_disabled),
-            ai_llm_disabled_reason=rl.llm_disabled_reason if rl else None,
-            ai_tokens_in=ai_service.stats.tokens_in if ai_service else 0,
-            ai_tokens_out=ai_service.stats.tokens_out if ai_service else 0,
-            ai_skipped_score=ai_service.stats.skipped_score if ai_service else 0,
-        )
-        if partial_dir and candidates:
-            p = save_partial_batch(partial_dir, snap, run_id=partial_run_id)
-            snap.extra["partial_path"] = str(p)
-        if progress_callback:
-            progress_callback(snap)
+        def _emit_progress(posts_processed: int, *, phase: str = "processing") -> None:
+            if not progress_callback and not partial_dir:
+                return
+            rl = ai_service._client.rate_limiter if ai_service is not None else None
+            snap = ParseProgressSnapshot(
+                posts_processed=posts_processed,
+                posts_total=len(all_posts),
+                vacancies_found=len(candidates),
+                vacancies=list(candidates),
+                phase=phase,
+                ai_llm_disabled=bool(rl and rl.llm_disabled),
+                ai_llm_disabled_reason=rl.llm_disabled_reason if rl else None,
+                ai_tokens_in=ai_service.stats.tokens_in if ai_service else 0,
+                ai_tokens_out=ai_service.stats.tokens_out if ai_service else 0,
+                ai_skipped_score=ai_service.stats.skipped_score if ai_service else 0,
+            )
+            if partial_dir and candidates:
+                p = save_partial_batch(partial_dir, snap, run_id=partial_run_id)
+                snap.extra["partial_path"] = str(p)
+            if progress_callback:
+                progress_callback(snap)
 
-    # Пост-обработка: regex (+ опционально LLM в пуле потоков).
-    if ai_service is not None:
-        workers = max(1, min(config.ai.concurrency, 16))
-    else:
-        workers = max(2, min(8, (os.cpu_count() or 4)))
+        # Пост-обработка: regex (+ опционально LLM в пуле потоков).
+        if ai_service is not None:
+            workers = max(1, min(config.ai.concurrency, 16))
+        else:
+            workers = max(2, min(8, (os.cpu_count() or 4)))
 
-    process_started = time.monotonic()
-    if len(all_posts) < 200 and ai_service is None:
-        for i, post in enumerate(all_posts, 1):
-            v = _process_one(post)
-            if v is not None:
-                candidates.append(v)
-            if i % batch_step == 0 or i == len(all_posts):
-                _emit_progress(i)
-            if i % 500 == 0:
-                _LOG.info("Обработано постов: %s/%s; прошло вакансий: %s", i, len(all_posts), len(candidates))
-    else:
-        label = "regex+AI" if ai_service else "regex"
-        _LOG.info(
-            "Пост-обработка %s постов в %s потоков (%s).",
-            len(all_posts),
-            workers,
-            label,
-        )
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="post-proc") as ex:
-            chunksize = max(8, len(all_posts) // (workers * 8) or 8)
-            for i, v in enumerate(ex.map(_process_one, all_posts, chunksize=chunksize), 1):
+        pool_cls = DaemonThreadPoolExecutor if ai_service is not None else ThreadPoolExecutor
+        process_started = time.monotonic()
+        if len(all_posts) < 200 and ai_service is None:
+            for i, post in enumerate(all_posts, 1):
+                v = _process_one(post)
                 if v is not None:
                     candidates.append(v)
                 if i % batch_step == 0 or i == len(all_posts):
@@ -346,58 +337,86 @@ def run_parse(
                         len(all_posts),
                         len(candidates),
                     )
-
-    process_elapsed = time.monotonic() - process_started
-    _emit_progress(len(all_posts), phase="post_processing_done")
-    if ai_service is not None:
-        ai_service.log_batch_finished()
-        all_warnings.append(ai_service.stats.format_token_summary())
-        if ai_service._client.rate_limiter.llm_disabled:
-            all_warnings.append(
-                f"AI: LLM отключён ({ai_service._client.rate_limiter.llm_disabled_reason}). "
-                "Оставшиеся посты обработаны только rules."
+        else:
+            label = "regex+AI" if ai_service else "regex"
+            _LOG.info(
+                "Пост-обработка %s постов в %s потоков (%s).",
+                len(all_posts),
+                workers,
+                label,
             )
-    _LOG.info(
-        "Пост-обработка завершена за %.1f с. После фильтров осталось вакансий-кандидатов: %s",
-        process_elapsed,
-        len(candidates),
-    )
+            with pool_cls(max_workers=workers, thread_name_prefix="post-proc") as ex:
+                chunksize = max(8, len(all_posts) // (workers * 8) or 8)
+                for i, v in enumerate(ex.map(_process_one, all_posts, chunksize=chunksize), 1):
+                    if v is not None:
+                        candidates.append(v)
+                    if i % batch_step == 0 or i == len(all_posts):
+                        _emit_progress(i)
+                    if i % 500 == 0:
+                        _LOG.info(
+                            "Обработано постов: %s/%s; прошло вакансий: %s",
+                            i,
+                            len(all_posts),
+                            len(candidates),
+                        )
 
-    dedup_started = time.monotonic()
-    unique, dups = deduplicate_vacancies(candidates, config)
-    _LOG.info(
-        "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
-        len(unique),
-        len(dups),
-        time.monotonic() - dedup_started,
-    )
+        process_elapsed = time.monotonic() - process_started
+        _emit_progress(len(all_posts), phase="post_processing_done")
+        if ai_service is not None:
+            ai_service.log_batch_finished()
+            all_warnings.append(ai_service.stats.format_token_summary())
+            if ai_service._client.rate_limiter.llm_disabled:
+                all_warnings.append(
+                    f"AI: LLM отключён ({ai_service._client.rate_limiter.llm_disabled_reason}). "
+                    "Оставшиеся посты обработаны только rules."
+                )
+        _LOG.info(
+            "Пост-обработка завершена за %.1f с. После фильтров осталось вакансий-кандидатов: %s",
+            process_elapsed,
+            len(candidates),
+        )
 
-    sort_vacancies_for_report(candidates)
-    sort_vacancies_for_report(unique)
-    sort_vacancies_for_report(dups)
+        dedup_started = time.monotonic()
+        unique, dups = deduplicate_vacancies(candidates, config)
+        _LOG.info(
+            "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
+            len(unique),
+            len(dups),
+            time.monotonic() - dedup_started,
+        )
 
-    metrics = build_metrics(
-        vacancies_all=candidates,
-        vacancies_unique=unique,
-        duplicates=dups,
-        posts_collected=posts_fetched,
-    )
-    metrics.warnings.extend(all_warnings)
+        sort_vacancies_for_report(candidates)
+        sort_vacancies_for_report(unique)
+        sort_vacancies_for_report(dups)
 
-    run_params = config.to_serializable_dict()
-    if ai_service is not None:
-        run_params["ai_stats"] = ai_service.stats.to_dict()
-    if cli_overrides:
-        run_params["cli_overrides"] = cli_overrides
+        metrics = build_metrics(
+            vacancies_all=candidates,
+            vacancies_unique=unique,
+            duplicates=dups,
+            posts_collected=posts_fetched,
+        )
+        metrics.warnings.extend(all_warnings)
 
-    parse_warnings = "; ".join(all_warnings) if all_warnings else None
+        run_params = config.to_serializable_dict()
+        if ai_service is not None:
+            run_params["ai_stats"] = ai_service.stats.to_dict()
+        if cli_overrides:
+            run_params["cli_overrides"] = cli_overrides
 
-    return ParseResult(
-        run_params=run_params,
-        posts_fetched=posts_fetched,
-        parse_warnings=parse_warnings,
-        vacancies_all=candidates,
-        vacancies_unique=unique,
-        duplicates=dups,
-        metrics=metrics,
-    )
+        parse_warnings = "; ".join(all_warnings) if all_warnings else None
+
+        return ParseResult(
+            run_params=run_params,
+            posts_fetched=posts_fetched,
+            parse_warnings=parse_warnings,
+            vacancies_all=candidates,
+            vacancies_unique=unique,
+            duplicates=dups,
+            metrics=metrics,
+        )
+    except KeyboardInterrupt:
+        _LOG.warning("Прогон прерван (Ctrl+C).")
+        raise
+    finally:
+        if ai_service is not None:
+            ai_service.close()
