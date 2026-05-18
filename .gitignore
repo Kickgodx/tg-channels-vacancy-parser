@@ -77,3 +77,6 @@ $RECYCLE.BIN/
 *.log
 *.tmp
 *.temp
+
+# frontend
+frontend/node_modules/

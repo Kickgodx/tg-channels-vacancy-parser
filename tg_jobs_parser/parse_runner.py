@@ -257,6 +257,11 @@ def _process_posts_parallel(
                     emit_progress(processed)
 
 
+def _api_run(cli_overrides: dict | None) -> bool:
+    """Прогон через REST API — служебные строки не дублируем в parse_warnings (есть run_params / UI)."""
+    return bool(cli_overrides and cli_overrides.get("api"))
+
+
 def run_parse(
     config: AppConfig,
     cli_overrides: dict | None = None,
@@ -303,9 +308,11 @@ def run_parse(
         )
         date_from, date_to = df_clamped, dt_clamped
 
-    all_warnings.append(
-        "Telegram: Telethon (MTProto). Убедитесь, что активна сессия и заданы TELEGRAM_API_ID / TELEGRAM_API_HASH."
-    )
+    if not _api_run(cli_overrides):
+        all_warnings.append(
+            "Telegram: Telethon (MTProto). Убедитесь, что активна сессия и заданы "
+            "TELEGRAM_API_ID / TELEGRAM_API_HASH."
+        )
 
     # Предвычисляем все словари один раз — иначе они пересобирались бы на каждом из тысяч постов.
     specs_map = config.merged_specializations()
@@ -376,15 +383,16 @@ def run_parse(
         try:
             ai_service = AIEnrichmentService(config)
             ai_service.begin_batch(len(all_posts))
-            all_warnings.append(
-                f"AI: OpenRouter, модель {config.ai.model}"
-                + (
-                    f", fallback [{', '.join(config.ai.resolved_fallback_models())}]"
-                    if config.ai.resolved_fallback_models()
-                    else ""
+            if not _api_run(cli_overrides):
+                all_warnings.append(
+                    f"AI: OpenRouter, модель {config.ai.model}"
+                    + (
+                        f", fallback [{', '.join(config.ai.resolved_fallback_models())}]"
+                        if config.ai.resolved_fallback_models()
+                        else ""
+                    )
+                    + f", режим {config.ai.mode}, concurrency={config.ai.concurrency}."
                 )
-                + f", режим {config.ai.mode}, concurrency={config.ai.concurrency}."
-            )
             logging.getLogger("httpx").setLevel(logging.WARNING)
             logging.getLogger("openai").setLevel(logging.WARNING)
             _LOG.info("AI-обогащение включено (до дедупликации).")
@@ -489,13 +497,14 @@ def run_parse(
         _emit_progress(len(all_posts), phase="post_processing_done")
         if ai_service is not None:
             ai_service.log_batch_finished()
-            all_warnings.append(ai_service.stats.format_token_summary())
-            cost_summary = ai_service.stats.format_cost_summary(
-                config.llm_model_catalog,
-                config.ai.model,
-            )
-            if cost_summary:
-                all_warnings.append(cost_summary)
+            if not _api_run(cli_overrides):
+                all_warnings.append(ai_service.stats.format_token_summary())
+                cost_summary = ai_service.stats.format_cost_summary(
+                    config.llm_model_catalog,
+                    config.ai.model,
+                )
+                if cost_summary:
+                    all_warnings.append(cost_summary)
             if ai_service._client.rate_limiter.llm_disabled:
                 all_warnings.append(
                     f"AI: LLM отключён ({ai_service._client.rate_limiter.llm_disabled_reason}). "
