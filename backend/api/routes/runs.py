@@ -185,7 +185,9 @@ def export_run_json(run_id: uuid.UUID, db: Session = Depends(get_db)):
     row = repo.get_parse_run(db, run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    items, _ = repo.list_run_vacancies(db, run_id, VacancyQuery(page=1, page_size=100_000))
+    items = repo.list_all_run_vacancies(
+        db, run_id, VacancyQuery(page=1, page_size=500, sort_by="post_date", sort_order="desc")
+    )
     result = _parse_result_from_run(row, items)
     data = export_json_bytes(result)
     return StreamingResponse(
@@ -200,9 +202,11 @@ def export_run_xlsx(run_id: uuid.UUID, db: Session = Depends(get_db)):
     row = repo.get_parse_run(db, run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    items, _ = repo.list_run_vacancies(db, run_id, VacancyQuery(page=1, page_size=100_000))
-    result = _parse_result_from_run(row, items)
-    data = export_excel_bytes(result.vacancies_unique)
+    items = repo.list_all_run_vacancies(
+        db, run_id, VacancyQuery(page=1, page_size=500, sort_by="post_date", sort_order="desc")
+    )
+    metrics = metrics_from_run(row)
+    data = export_excel_bytes(items, metrics=metrics)
     return StreamingResponse(
         iter([data]),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -241,15 +241,32 @@ def export_excel(
     return path
 
 
-def export_excel_bytes(vacancies_unique: list[Vacancy]) -> bytes:
-    """Минимальный Excel для API (лист уникальных вакансий)."""
+def export_excel_bytes(
+    vacancies_unique: list[Vacancy],
+    *,
+    metrics: MetricsSummary | None = None,
+) -> bytes:
+    """Excel для API: лист вакансий и опционально сводка метрик."""
     from io import BytesIO
 
     buf = BytesIO()
+    sheet_names = ["vacancies"]
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         _vacancies_df(vacancies_unique, include_parse_dedup_columns=False).to_excel(
-            writer, sheet_name="vacancies_unique", index=False
+            writer, sheet_name="vacancies", index=False
         )
+        if metrics is not None:
+            summary_rows = [
+                ("total_posts_fetched", metrics.total_posts_fetched),
+                ("unique_vacancies", metrics.unique_vacancies),
+                ("duplicate_count", metrics.duplicate_count),
+                ("vacancies_with_salary", metrics.vacancies_with_salary),
+                ("vacancies_without_salary", metrics.vacancies_without_salary),
+            ]
+            pd.DataFrame(summary_rows, columns=["metric", "value"]).to_excel(
+                writer, sheet_name="metrics_summary", index=False
+            )
+            sheet_names.append("metrics_summary")
         wb = writer.book
-        _apply_openpyxl_formatting(wb, ["vacancies_unique"])
+        _apply_openpyxl_formatting(wb, sheet_names)
     return buf.getvalue()
