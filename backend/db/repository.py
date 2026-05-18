@@ -14,6 +14,7 @@ from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
 
 from backend.db.models import ParseRunRow, VacancyRow
+from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
 from backend.db.vacancy_mapper import row_to_vacancy, vacancy_to_row
 from backend.schemas import RunStatus, VacancyQuery, VacancySortField
 
@@ -133,30 +134,15 @@ def upsert_vacancies(
 
 
 def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[Vacancy], int]:
-    stmt = select(VacancyRow).where(VacancyRow.is_duplicate.is_(False))
-    if query.source_channel:
-        stmt = stmt.where(VacancyRow.source_channel == query.source_channel.lstrip("@"))
-    if query.grade:
-        stmt = stmt.where(VacancyRow.detected_grade == query.grade)
-    if query.work_format:
-        stmt = stmt.where(VacancyRow.work_format == query.work_format)
-    if query.date_from:
-        dt_from = datetime.combine(query.date_from, time.min, tzinfo=timezone.utc)
-        stmt = stmt.where(VacancyRow.post_date >= dt_from)
-    if query.date_to:
-        dt_to = datetime.combine(query.date_to, time.max, tzinfo=timezone.utc)
-        stmt = stmt.where(VacancyRow.post_date <= dt_to)
-    if query.q:
-        stmt = stmt.where(VacancyRow.cleaned_text.ilike(f"%{query.q}%"))
-
-    total = session.scalar(select(func.count(VacancyRow.id)).where(*stmt._where_criteria)) or 0
+    stmt = apply_vacancy_filters(select(VacancyRow), query)
+    total = int(session.scalar(vacancy_count_stmt(query)) or 0)
     offset = (query.page - 1) * query.page_size
     rows = session.scalars(
         stmt.order_by(_vacancy_order_by(query), VacancyRow.id.asc())
         .offset(offset)
         .limit(query.page_size)
     ).all()
-    return [row_to_vacancy(r) for r in rows], int(total)
+    return [row_to_vacancy(r) for r in rows], total
 
 
 def list_run_vacancies(

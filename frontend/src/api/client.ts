@@ -87,6 +87,18 @@ export const api = {
     return request<VacancyListResponse>(`/vacancies${qs ? `?${qs}` : ""}`);
   },
 
+  /** Агрегаты для графиков (те же фильтры, что у listVacancies, без пагинации). */
+  getVacancyMetrics: (params?: Record<string, string>) => {
+    const q = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== "" && v !== undefined) q.set(k, String(v));
+      });
+    }
+    const qs = q.toString();
+    return request<MetricsSummary>(`/vacancies/metrics${qs ? `?${qs}` : ""}`);
+  },
+
   listRunVacancies: (
     runId: string,
     page = 1,
