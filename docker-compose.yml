@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tgjobs
+      POSTGRES_PASSWORD: tgjobs
+      POSTGRES_DB: tgjobs
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tgjobs -d tgjobs"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
+      CONFIG_PATH: /app/config.yaml
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./llm_models.yaml:/app/llm_models.yaml:ro
+      - ./sessions:/app/sessions
+      - ./.cache:/app/.cache
+      - ./output:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000/api/v1
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

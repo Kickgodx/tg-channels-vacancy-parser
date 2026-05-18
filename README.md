@@ -1,35 +1,116 @@
 # tg_jobs_parser
 
-Локальное **Windows-first** MVP-приложение на Python: парсинг Telegram-каналов с IT-вакансиями через **Telethon** (ваш аккаунт, MTProto), правиловое извлечение полей, **опциональный AI** (OpenRouter), фильтры, дедуп, метрики, экспорт **Excel/JSON**, CLI (**Typer**) и **Streamlit** + **Plotly**.
+Локальное **Windows-first** приложение для парсинга Telegram-каналов с IT-вакансиями: **Telethon** (ваш аккаунт, MTProto), правиловое извлечение полей, опциональный **AI** (OpenRouter), фильтры, дедуп, метрики, экспорт **Excel/JSON**.
 
-Каналы задаются в `config.yaml` (или `--channels`). Опционально в Streamlit доступен best-effort **поиск кандидатов каналов** через DuckDuckGo (не заменяет ручной список источников).
+**Основной способ работы** — веб-интерфейс на **React** + **FastAPI** backend + **PostgreSQL** (Docker Compose). Парсинг запускается из UI, прогресс идёт по SSE, вакансии сохраняются в БД.
 
-## Telethon: что подготовить локально
+Также доступны **CLI (Typer)** и **Streamlit** (legacy UI) для локальной отладки и первой авторизации Telethon.
 
-**Не передавайте никому** `api_hash`, коды SMS и файл сессии. Держите их только в `.env` и в `sessions/` (каталог в `.gitignore`).
+Подробный план архитектуры и миграции: [`zrevise.md`](zrevise.md). Детали AI: [`zaddai.md`](zaddai.md).
 
-1. Зарегистрируйте приложение на [https://my.telegram.org/apps](https://my.telegram.org/apps) и получите **API ID** (целое число) и **API hash**.
-2. Создайте `.env` рядом с `config.yaml` (образец в `.env.example`):
+---
 
-```env
-TELEGRAM_API_ID=12345678
-TELEGRAM_API_HASH=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
+## Быстрый старт (Docker Compose)
 
-3. Установите проект через Poetry (см. ниже). Дополнительно для ускорения Telethon на Windows: `poetry install --extras telethon` (ставит **cryptg**).
-4. В `config.yaml` укажите `telegram.telethon_session_file` (путь к файлу сессии).
-5. **Первый запуск** удобнее из консоли: Telethon запросит телефон, код из SMS и при необходимости пароль 2FA — так создаётся файл сессии. В Streamlit интерактивная авторизация обычно неудобна; сначала выполните хотя бы один успешный `parse` через CLI.
+### Требования
+
+- Docker Desktop (Windows / macOS / Linux)
+- Файл `.env` рядом с `config.yaml` (см. [Telethon](#telethon-что-подготовить-локально))
+- Каталог `sessions/` для файла MTProto-сессии (монтируется в backend)
+
+### Запуск
 
 ```powershell
-python -m tg_jobs_parser.cli parse --config config.yaml
-# или
-poetry run python -m tg_jobs_parser.cli parse --config config.yaml
+cd путь\к\tg_jobs_parser
+# Скопируйте .env.example → .env и заполните TELEGRAM_API_ID / TELEGRAM_API_HASH
+docker compose up --build
 ```
 
-### Сообщения в консоли при первом запуске
+| Сервис   | URL |
+|----------|-----|
+| **Web UI** | http://localhost:5173 |
+| **API** (OpenAPI) | http://localhost:8000/docs |
+| **PostgreSQL** | `localhost:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
 
-- **`Failed to load SSL library` / `cryptg module not installed`** — часто появляется на Windows: Telethon ищет нативный OpenSSL для ускорения; при этом соединение с `149.154.x.x` всё равно устанавливается (как у вас: `Connection ... complete`). Для более быстрого шифрования можно поставить **`cryptg`** (он уже в extra `telethon` в `pyproject.toml`).
-- **`Please enter your phone`** — первая авторизация: сессии ещё нет. Введите номер в формате **`+79991234567`**, затем код из Telegram/SMS; при 2FA — пароль облака. Чтобы не набирать номер руками каждый раз при новой сессии, добавьте в `.env` переменную **`TELEGRAM_PHONE`** (см. `.env.example`). Код из SMS всё равно нужно будет ввести в консоли один раз (или положите **`TELEGRAM_2FA_PASSWORD`** только на своей машине, если включена двухфакторка).
+### Первая авторизация Telethon
+
+В контейнере backend интерактивный ввод телефона и кода удобнее, чем в браузере:
+
+```powershell
+docker compose exec backend python -m tg_jobs_parser.cli parse --config /app/config.yaml
+```
+
+Введите номер (`+79991234567`), код из Telegram/SMS и при необходимости пароль 2FA. Файл сессии появится в `sessions/` на хосте (volume).
+
+После этого парсинг запускайте из UI (**Запуск** → настройте фильтры → **Запустить парсинг**).
+
+### Переменные backend (`.env`)
+
+```env
+TELEGRAM_API_ID=...
+TELEGRAM_API_HASH=...
+OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
+
+# Опционально (для docker compose уже задано в compose-файле):
+# DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
+# CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+# API_KEY=                        # если задан — заголовок X-API-Key для API
+```
+
+---
+
+## Web UI (React)
+
+Стек: **Vite + TypeScript + React Router + TanStack Query + Recharts**.
+
+| Страница | Описание |
+|----------|----------|
+| **Запуск** | Форма парсинга (каналы, даты, специализации, формат работы, AI, пороги score), поиск каналов (DuckDuckGo) |
+| **Прогон** | Прогресс (SSE), метрики, графики, блок AI (токены и стоимость input/output/total), таблица вакансий, экспорт Excel/JSON |
+| **Вакансии** | Все уникальные вакансии из PostgreSQL: фильтры, пагинация, сортировка по клику на заголовок |
+
+Возможности таблицы: сортировка asc/desc по дате, зарплате, валюте, формату, грейду, score; выбор видимых колонок; модальное окно с полным текстом.
+
+Локальная разработка frontend без Docker:
+
+```powershell
+cd frontend
+npm install
+# VITE_API_BASE_URL=http://localhost:8000/api/v1
+npm run dev
+```
+
+Backend отдельно:
+
+```powershell
+poetry install
+# DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@localhost:5432/tgjobs
+uvicorn backend.main:app --reload --port 8000
+```
+
+---
+
+## Backend API (FastAPI)
+
+Префикс: `/api/v1`.
+
+| Метод | Путь | Назначение |
+|-------|------|------------|
+| `GET` | `/health` | Статус API и подключения к БД |
+| `GET` | `/config/defaults` | Значения по умолчанию для формы |
+| `GET` | `/config/llm-models` | Каталог моделей из `llm_models.yaml` |
+| `POST` | `/channels/search` | Поиск кандидатов каналов |
+| `POST` | `/runs` | Запуск парсинга (фоновый поток) |
+| `GET` | `/runs/{id}` | Статус и метрики прогона |
+| `GET` | `/runs/{id}/events` | SSE: прогресс в реальном времени |
+| `POST` | `/runs/{id}/cancel` | Отмена |
+| `GET` | `/runs/{id}/vacancies` | Вакансии прогона (`sort_by`, `sort_order`) |
+| `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта |
+| `GET` | `/vacancies` | Глобальный список вакансий (фильтры, сортировка, пагинация) |
+
+Ядро парсинга (`tg_jobs_parser.parse_runner`) вызывается из `backend/services/run_service.py`; результаты пишутся в PostgreSQL (UPSERT по `id` вакансии).
+
+---
 
 ## Структура проекта
 
@@ -37,181 +118,146 @@ poetry run python -m tg_jobs_parser.cli parse --config config.yaml
 tg_jobs_parser/
   README.md
   pyproject.toml
-  poetry.lock
   config.yaml
-  .env.example
-  .gitignore
+  llm_models.yaml
+  docker-compose.yml
+  Dockerfile.backend
 
-  tg_jobs_parser/
-    __init__.py
-    main.py
+  backend/                 — FastAPI, SQLAlchemy, RunService, SSE
+    api/routes/            — health, config, channels, runs, vacancies
+    db/                    — модели, репозиторий, UPSERT вакансий
+    services/              — run_service, progress_bus, registry
+
+  frontend/                — React UI (Vite)
+    src/pages/             — Dashboard, Run, Vacancies
+    src/components/        — ParseForm, VacancyTable, MetricsCharts
+
+  tg_jobs_parser/          — ядро парсинга (общее для API, CLI, Streamlit)
     parse_runner.py
-    channel_search.py
+    cli/                   — Typer CLI
+    web/                   — Streamlit (legacy)
+    config/                — YAML + Pydantic
+    parsers/               — Telethon
+    extraction/            — rules
+    ai/                    — OpenRouter, кэш, token cost
+    filters/, deduplication/, analytics/, exporters/
 
-    cli/          — Typer CLI
-    web/          — Streamlit UI
-    config/       — YAML + Pydantic-схема
-    parsers/      — Telethon, channel_username
-    extraction/   — нормализация, vacancy score, специализации, зарплата...
-    ai/           — OpenRouter (OpenAI SDK), промпты, кэш, слияние с rules
-    models/       — Vacancy, метрики, ParseResult
-    filters/      — фильтры по конфигу/CLI/UI
-    deduplication/- хэши + rapidfuzz
-    analytics/    — метрики, matplotlib/plotly
-    exporters/    — Excel, JSON
-    utils/        — логгер, даты, текст
-
+  sessions/                — Telethon session (не в git)
+  .cache/ai_extractions/   — дисковый кэш LLM
+  output/                  — Excel/JSON при экспорте
   tests/
 ```
 
-## Установка (Poetry)
+---
 
-Проект **Poetry-first**: зависимости и extras задаются в `pyproject.toml` / `poetry.lock`.
+## Telethon: что подготовить локально
+
+**Не передавайте никому** `api_hash`, коды SMS и файл сессии. Держите их только в `.env` и в `sessions/` (каталог в `.gitignore`).
+
+1. Зарегистрируйте приложение на [https://my.telegram.org/apps](https://my.telegram.org/apps) и получите **API ID** и **API hash**.
+2. Создайте `.env` рядом с `config.yaml` (образец в `.env.example`).
+3. В `config.yaml` укажите `telegram.telethon_session_file` (например `sessions/tg_jobs.session`).
+4. **Первый запуск** — интерактивная авторизация (см. [Docker](#первая-авторизация-telethon) или CLI ниже).
+
+### Сообщения в консоли при первом запуске
+
+- **`Failed to load SSL library` / `cryptg module not installed`** — на Windows Telethon может работать без cryptg; для ускорения: `poetry install --extras telethon`.
+- **`Please enter your phone`** — первая авторизация. В `.env` можно задать **`TELEGRAM_PHONE`**; код из SMS вводится один раз (или **`TELEGRAM_2FA_PASSWORD`** при 2FA).
+
+---
+
+## Установка без Docker (Poetry)
 
 ```powershell
 cd путь\к\tg_jobs_parser
 poetry install
-# опционально ускорение Telethon (cryptg):
-poetry install --extras telethon
-# опционально AI (OpenRouter + openai SDK):
-poetry install --extras ai
+poetry install --extras telethon   # cryptg (опционально)
+poetry install --extras ai         # OpenRouter
 ```
 
-Проверка окружения:
+Проверка:
 
 ```powershell
 poetry run python -c "import telethon; print(telethon.__version__)"
 ```
 
-Важно: **голый** `python` в консоли часто указывает на другой интерпретатор, не на Poetry-venv.
-Используйте **`poetry run python -m tg_jobs_parser.cli …`** или **`poetry shell`**, либо активируйте `.venv\Scripts\Activate.ps1`.
+Используйте **`poetry run python -m tg_jobs_parser.cli …`** или активируйте `.venv`.
+
+---
 
 ## Конфигурация
 
-Основной файл: `config.yaml` (структура соответствует `tg_jobs_parser/config/schema.py`).
+Основной файл: `config.yaml` (схема: `tg_jobs_parser/config/schema.py`).
 
-Специализации и синонимы объединяются с предустановками из схемы; словарь технологий и исключений расширяется через `dictionaries`.
+### Отбор постов (`parser`)
 
-### Отбор постов как вакансий (`parser`)
-
-- **`vacancy_score_threshold`** — минимальный общий счёт правил из `extraction/vacancy_detector.py` (маркеры вакансии, разработческие формулировки, намёки на зарплату, грейд, компания, **email или @**, слова формата remote/office…).
-- **`vacancy_min_substantive_score`** — минимальный счёт **без** бонуса за email/`@username`. Значение **1** и выше отсекает короткие обсуждения, где сработало только упоминание контакта, но нет хотя бы одного другого признака (например зарплаты, офис/hybrid или явного «vacancy»/developer и т.д.).
+- **`vacancy_score_threshold`** — минимальный общий score правил.
+- **`vacancy_min_substantive_score`** — минимум без бонуса за email/@ (отсекает «пустые» контакты).
 
 ### Секция `ai` (опционально)
 
-По умолчанию **`ai.enabled: false`** — работают только эвристики из `extraction/`. При включении каждый пост (до дедупликации) дополнительно разбирается через **OpenRouter**; HTTP-клиент — официальный пакет **[`openai`](https://github.com/openai/openai-python)** (OpenAI-compatible API, тот же протокол, что у OpenRouter).
+По умолчанию **`ai.enabled: false`**. При включении — разбор через **OpenRouter** (OpenAI-compatible SDK).
 
 | Поле | Назначение |
 |------|------------|
-| **`enabled`** | Включить LLM-разбор. |
-| **`mode`** | `assist` — AI уточняет поля поверх rules; `primary` — AI основной источник (rules — fallback при ошибке). |
-| **`model`** | Id основной модели из **`llm_models.yaml`**. |
-| **`fallback_models`** | Запасные id (порядок = приоритет); пусто — `default_fallbacks` из реестра. |
-| **`concurrency`** | Параллельные LLM-запросы. |
-| **`requests_per_minute`** | Темп запросов (пауза между стартами вызовов). |
-| **`stop_llm_when_rate_limited`** | При `X-RateLimit-Remaining: 0` — **отключить LLM** до конца прогона (только rules). |
-| **`max_retries_on_429`** | Повторы при 429. |
-| **`max_completion_tokens`** | Лимит выходных токенов на запрос (`max_tokens` в API). |
-| **`parser.progress_batch_posts`** | Обновление UI / partial JSON каждые N постов. |
-| **`output.save_progress_batches`** | Сохранять `output/partial/partial_*.json` по ходу. |
-| **`max_posts_per_run`** | Лимит LLM-вызовов за прогон (`0` = без лимита). |
-| **`use_cache`** | Дисковый кэш в `.cache/ai_extractions/`. |
-| **`reasoning_enabled`** | Для reasoning-моделей; для стабильного JSON лучше **`false`**. |
+| `enabled` | Включить LLM |
+| `mode` | `assist` / `primary` |
+| `model` | Id из `llm_models.yaml` |
+| `fallback_models` | Запасные модели |
+| `concurrency`, `requests_per_minute` | Темп и параллелизм |
+| `stop_llm_when_rate_limited` | Отключить LLM при 429 до конца прогона |
+| `max_completion_tokens` | Лимит выходных токенов |
+| `use_cache` | Дисковый кэш `.cache/ai_extractions/` |
 
-Подробный план и архитектура: **`zaddai.md`**.
+Ключ в `.env`: `OPENROUTER_API_KEY=sk-or-v1-...`
 
-#### Что извлекает AI (RU + EN)
+В UI и в `run_params` доступен блок **`ai_stats`**: вызовы, кэш, токены, **стоимость USD** (input / output / total).
 
-Приоритет полей: **зарплата**, **валюта**, **специализация** (в т.ч. новые роли, не только словарь конфига), **формат работы**, **локация**, **ссылки на отклик** (`application_urls` — hh.ru, careers и т.д.).
+> **Приватность:** текст постов уходит на серверы OpenRouter/провайдера модели.
 
-Посты «резюме / курсы / не вакансия» отсекаются флагом **`is_job_post`** и не попадают в выдачу.
+### `work_formats` в фильтрах
 
-#### Подготовка OpenRouter
+`remote`, `hybrid`, `office`, `relocation`, **`any`**, **`exclude_office`**.
 
-1. Ключ: [https://openrouter.ai/keys](https://openrouter.ai/keys) → в `.env`:
+---
 
-```env
-OPENROUTER_API_KEY=sk-or-v1-...
-```
-
-2. Установите extra с OpenAI SDK:
-
-```powershell
-poetry install --extras ai
-```
-
-3. Каталог моделей — **`llm_models.yaml`** (id, название, цена). В `config.yaml` — только выбор id:
-
-```yaml
-ai:
-  enabled: true
-  model: deepseek/deepseek-v4-flash
-```
-
-4. Запуск:
-
-```powershell
-poetry run python -m tg_jobs_parser.cli parse --ai
-```
-
-В Streamlit: sidebar → **«Использовать LLM для разбора текста»**.
-
-В JSON-отчёте (`run_params`) появляется блок **`ai_stats`**: число вызовов, кэш, отсечённые не-вакансии, токены.
-
-> **Приватность:** текст постов уходит на серверы OpenRouter/провайдера модели. Для полностью локального разбора — см. roadmap в `zaddai.md` (Ollama, итерация 2).
-
-#### Лимиты API
-
-При **429** / `X-RateLimit-Remaining: 0` срабатывает `stop_llm_when_rate_limited` — LLM отключается до конца прогона (дальше rules). Темп задаётся `requests_per_minute` и `concurrency`. Повторный прогон с **`use_cache: true`** не вызывает API для уже разобранных постов.
-
-#### OpenAI SDK vs «голый» httpx
-
-Используется **OpenAI SDK**, потому что OpenRouter совместим с OpenAI API: меньше своего кода, встроенные retries и таймауты, нативный `response_format` для JSON. Пакет `httpx` остаётся в проекте для других задач (Telethon/web), но LLM-вызовы идут через `openai`.
-
-## CLI
-
-Из корня проекта (рядом с `config.yaml`). Предпочтительно (**без предупреждения runpy**):
+## CLI (legacy / отладка)
 
 ```powershell
 python -m tg_jobs_parser.cli parse --config config.yaml
 python -m tg_jobs_parser.cli parse --ai
 python -m tg_jobs_parser.cli analyze --from-json output/vacancies.json
 python -m tg_jobs_parser.cli export --from-json output/vacancies.json --out reexport.xlsx
-python -m tg_jobs_parser.cli run-web
+python -m tg_jobs_parser.cli run-web    # Streamlit
 ```
 
-Вариант ``python -m tg_jobs_parser.cli.app ...`` тоже работает, но может выдать ``RuntimeWarning`` при старте.
+Короткая команда после `poetry install`: `poetry run tg-jobs-parser parse`
 
-После `poetry install` доступна короткая команда:
+Логи: консоль + `logs/app.log`.
 
-```powershell
-poetry run tg-jobs-parser parse --config config.yaml
-```
+---
 
-Логи: консоль + `logs/app.log` (прогресс LLM: `AI LLM: 100/1500 — @channel [запрос API]`).
+## Streamlit UI (legacy)
 
-### Параметры `work_formats` в конфиге
-
-Значения: `remote`, `hybrid`, `office`, `relocation`, **`any`** (нет фильтра), **`exclude_office`** — отбросить строки с определённым офисным форматом.
-
-## Streamlit UI
-
-Из корня проекта:
+Не целевой интерфейс; оставлен для совместимости.
 
 ```powershell
 streamlit run tg_jobs_parser/web/streamlit_app.py
+# или
+poetry run python -m tg_jobs_parser.cli run-web
 ```
 
-Поддерживается ввод каналов вручную, выбор специализаций/исключений/дат, **опциональный LLM (OpenRouter)**, best-effort поиск каналов (HTML DuckDuckGo), таблица результатов, графики Plotly, скачивание Excel/JSON. После прогона с AI в sidebar показывается сводка `ai_stats`.
+Для повседневной работы используйте **React UI** на http://localhost:5173.
 
-## Результаты
+---
 
-По умолчанию директория `output/`:
+## Результаты и экспорт
 
-- `vacancies.xlsx` — листы `vacancies_all`, `vacancies_unique`, `duplicates`, `metrics_*`.
-- `vacancies.json` — параметры запуска (как сохранены), посты→вакансии, метрики, поле `parse_warnings` (раньше могло быть `web_limitation_warning` в старых файлах).
+- **PostgreSQL** — постоянное хранение уникальных вакансий и журнал прогонов (`parse_runs`).
+- **Экспорт из UI** — `GET /runs/{id}/export.xlsx` и `.json` (листы и метрики как в `exporters/`).
+- **CLI / Streamlit** — по-прежнему пишут в `output/` (`vacancies.xlsx`, `vacancies.json`, `output/charts/`).
 
-Графики **matplotlib** (если включены в CLI без `--skip-charts`): каталог `output/charts/` (или `output/<charts_directory>` из конфига).
+---
 
 ## Тесты
 
@@ -219,22 +265,32 @@ streamlit run tg_jobs_parser/web/streamlit_app.py
 pytest
 ```
 
+В том числе: `tests/test_api_health.py`, `tests/test_upsert_vacancies.py`, тесты ядра extraction/AI.
+
+---
+
 ## Архитектура
 
 ```text
-Telethon → RawPost → extraction/ (rules) → [ai/ OpenRouter] → filters → dedup → export
+[React UI] ──REST/SSE──► [FastAPI backend] ──► parse_runner
+                              │                    │
+                              ▼                    ├── Telethon
+                         PostgreSQL               ├── extraction/ (rules)
+                              ▲                    ├── ai/ (OpenRouter)
+                              │                    ├── filters → dedup
+                         UPSERT vacancies          └── metrics → export
 ```
 
 - **`extraction/`** — быстрые эвристики (всегда).
-- **`ai/`** — опционально: OpenAI SDK → OpenRouter, JSON-схема, кэш, `merge_rules_and_ai`.
-- **`parsers/base.py`** — интерфейс источника; реализация — **Telethon**.
+- **`ai/`** — опционально: OpenRouter, JSON-схема, кэш, `merge_rules_and_ai`.
+- **`backend/`** — API, фоновые прогоны, персистентность.
 
-## Roadmap / следующие шаги
+---
 
-- Расширение **Telethon**: `joinchat`/каналы без `@username`, rate-limit, неинтерактивный вход.
-- Альтернатива **Pyrogram**.
-- **Локальные LLM** (Ollama / LM Studio) через тот же OpenAI-compatible endpoint.
-- **SQLite/PostgreSQL** для хранения прогонов.
-- **Docker**, планировщик задач (Task Scheduler / cron), **бот** для алертов.
-- Расширенный поиск каналов (несколько запросов DuckDuckGo + слияние).
-- **FastAPI + React**-дашборд.
+## Roadmap
+
+- [x] FastAPI + PostgreSQL + React UI + Docker Compose
+- [ ] Alembic-миграции, восстановление прогресса после рестарта backend
+- [ ] Локальные LLM (Ollama) через OpenAI-compatible endpoint
+- [ ] Расширение Telethon: joinchat, rate-limit
+- [ ] JWT / multi-user (сейчас — один локальный оператор, опциональный `API_KEY`)

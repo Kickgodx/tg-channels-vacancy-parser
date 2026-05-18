@@ -1,0 +1,248 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { api } from "../api/client";
+import type { ParseFormState } from "../types/api";
+import { buildRunBody, formFromDefaults } from "../utils/parseForm";
+
+interface Props {
+  onSubmit: (body: ReturnType<typeof buildRunBody>) => void;
+  disabled?: boolean;
+  isSubmitting?: boolean;
+}
+
+export default function ParseForm({ onSubmit, disabled, isSubmitting }: Props) {
+  const defaultsQ = useQuery({ queryKey: ["config-defaults"], queryFn: () => api.getConfigDefaults() });
+  const llmQ = useQuery({ queryKey: ["llm-models"], queryFn: () => api.getLlmModels() });
+
+  const [form, setForm] = useState<ParseFormState | null>(null);
+  const [channelResults, setChannelResults] = useState<{ found: string[]; backend: string } | null>(null);
+
+  useEffect(() => {
+    if (defaultsQ.data && !form) {
+      setForm(formFromDefaults(defaultsQ.data));
+    }
+  }, [defaultsQ.data, form]);
+
+  const channelSearch = useMutation({
+    mutationFn: (q: string) => api.searchChannels(q),
+    onSuccess: (data) => setChannelResults({ found: data.found, backend: data.backend }),
+  });
+
+  if (!form || !defaultsQ.data) {
+    return <p>Загрузка настроек из config.yaml…</p>;
+  }
+
+  const d = defaultsQ.data;
+  const modelOptions = llmQ.data?.models ?? [];
+  const fallbackOpts = modelOptions.filter((m) => m.id !== form.aiModel).map((m) => m.id);
+
+  const patch = (p: Partial<ParseFormState>) => setForm({ ...form, ...p });
+
+  const toggleSpec = (spec: string) => {
+    if (form.specializations.includes(spec)) {
+      patch({ specializations: form.specializations.filter((s) => s !== spec) });
+    } else {
+      patch({ specializations: [...form.specializations, spec] });
+    }
+  };
+
+  const toggleWf = (wf: string) => {
+    if (form.workFormats.includes(wf)) {
+      patch({ workFormats: form.workFormats.filter((w) => w !== wf) });
+    } else {
+      patch({ workFormats: [...form.workFormats, wf] });
+    }
+  };
+
+  return (
+    <div className="parse-form">
+      <section>
+        <h3>Источники</h3>
+        <label className="field">
+          Каналы (по строке или через запятую)
+          <textarea
+            rows={5}
+            value={form.channelsText}
+            onChange={(e) => patch({ channelsText: e.target.value })}
+            placeholder="qa_jobs&#10;python_django_jobs"
+          />
+        </label>
+        <div className="row">
+          <input
+            type="text"
+            value={form.channelSearchQuery}
+            onChange={(e) => patch({ channelSearchQuery: e.target.value })}
+            placeholder="Поиск каналов (DuckDuckGo)"
+            style={{ flex: 1 }}
+          />
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => channelSearch.mutate(form.channelSearchQuery)}
+            disabled={channelSearch.isPending}
+          >
+            Найти
+          </button>
+        </div>
+        {channelResults && (
+          <p className="caption">
+            Бэкенд: {channelResults.backend}.{" "}
+            {channelResults.found.length
+              ? channelResults.found.join(", ")
+              : "Ссылки t.me не найдены — укажите каналы вручную."}
+          </p>
+        )}
+        <label className="field">
+          Файл сессии Telethon
+          <input
+            value={form.telethonSession}
+            onChange={(e) => patch({ telethonSession: e.target.value })}
+          />
+        </label>
+        <p className="caption">Нужны TELEGRAM_API_ID / TELEGRAM_API_HASH в .env на backend.</p>
+      </section>
+
+      <section>
+        <h3>Фильтры</h3>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={form.anySpecialization}
+            onChange={(e) => patch({ anySpecialization: e.target.checked })}
+          />
+          Любая IT-специализация
+        </label>
+        {!form.anySpecialization && (
+          <div className="chip-grid">
+            {d.specialization_options.map((spec) => (
+              <label key={spec} className="chip">
+                <input
+                  type="checkbox"
+                  checked={form.specializations.includes(spec)}
+                  onChange={() => toggleSpec(spec)}
+                />
+                {spec}
+              </label>
+            ))}
+          </div>
+        )}
+        <label className="field">
+          Исключающие ключевые слова (по строке)
+          <textarea
+            rows={4}
+            value={form.excludeKeywordsText}
+            onChange={(e) => patch({ excludeKeywordsText: e.target.value })}
+          />
+        </label>
+        <div className="row">
+          <label className="field">
+            Дата от
+            <input type="date" value={form.dateFrom} onChange={(e) => patch({ dateFrom: e.target.value })} />
+          </label>
+          <label className="field">
+            Дата до
+            <input type="date" value={form.dateTo} onChange={(e) => patch({ dateTo: e.target.value })} />
+          </label>
+        </div>
+        <label className="field">
+          Страны (через запятую)
+          <input value={form.countriesText} onChange={(e) => patch({ countriesText: e.target.value })} />
+        </label>
+        <label className="field">
+          Города (через запятую)
+          <input value={form.citiesText} onChange={(e) => patch({ citiesText: e.target.value })} />
+        </label>
+        <p className="field-label">Формат работы</p>
+        <div className="chip-grid">
+          {d.work_format_options.map((wf) => (
+            <label key={wf} className="chip">
+              <input type="checkbox" checked={form.workFormats.includes(wf)} onChange={() => toggleWf(wf)} />
+              {wf}
+            </label>
+          ))}
+        </div>
+        <label className="field">
+          Мин. vacancy_score: {form.vacancyScoreThreshold}
+          <input
+            type="range"
+            min={0}
+            max={10}
+            value={form.vacancyScoreThreshold}
+            onChange={(e) => patch({ vacancyScoreThreshold: Number(e.target.value) })}
+          />
+        </label>
+        <label className="field">
+          Мин. содержательных баллов: {form.vacancyMinSubstantive}
+          <input
+            type="range"
+            min={0}
+            max={10}
+            value={form.vacancyMinSubstantive}
+            onChange={(e) => patch({ vacancyMinSubstantive: Number(e.target.value) })}
+          />
+        </label>
+      </section>
+
+      <section>
+        <h3>AI (OpenRouter)</h3>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={form.useAi} onChange={(e) => patch({ useAi: e.target.checked })} />
+          Использовать LLM
+        </label>
+        {form.useAi && (
+          <>
+            <label className="field">
+              Основная модель
+              <select value={form.aiModel} onChange={(e) => patch({ aiModel: e.target.value })}>
+                {modelOptions.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="field-label">Fallback-модели</p>
+            <div className="chip-grid">
+              {fallbackOpts.map((id) => {
+                const label = modelOptions.find((m) => m.id === id)?.label ?? id;
+                return (
+                  <label key={id} className="chip">
+                    <input
+                      type="checkbox"
+                      checked={form.aiFallbacks.includes(id)}
+                      onChange={() => {
+                        if (form.aiFallbacks.includes(id)) {
+                          patch({ aiFallbacks: form.aiFallbacks.filter((x) => x !== id) });
+                        } else {
+                          patch({ aiFallbacks: [...form.aiFallbacks, id] });
+                        }
+                      }}
+                    />
+                    {label}
+                  </label>
+                );
+              })}
+            </div>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={form.ignoreLlmCache}
+                onChange={(e) => patch({ ignoreLlmCache: e.target.checked })}
+              />
+              Не использовать кэш LLM в этом прогоне
+            </label>
+          </>
+        )}
+      </section>
+
+      <button
+        type="button"
+        className="primary"
+        disabled={disabled || isSubmitting}
+        onClick={() => onSubmit(buildRunBody(form, d))}
+      >
+        {isSubmitting ? "Запуск…" : "Запустить парсинг"}
+      </button>
+    </div>
+  );
+}

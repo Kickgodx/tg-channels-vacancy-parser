@@ -239,3 +239,17 @@ def export_excel(
                 _apply_openpyxl_formatting(wb, [meta])
 
     return path
+
+
+def export_excel_bytes(vacancies_unique: list[Vacancy]) -> bytes:
+    """Минимальный Excel для API (лист уникальных вакансий)."""
+    from io import BytesIO
+
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        _vacancies_df(vacancies_unique, include_parse_dedup_columns=False).to_excel(
+            writer, sheet_name="vacancies_unique", index=False
+        )
+        wb = writer.book
+        _apply_openpyxl_formatting(wb, ["vacancies_unique"])
+    return buf.getvalue()
