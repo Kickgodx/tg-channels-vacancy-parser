@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field, field_validator
 
+from tg_jobs_parser.extraction.grade_extractor import normalize_grade
+
 
 class Vacancy(BaseModel):
     """Вакансия, спарсенная из поста Telegram."""
@@ -70,8 +72,4 @@ class Vacancy(BaseModel):
     @field_validator("detected_grade", mode="before")
     @classmethod
     def coerce_grade(cls, v: object) -> str:
-        if v is None:
-            return "unknown"
-        if isinstance(v, str) and not v.strip():
-            return "unknown"
-        return str(v).strip() if isinstance(v, str) else "unknown"
+        return normalize_grade(v)

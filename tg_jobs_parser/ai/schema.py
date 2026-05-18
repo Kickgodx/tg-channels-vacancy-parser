@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 
-_VALID_GRADES = frozenset(
-    {"intern", "junior", "middle", "senior", "lead", "principal", "unknown"}
-)
+from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS, normalize_grade
+
+_VALID_GRADES = frozenset(GRADE_OPTIONS)
 _VALID_WORK_FORMATS = frozenset(
     {"remote", "hybrid", "office", "relocation", "unknown"}
 )
@@ -94,10 +94,7 @@ class VacancyAIExtraction(BaseModel):
     @field_validator("detected_grade", mode="before")
     @classmethod
     def norm_grade(cls, v: object) -> str:
-        if v is None or (isinstance(v, str) and not str(v).strip()):
-            return "unknown"
-        g = str(v).strip().lower()
-        return g if g in _VALID_GRADES else "unknown"
+        return normalize_grade(v)
 
     @field_validator("work_format", mode="before")
     @classmethod

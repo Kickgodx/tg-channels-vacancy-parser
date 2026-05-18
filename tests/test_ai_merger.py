@@ -47,6 +47,28 @@ def test_merge_ai_salary_and_specs():
     assert out.extraction_source == "hybrid"
 
 
+def test_primary_grade_from_ai_not_rules():
+    cfg = AppConfig()
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"})})
+    v = _vacancy(detected_grade="staff")
+    ai = VacancyAIExtraction(
+        is_job_post=True,
+        detected_grade="senior",
+        confidence=0.9,
+    )
+    out = merge_rules_and_ai(v, ai, cfg)
+    assert out.detected_grade == "senior"
+
+
+def test_primary_unknown_grade_not_rules_fallback():
+    cfg = AppConfig()
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"})})
+    v = _vacancy(detected_grade="staff")
+    ai = VacancyAIExtraction(is_job_post=True, detected_grade="unknown", confidence=0.9)
+    out = merge_rules_and_ai(v, ai, cfg)
+    assert out.detected_grade == "unknown"
+
+
 def test_primary_clears_rules_salary_when_ai_null():
     cfg = AppConfig()
     cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"})})

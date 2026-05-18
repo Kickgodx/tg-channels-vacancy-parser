@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 from tg_jobs_parser.config.loader import ConfigLoadError, load_config
 from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
+from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 from tg_jobs_parser.ai.llm_models_registry import load_llm_models_registry, resolve_llm_models_path
 from tg_jobs_parser.ai.models_catalog import catalog_model_ids, label_for_model_id
 from tg_jobs_parser.utils.dates import parse_date, resolve_search_date_to
@@ -66,6 +67,7 @@ def get_config_defaults() -> dict:
         "telegram": {"telethon_session_file": cfg.telegram.telethon_session_file},
         "specialization_options": list(DEFAULT_SPECIALIZATIONS.keys()),
         "work_format_options": WORK_FORMAT_OPTIONS,
+        "grade_options": list(GRADE_OPTIONS),
     }
 
 

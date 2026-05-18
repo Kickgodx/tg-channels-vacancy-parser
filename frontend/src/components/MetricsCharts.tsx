@@ -64,6 +64,10 @@ export default function MetricsCharts({ metrics }: Props) {
     .map(([name, st]) => ({ name, mean: Math.round(st.mean!) }))
     .sort((a, b) => b.mean - a.mean)
     .slice(0, 20);
+  const salaryGrade = Object.entries(metrics.salary_by_grade ?? {})
+    .filter(([, st]) => st.count_with_salary > 0 && st.mean != null)
+    .map(([name, st]) => ({ name, mean: Math.round(st.mean!) }))
+    .sort((a, b) => b.mean - a.mean);
 
   return (
     <div className="charts-grid">
@@ -136,6 +140,21 @@ export default function MetricsCharts({ metrics }: Props) {
           </ResponsiveContainer>
         )}
       </div>
+
+      {salaryGrade.length > 0 && (
+        <div className="card chart-card">
+          <h4>Средняя зарплата по грейдам</h4>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={salaryGrade}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="mean" fill="#7950f2" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       {salarySpec.length > 0 && (
         <div className="card chart-card chart-wide">

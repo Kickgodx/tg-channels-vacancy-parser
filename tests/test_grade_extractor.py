@@ -11,3 +11,15 @@ def test_lead():
 
 def test_unknown_when_no_grade():
     assert extract_grade("просто текст вакансии без ключевых слов грейда") == "unknown"
+
+
+def test_staff_verb_not_grade():
+    text = (
+        "Senior QA Mobile Engineer. We connect IT professionals to staff and grow "
+        "technology teams. hybrid working model."
+    )
+    assert extract_grade(text) == "senior"
+
+
+def test_staff_engineer_title():
+    assert extract_grade("Staff Engineer, platform team") == "staff"

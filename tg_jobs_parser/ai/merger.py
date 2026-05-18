@@ -79,7 +79,10 @@ def merge_rules_and_ai(
     elif specs:
         updates["detected_specializations"] = specs
 
-    if _use_ai("detected_grade") and ai.detected_grade != "unknown":
+    if ai_cfg.mode == "primary":
+        # В primary грейд только от LLM; rules не подставляем при unknown.
+        updates["detected_grade"] = ai.detected_grade
+    elif _use_ai("detected_grade") and ai.detected_grade != "unknown":
         updates["detected_grade"] = ai.detected_grade
 
     for fld, ai_val, rules_val in (

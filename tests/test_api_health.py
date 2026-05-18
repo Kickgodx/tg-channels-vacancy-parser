@@ -106,11 +106,34 @@ def test_vacancy_metrics_aggregated(client: TestClient):
     finally:
         session.close()
 
+    v2 = Vacancy(
+        id="chan-2",
+        source_channel="chan",
+        source_url="https://t.me/s/chan",
+        post_url="https://t.me/chan/2",
+        post_date=datetime(2026, 3, 2, tzinfo=timezone.utc),
+        raw_text="Python backend",
+        cleaned_text="Python backend",
+        detected_specializations=["Python", "Backend"],
+        detected_grade="senior",
+        work_format="remote",
+        detected_salary_avg=300000.0,
+    )
+    session = factory()
+    try:
+        upsert_vacancies(session, [v2], parse_run_id=run_id)
+        session.commit()
+    finally:
+        session.close()
+
     r = client.get("/api/v1/vacancies/metrics")
     assert r.status_code == 200
     body = r.json()
-    assert body["unique_vacancies"] == 1
+    assert body["unique_vacancies"] == 2
     assert body["vacancies_by_grade"].get("middle") == 1
-    assert body["vacancies_by_work_format"].get("remote") == 1
-    assert body["vacancies_by_specialization"].get("Python") == 1
+    assert body["vacancies_by_work_format"].get("remote") == 2
+    assert body["vacancies_by_specialization"].get("Python") == 2
+    assert body["vacancies_by_specialization"].get("Backend") == 1
+    for count in body["vacancies_by_specialization"].values():
+        assert count <= body["unique_vacancies"]
     assert len(body["daily"]) >= 1
