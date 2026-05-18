@@ -28,7 +28,7 @@ def get_config() -> dict:
 
 @router.get("/defaults")
 def get_config_defaults() -> dict:
-    """Значения по умолчанию для формы запуска (как Streamlit sidebar)."""
+    """Значения по умолчанию для формы запуска в React UI."""
     settings = get_settings()
     try:
         cfg = load_config(settings.config_path)

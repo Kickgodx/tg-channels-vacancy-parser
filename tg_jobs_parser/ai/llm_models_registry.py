@@ -111,7 +111,7 @@ def load_llm_model_catalog(
 
 
 def registry_signature(registry_path: Path, registry: LlmModelsRegistry) -> str:
-    """Подпись каталога для сброса виджетов Streamlit."""
+    """Подпись каталога моделей (для инвалидации кэша UI при смене файла)."""
     try:
         mtime_ns = registry_path.stat().st_mtime_ns
     except OSError:

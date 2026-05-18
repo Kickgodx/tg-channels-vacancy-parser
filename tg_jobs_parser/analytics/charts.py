@@ -1,4 +1,4 @@
-"""Построение графиков Matplotlib (файлы) и Plotly (для Streamlit)."""
+"""Построение графиков Matplotlib (PNG в output/charts/)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
-import plotly.express as px
 
 from tg_jobs_parser.models.metrics import MetricsSummary
 
@@ -93,52 +92,3 @@ def save_matplotlib_charts(metrics: MetricsSummary, out_dir: str | Path) -> list
         saved.append(p)
 
     return saved
-
-
-def plotly_spec_bar(metrics: MetricsSummary):
-    if not metrics.vacancies_by_specialization:
-        return None
-    df = pd.DataFrame(
-        list(metrics.vacancies_by_specialization.items()),
-        columns=["specialization", "count"],
-    ).sort_values("count", ascending=False)
-    return px.bar(df.head(30), x="specialization", y="count", title="Вакансии по специализациям")
-
-
-def plotly_grade_bar(metrics: MetricsSummary):
-    if not metrics.vacancies_by_grade:
-        return None
-    df = pd.DataFrame(
-        list(metrics.vacancies_by_grade.items()),
-        columns=["grade", "count"],
-    )
-    return px.bar(df, x="grade", y="count", title="Вакансии по грейдам")
-
-
-def plotly_daily_line(metrics: MetricsSummary):
-    if not metrics.daily:
-        return None
-    df = pd.DataFrame([b.model_dump() for b in metrics.daily])
-    return px.line(df, x="period", y="count", title="Динамика вакансий по дням")
-
-
-def plotly_work_format(metrics: MetricsSummary):
-    if not metrics.vacancies_by_work_format:
-        return None
-    df = pd.DataFrame(
-        list(metrics.vacancies_by_work_format.items()),
-        columns=["format", "count"],
-    )
-    return px.pie(df, names="format", values="count", title="Формат работы")
-
-
-def plotly_salary_by_spec(metrics: MetricsSummary):
-    rows = [
-        {"specialization": s, "mean": st.mean or 0, "median": st.median or 0, "n": st.count_with_salary}
-        for s, st in metrics.salary_by_specialization.items()
-        if st.count_with_salary > 0 and st.mean is not None
-    ]
-    if not rows:
-        return None
-    df = pd.DataFrame(rows).sort_values("mean", ascending=False)
-    return px.bar(df.head(25), x="specialization", y="mean", title="Средняя зарплата по специализациям")
