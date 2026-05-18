@@ -25,13 +25,14 @@ services:
       DATABASE_URL: postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
       CONFIG_PATH: /app/config.yaml
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      PYTHONUNBUFFERED: "1"
+      LOG_DIR: ""
     env_file:
       - .env
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
       - ./sessions:/app/sessions
-      - ./.cache:/app/.cache
       - ./output:/app/output
     depends_on:
       postgres:

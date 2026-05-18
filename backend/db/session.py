@@ -30,7 +30,11 @@ def get_engine():
         connect_args = {}
         if url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
-        _engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
+        pool_kw: dict = {"pool_pre_ping": True}
+        if url.startswith("postgresql"):
+            pool_kw["pool_size"] = 10
+            pool_kw["max_overflow"] = 20
+        _engine = create_engine(url, connect_args=connect_args, **pool_kw)
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
     return _engine
 
@@ -42,7 +46,9 @@ def get_session_factory() -> sessionmaker[Session]:
 
 
 def init_db() -> None:
-    Base.metadata.create_all(bind=get_engine())
+    from backend.db.migrate import init_schema
+
+    init_schema()
 
 
 @contextmanager

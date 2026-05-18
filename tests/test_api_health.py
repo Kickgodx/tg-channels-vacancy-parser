@@ -76,6 +76,20 @@ def test_vacancy_metrics_empty(client: TestClient):
     assert body["daily"] == []
 
 
+def test_ai_cache_clear_empty(client: TestClient):
+    r = client.post("/api/v1/ai-cache/clear")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["deleted"] == 0
+    assert body["remaining"] == 0
+
+
+def test_ai_cache_stats(client: TestClient):
+    r = client.get("/api/v1/ai-cache/stats")
+    assert r.status_code == 200
+    assert r.json()["count"] == 0
+
+
 def test_vacancy_metrics_aggregated(client: TestClient):
     import uuid
     from datetime import datetime, timezone

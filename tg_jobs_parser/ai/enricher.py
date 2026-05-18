@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from tg_jobs_parser.ai.cache import AIExtractionCache
 from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
@@ -114,10 +113,7 @@ class AIEnrichmentService:
         self._ai = config.ai
         self._context = build_search_context(config)
         self._client = OpenRouterClient(self._ai)
-        self._cache = AIExtractionCache(
-            Path(self._ai.cache_path),
-            enabled=self._ai.use_cache,
-        )
+        self._cache = AIExtractionCache(self._ai)
         self.stats = RunAIStats()
         self._progress_total: int = 0
         self._progress_done: int = 0
@@ -227,7 +223,7 @@ class AIEnrichmentService:
             )
             self._cache.put(
                 text=text,
-                model=cache_model,
+                model=self._ai.model,
                 prompt_version=self._ai.prompt_version,
                 mode=self._ai.mode,
                 extraction=extraction,

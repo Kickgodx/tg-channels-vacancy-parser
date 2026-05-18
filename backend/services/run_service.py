@@ -54,9 +54,21 @@ def cancel_run(run_id: uuid.UUID) -> bool:
 
 
 def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
+    from tg_jobs_parser.utils.logger import setup_logging
+
+    setup_logging()
+
     active = run_registry.get(run_id)
     if active is None:
         return
+
+    _LOG.info(
+        "Прогон %s: старт worker, AI=%s, кэш=%s (%s).",
+        run_id,
+        config.ai.enabled,
+        config.ai.use_cache if config.ai.enabled else "—",
+        config.ai.cache_backend if config.ai.enabled else "—",
+    )
 
     def on_progress(snap: ParseProgressSnapshot) -> None:
         active.last_progress = snap

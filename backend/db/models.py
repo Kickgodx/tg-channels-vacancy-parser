@@ -53,14 +53,14 @@ class VacancyRow(Base):
     salary_currency: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     work_format: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    country: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    city: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(256), nullable=True)
     company: Mapped[str | None] = mapped_column(String(256), nullable=True)
     contact: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     technologies: Mapped[list[str]] = mapped_column(JSON, default=list)
-    required_experience: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    employment_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    required_experience: Mapped[str | None] = mapped_column(Text, nullable=True)
+    employment_type: Mapped[str | None] = mapped_column(String(256), nullable=True)
     application_urls: Mapped[list[str]] = mapped_column(JSON, default=list)
 
     extraction_source: Mapped[str] = mapped_column(String(16), default="rules")
@@ -78,4 +78,23 @@ class VacancyRow(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, server_default=func.now()
+    )
+
+
+class AIExtractionCacheRow(Base):
+    """Кэш ответов LLM (ключ = sha256 текста + model + prompt_version + mode)."""
+
+    __tablename__ = "ai_extraction_cache"
+
+    cache_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
     )

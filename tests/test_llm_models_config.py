@@ -19,10 +19,16 @@ def test_llm_models_yaml_exists_and_has_gemini():
 
 
 def test_config_loads_catalog_from_registry():
+    reg_path = resolve_llm_models_path("config.yaml")
+    reg = load_llm_models_registry(reg_path)
     cfg = load_config("config.yaml")
+
     assert len(cfg.llm_model_catalog) >= 3
-    assert cfg.ai.model == "deepseek/deepseek-v4-flash"
-    assert cfg.ai.model in {m.id for m in cfg.llm_model_catalog}
+    catalog_ids = {m.id for m in cfg.llm_model_catalog}
+    assert catalog_ids == reg.ids()
+    assert cfg.ai.model in catalog_ids
+    # config.yaml задаёт ai.model явно (сейчас совпадает с default_model реестра)
+    assert cfg.ai.model == reg.default_model
     label = label_for_model_id(cfg.llm_model_catalog, "google/gemini-3.1-flash-lite")
     assert "Gemini" in label
 

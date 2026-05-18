@@ -67,6 +67,23 @@ button.secondary,
   background: #868e96;
 }
 
+button.secondary.danger {
+  background: #c92a2a;
+}
+
+button.secondary.danger:hover:not(:disabled) {
+  background: #a61e1e;
+}
+
+.muted {
+  color: #868e96;
+  font-size: 0.9rem;
+}
+
+.success {
+  color: #2b8a3e;
+}
+
 button.primary {
   background: #3b5bdb;
   font-weight: 600;

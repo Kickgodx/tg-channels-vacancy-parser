@@ -105,6 +105,23 @@ uvicorn backend.main:app --reload --port 8000
 | `GET` | `/runs/{id}/vacancies` | Вакансии прогона (`sort_by`, `sort_order`) |
 | `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта |
 | `GET` | `/vacancies` | Глобальный список вакансий (фильтры, сортировка, пагинация) |
+| `GET` | `/ai-cache/stats` | Число записей в кэше LLM |
+| `POST` | `/ai-cache/clear` | Полная очистка кэша LLM |
+
+Кэш ответов LLM хранится в PostgreSQL (`ai_extraction_cache`). Параметры в `config.yaml`: `ai.cache_backend: postgres`, `ai.cache_ttl_days` (0 — без срока, иначе дни). Очистка — кнопка на странице **Запуск** или `POST /ai-cache/clear`.
+
+### Схема БД (MVP)
+
+Одна миграция: `alembic/versions/001_initial_schema.py`. При старте backend применяет `upgrade head`.
+
+**Если меняете колонки/таблицы** — правьте `001_initial_schema.py` и модели в `backend/db/models.py`, затем пересоздайте Postgres:
+
+```powershell
+docker compose down -v
+docker compose up --build
+```
+
+Флаг `-v` удаляет volume `pgdata` (все прогоны и вакансии). Для MVP так проще, чем цепочка миграций.
 
 Ядро парсинга (`tg_jobs_parser.parse_runner`) вызывается из `backend/services/run_service.py`; результаты пишутся в PostgreSQL (UPSERT по `id` вакансии).
 
@@ -122,8 +139,9 @@ tg_jobs_parser/
   Dockerfile.backend
 
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
-    api/routes/            — health, config, channels, runs, vacancies
-    db/                    — модели, репозиторий, UPSERT вакансий
+    api/routes/            — health, config, channels, runs, vacancies, ai-cache
+    db/                    — модели, Alembic, репозиторий, кэш LLM, UPSERT
+  alembic/                 — миграции SQL
     services/              — run_service, progress_bus, registry
 
   frontend/                — React UI (Vite)

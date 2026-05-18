@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -12,7 +13,12 @@ def setup_logging(log_dir: str | Path | None = "logs", level: int = logging.INFO
     Корневой логгер приложения.
 
     Если ``log_dir`` задан — пишется ``app.log``. Иначе только консоль.
+    ``LOG_DIR`` из env: пустая строка — только stdout (удобно для Docker).
     """
+    env_log_dir = os.environ.get("LOG_DIR")
+    if env_log_dir is not None:
+        log_dir = env_log_dir.strip() or None
+
     root = logging.getLogger()
     root.handlers.clear()
     root.setLevel(level)
@@ -29,6 +35,12 @@ def setup_logging(log_dir: str | Path | None = "logs", level: int = logging.INFO
         fh = logging.FileHandler(p / "app.log", encoding="utf-8")
         fh.setFormatter(formatter)
         root.addHandler(fh)
+
+    for name in ("tg_jobs_parser", "backend"):
+        logging.getLogger(name).setLevel(level)
+
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> logging.Logger:

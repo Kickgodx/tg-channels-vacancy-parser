@@ -63,6 +63,8 @@ def get_config_defaults() -> dict:
             "model": cfg.ai.model,
             "fallback_models": list(cfg.ai.fallback_models or []),
             "use_cache": cfg.ai.use_cache,
+            "cache_backend": cfg.ai.cache_backend,
+            "cache_ttl_days": cfg.ai.cache_ttl_days,
         },
         "telegram": {"telethon_session_file": cfg.telegram.telethon_session_file},
         "specialization_options": list(DEFAULT_SPECIALIZATIONS.keys()),
