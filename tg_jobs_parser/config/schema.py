@@ -180,6 +180,15 @@ class AiConfig(BaseModel):
     use_few_shot: bool = False
     prompt_version: str = "v1"
     use_cache: bool = True
+    cache_backend: str = Field(
+        default="postgres",
+        description="postgres — таблица ai_extraction_cache; file — локальные JSON.",
+    )
+    cache_ttl_days: int = Field(
+        default=90,
+        ge=0,
+        description="Срок жизни записи кэша в днях; 0 — без срока (только ручная очистка).",
+    )
     cache_path: str = ".cache/ai_extractions"
     request_timeout_seconds: float = 90.0
     max_completion_tokens: int = Field(
@@ -218,6 +227,14 @@ class AiConfig(BaseModel):
         if v not in allowed:
             raise ValueError(f"ai.mode must be one of {allowed}")
         return v
+
+    @field_validator("cache_backend")
+    @classmethod
+    def validate_cache_backend(cls, v: str) -> str:
+        normalized = (v or "postgres").strip().lower()
+        if normalized not in {"postgres", "file"}:
+            raise ValueError("ai.cache_backend must be 'postgres' or 'file'")
+        return normalized
 
     def resolved_fallback_models(self) -> list[str]:
         """Запасные модели без дубликатов и без совпадения с ``model``."""

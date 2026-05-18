@@ -92,6 +92,11 @@ export const api = {
 
   cancelRun: (id: string) => request<{ ok: boolean }>(`/runs/${id}/cancel`, { method: "POST" }),
 
+  getAiCacheStats: () => request<{ count: number }>("/ai-cache/stats"),
+
+  clearAiCache: () =>
+    request<{ deleted: number; remaining: number }>("/ai-cache/clear", { method: "POST" }),
+
   listVacancies: (params?: VacancyQueryParams) => {
     const q = new URLSearchParams();
     appendSearchParams(q, params);

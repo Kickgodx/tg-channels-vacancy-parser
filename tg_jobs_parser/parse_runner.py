@@ -395,7 +395,13 @@ def run_parse(
                 )
             logging.getLogger("httpx").setLevel(logging.WARNING)
             logging.getLogger("openai").setLevel(logging.WARNING)
-            _LOG.info("AI-обогащение включено (до дедупликации).")
+            _LOG.info(
+                "AI-обогащение включено (до дедупликации): модель %s, кэш %s (%s), concurrency=%s.",
+                config.ai.model,
+                "вкл" if config.ai.use_cache else "выкл",
+                config.ai.cache_backend,
+                config.ai.concurrency,
+            )
         except Exception as e:
             all_warnings.append(f"AI не запущен: {e}")
             _LOG.error("AI не инициализирован: %s", e)

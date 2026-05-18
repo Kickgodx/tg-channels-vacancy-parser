@@ -6,13 +6,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
 COPY tg_jobs_parser ./tg_jobs_parser
 COPY backend ./backend
+COPY alembic ./alembic
 COPY config.yaml llm_models.yaml ./
 
 RUN pip install --no-cache-dir -e .
 
+ENV PYTHONUNBUFFERED=1
+ENV LOG_DIR=
+
 EXPOSE 8000
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "backend.main"]

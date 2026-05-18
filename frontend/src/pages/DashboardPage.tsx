@@ -28,6 +28,20 @@ export default function DashboardPage() {
     },
   });
 
+  const cacheStats = useQuery({
+    queryKey: ["ai-cache-stats"],
+    queryFn: () => api.getAiCacheStats(),
+    enabled: Boolean(health.data?.database),
+    refetchInterval: 30_000,
+  });
+
+  const clearCache = useMutation({
+    mutationFn: () => api.clearAiCache(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["ai-cache-stats"] });
+    },
+  });
+
   const hasActiveRun = runs.data?.some((r) => r.status === "running" || r.status === "pending");
 
   return (
@@ -44,6 +58,43 @@ export default function DashboardPage() {
             <p className="error">Backend недоступен. Запустите docker compose up.</p>
           ) : (
             <p>Загрузка…</p>
+          )}
+        </div>
+
+        <div className="card">
+          <h2>Кэш LLM</h2>
+          <p className="muted">
+            Ответы модели хранятся в PostgreSQL. TTL задаётся в config.yaml (
+            <code>ai.cache_ttl_days</code>).
+          </p>
+          <p>
+            Записей в кэше: <strong>{cacheStats.data?.count ?? "—"}</strong>
+          </p>
+          <button
+            type="button"
+            className="secondary danger"
+            disabled={!health.data?.database || clearCache.isPending || hasActiveRun}
+            onClick={() => {
+              if (
+                !window.confirm(
+                  "Удалить все записи кэша LLM? Следующий прогон снова вызовет API для всех постов.",
+                )
+              ) {
+                return;
+              }
+              clearCache.mutate();
+            }}
+          >
+            {clearCache.isPending ? "Очистка…" : "Очистить кэш LLM"}
+          </button>
+          {hasActiveRun && (
+            <p className="warning">Очистка недоступна во время активного прогона.</p>
+          )}
+          {clearCache.error && <p className="error">{(clearCache.error as Error).message}</p>}
+          {clearCache.isSuccess && (
+            <p className="success">
+              Удалено записей: {clearCache.data.deleted}, осталось: {clearCache.data.remaining}
+            </p>
           )}
         </div>
 
