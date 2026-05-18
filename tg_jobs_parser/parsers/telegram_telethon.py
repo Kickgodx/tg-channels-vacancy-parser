@@ -158,7 +158,11 @@ class TelegramTelethonParser(BaseChannelParser):
                 concurrency,
             )
 
+            cancel = self.cancellation
+
             async def _one(u: str) -> tuple[str, list[RawPost], str | None]:
+                if cancel and cancel.is_cancelled():
+                    return u, [], "Прервано (отмена)."
                 async with sem:
                     try:
                         posts, warn = await self._iter_channel(client, u)
@@ -168,7 +172,12 @@ class TelegramTelethonParser(BaseChannelParser):
                         return u, [], f"@{u}: Telethon — {e}"
 
             tasks = [asyncio.create_task(_one(u)) for u in usernames]
-            return list(await asyncio.gather(*tasks))
+            try:
+                return list(await asyncio.gather(*tasks))
+            finally:
+                if cancel and cancel.is_cancelled():
+                    for t in tasks:
+                        t.cancel()
         finally:
             await _disconnect_client(client)
 
@@ -205,7 +214,11 @@ class TelegramTelethonParser(BaseChannelParser):
         scanned = 0
         posts: list[RawPost] = []
 
+        cancel = self.cancellation
         async for msg in client.iter_messages(username, limit=iter_limit):
+            if cancel and cancel.is_cancelled():
+                _LOG.warning("Telethon @%s: обход прерван (отмена).", username)
+                break
             scanned += 1
             if scanned > max_scan:
                 _LOG.warning(

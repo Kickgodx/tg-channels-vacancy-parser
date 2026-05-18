@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import TYPE_CHECKING
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +26,11 @@ from tg_jobs_parser.extraction.vacancy_detector import compute_vacancy_score
 from tg_jobs_parser.filters.vacancy_filters import apply_post_filters
 from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.parse_cancel import (
+    ParseCancellationToken,
+    ParseCancelled,
+    install_sigint_cancel_handler,
+)
 from tg_jobs_parser.parse_progress import (
     ParseProgressCallback,
     ParseProgressSnapshot,
@@ -46,7 +51,11 @@ if TYPE_CHECKING:
 _LOG = get_logger(__name__)
 
 
-def _channel_parser(config: AppConfig) -> BaseChannelParser:
+def _channel_parser(
+    config: AppConfig,
+    *,
+    cancellation: ParseCancellationToken | None = None,
+) -> BaseChannelParser:
     """Единственный источник сообщений — Telethon (MTProto с файлом сессии)."""
     from tg_jobs_parser.parsers.telegram_telethon import TelegramTelethonParser, telethon_import_error
 
@@ -55,7 +64,7 @@ def _channel_parser(config: AppConfig) -> BaseChannelParser:
             "Нужен Telethon: poetry install (и при необходимости --extras telethon). "
             "Запускайте через poetry run python -m tg_jobs_parser.cli …"
         ) from err
-    return TelegramTelethonParser(config)
+    return TelegramTelethonParser(config, cancellation=cancellation)
 
 
 def _extract_employment(text: str) -> str | None:
@@ -166,12 +175,95 @@ def raw_post_to_vacancy(
     )
 
 
+def _build_parse_result(
+    *,
+    config: AppConfig,
+    cli_overrides: dict | None,
+    all_warnings: list[str],
+    posts_fetched: int,
+    candidates: list[Vacancy],
+    ai_service: AIEnrichmentService | None,
+) -> ParseResult:
+    dedup_started = time.monotonic()
+    unique, dups = deduplicate_vacancies(candidates, config)
+    _LOG.info(
+        "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
+        len(unique),
+        len(dups),
+        time.monotonic() - dedup_started,
+    )
+
+    sort_vacancies_for_report(candidates)
+    sort_vacancies_for_report(unique)
+    sort_vacancies_for_report(dups)
+
+    metrics = build_metrics(
+        vacancies_all=candidates,
+        vacancies_unique=unique,
+        duplicates=dups,
+        posts_collected=posts_fetched,
+    )
+    metrics.warnings.extend(all_warnings)
+
+    run_params = config.to_serializable_dict()
+    if ai_service is not None:
+        run_params["ai_stats"] = ai_service.stats.to_dict(
+            catalog=config.llm_model_catalog,
+            primary_model=config.ai.model,
+        )
+    if cli_overrides:
+        run_params["cli_overrides"] = cli_overrides
+
+    parse_warnings = "; ".join(all_warnings) if all_warnings else None
+
+    return ParseResult(
+        run_params=run_params,
+        posts_fetched=posts_fetched,
+        parse_warnings=parse_warnings,
+        vacancies_all=candidates,
+        vacancies_unique=unique,
+        duplicates=dups,
+        metrics=metrics,
+    )
+
+
+def _process_posts_parallel(
+    all_posts: list[RawPost],
+    *,
+    workers: int,
+    pool_cls: type[ThreadPoolExecutor],
+    process_one,
+    cancel: ParseCancellationToken | None,
+    batch_step: int,
+    emit_progress,
+):
+    """Параллельная пост-обработка с проверкой отмены между завершёнными задачами."""
+    processed = 0
+    with pool_cls(max_workers=workers, thread_name_prefix="post-proc") as ex:
+        futures = {ex.submit(process_one, post): post for post in all_posts}
+        pending = set(futures.keys())
+        while pending:
+            if cancel and cancel.is_cancelled():
+                for fut in pending:
+                    fut.cancel()
+                ex.shutdown(wait=False, cancel_futures=True)
+                raise ParseCancelled()
+            done, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
+            for fut in done:
+                processed += 1
+                v = fut.result()
+                yield processed, v
+                if processed % batch_step == 0 or processed == len(all_posts):
+                    emit_progress(processed)
+
+
 def run_parse(
     config: AppConfig,
     cli_overrides: dict | None = None,
     *,
     progress_callback: ParseProgressCallback | None = None,
     progress_every_n_posts: int | None = None,
+    cancel: ParseCancellationToken | None = None,
 ) -> ParseResult:
     """
     Основной сценарий MVP.
@@ -180,7 +272,10 @@ def run_parse(
     """
     try_load_dotenv()
 
-    channel_fetcher = _channel_parser(config)
+    if cancel is not None:
+        install_sigint_cancel_handler(cancel, log=_LOG.warning)
+
+    channel_fetcher = _channel_parser(config, cancellation=cancel)
 
     date_from = parse_date(config.search.date_from)
     date_to = resolve_search_date_to(config.search.date_to)
@@ -240,7 +335,23 @@ def run_parse(
     # Результат — список (username, posts, warning) в произвольном порядке: пост-обработка и так
     # сортирует выдачу по дате, поэтому порядок каналов значения не имеет.
     fetch_started = time.monotonic()
-    fetch_results = channel_fetcher.fetch_posts_many(channels_unique)
+    try:
+        if cancel:
+            cancel.check()
+        fetch_results = channel_fetcher.fetch_posts_many(channels_unique)
+        if cancel:
+            cancel.check()
+    except ParseCancelled:
+        _LOG.warning("Выборка прервана до завершения обхода каналов.")
+        all_warnings.append("Прогон прерван пользователем во время выборки постов.")
+        return _build_parse_result(
+            config=config,
+            cli_overrides=cli_overrides,
+            all_warnings=all_warnings,
+            posts_fetched=0,
+            candidates=[],
+            ai_service=None,
+        )
     fetch_elapsed = time.monotonic() - fetch_started
 
     all_posts: list[RawPost] = []
@@ -284,11 +395,15 @@ def run_parse(
     try:
 
         def _process_one(post: RawPost) -> Vacancy | None:
+            if cancel and cancel.is_cancelled():
+                return None
             v = raw_post_to_vacancy_rules(
                 post, config, spec_map=specs_map, tech_list=tech_list, wf_map=wf_map
             )
             if ai_service is not None:
-                v = ai_service.enrich(v)
+                if cancel and cancel.is_cancelled():
+                    return None
+                v = ai_service.enrich(v, cancel=cancel)
                 if v is None:
                     return None
             elif v.vacancy_score < threshold:
@@ -329,6 +444,8 @@ def run_parse(
         process_started = time.monotonic()
         if len(all_posts) < 200 and ai_service is None:
             for i, post in enumerate(all_posts, 1):
+                if cancel:
+                    cancel.check()
                 v = _process_one(post)
                 if v is not None:
                     candidates.append(v)
@@ -349,20 +466,24 @@ def run_parse(
                 workers,
                 label,
             )
-            with pool_cls(max_workers=workers, thread_name_prefix="post-proc") as ex:
-                chunksize = max(8, len(all_posts) // (workers * 8) or 8)
-                for i, v in enumerate(ex.map(_process_one, all_posts, chunksize=chunksize), 1):
-                    if v is not None:
-                        candidates.append(v)
-                    if i % batch_step == 0 or i == len(all_posts):
-                        _emit_progress(i)
-                    if i % 500 == 0:
-                        _LOG.info(
-                            "Обработано постов: %s/%s; прошло вакансий: %s",
-                            i,
-                            len(all_posts),
-                            len(candidates),
-                        )
+            for i, v in _process_posts_parallel(
+                all_posts,
+                workers=workers,
+                pool_cls=pool_cls,
+                process_one=_process_one,
+                cancel=cancel,
+                batch_step=batch_step,
+                emit_progress=_emit_progress,
+            ):
+                if v is not None:
+                    candidates.append(v)
+                if i % 500 == 0:
+                    _LOG.info(
+                        "Обработано постов: %s/%s; прошло вакансий: %s",
+                        i,
+                        len(all_posts),
+                        len(candidates),
+                    )
 
         process_elapsed = time.monotonic() - process_started
         _emit_progress(len(all_posts), phase="post_processing_done")
@@ -386,48 +507,28 @@ def run_parse(
             len(candidates),
         )
 
-        dedup_started = time.monotonic()
-        unique, dups = deduplicate_vacancies(candidates, config)
-        _LOG.info(
-            "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
-            len(unique),
-            len(dups),
-            time.monotonic() - dedup_started,
-        )
-
-        sort_vacancies_for_report(candidates)
-        sort_vacancies_for_report(unique)
-        sort_vacancies_for_report(dups)
-
-        metrics = build_metrics(
-            vacancies_all=candidates,
-            vacancies_unique=unique,
-            duplicates=dups,
-            posts_collected=posts_fetched,
-        )
-        metrics.warnings.extend(all_warnings)
-
-        run_params = config.to_serializable_dict()
-        if ai_service is not None:
-            run_params["ai_stats"] = ai_service.stats.to_dict(
-                catalog=config.llm_model_catalog,
-                primary_model=config.ai.model,
-            )
-        if cli_overrides:
-            run_params["cli_overrides"] = cli_overrides
-
-        parse_warnings = "; ".join(all_warnings) if all_warnings else None
-
-        return ParseResult(
-            run_params=run_params,
+        return _build_parse_result(
+            config=config,
+            cli_overrides=cli_overrides,
+            all_warnings=all_warnings,
             posts_fetched=posts_fetched,
-            parse_warnings=parse_warnings,
-            vacancies_all=candidates,
-            vacancies_unique=unique,
-            duplicates=dups,
-            metrics=metrics,
+            candidates=candidates,
+            ai_service=ai_service,
+        )
+    except ParseCancelled:
+        _LOG.warning("Прогон прерван (отмена).")
+        all_warnings.append("Прогон прерван пользователем.")
+        return _build_parse_result(
+            config=config,
+            cli_overrides=cli_overrides,
+            all_warnings=all_warnings,
+            posts_fetched=posts_fetched,
+            candidates=candidates,
+            ai_service=ai_service,
         )
     except KeyboardInterrupt:
+        if cancel is not None:
+            cancel.request_cancel()
         _LOG.warning("Прогон прерван (Ctrl+C).")
         raise
     finally:

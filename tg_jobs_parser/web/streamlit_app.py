@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from datetime import date
 from pathlib import Path
 
@@ -53,12 +55,17 @@ _AI_PRIMARY_MODEL_KEY = "ai_primary_model"
 _AI_FALLBACK_MODELS_KEY = "ai_fallback_models"
 _USE_AI_KEY = "use_ai_llm"
 _IGNORE_LLM_CACHE_KEY = "ignore_llm_cache_run"
+_PARSE_JOB_KEY = "parse_job"
+_PARSE_SYNCED_KEY = "parse_job_synced"
+_PARSE_UI_ERROR_KEY = "parse_ui_error"
 from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.exporters.excel_exporter import export_excel
 from tg_jobs_parser.exporters.json_exporter import export_json
 from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.parse_cancel import ParseCancellationToken
 from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 from tg_jobs_parser.parse_runner import run_parse
+from tg_jobs_parser.web.parse_job import ParseJobState
 from tg_jobs_parser.utils.dates import parse_date, resolve_search_date_to
 from tg_jobs_parser.utils.logger import setup_logging
 from tg_jobs_parser.utils.text import post_id_display
@@ -551,6 +558,72 @@ def rebuild_config_inline() -> "AppConfig":
 
 tab_run, tab_results = st.tabs(["Запуск", "Последний результат"])
 
+def _export_parse_result_to_disk(cfg_inline: object, result: object) -> tuple[Path, Path]:
+    from tg_jobs_parser.config.schema import AppConfig
+
+    assert isinstance(cfg_inline, AppConfig)
+    out_dir = Path(cfg_inline.output.directory)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    xlsx_path = out_dir / cfg_inline.output.excel_filename
+    json_path = out_dir / cfg_inline.output.json_filename
+    export_excel(
+        xlsx_path,
+        result.vacancies_all,
+        result.vacancies_unique,
+        result.duplicates,
+        result.metrics,
+    )
+    export_json(result, json_path)
+    return xlsx_path, json_path
+
+
+def _sync_finished_job_to_session(job: ParseJobState) -> None:
+    """Один раз переносит результат worker → ``session_state`` (только главный поток)."""
+    running, _progress, result, error, ui_message, xlsx_path, json_path = job.snapshot()
+    if running:
+        return
+    if result is not None:
+        st.session_state["last_result"] = result
+    if error:
+        st.session_state[_PARSE_UI_ERROR_KEY] = error
+    elif ui_message:
+        st.session_state[_PARSE_UI_ERROR_KEY] = ui_message
+    else:
+        st.session_state.pop(_PARSE_UI_ERROR_KEY, None)
+    if xlsx_path is not None and xlsx_path.is_file():
+        st.session_state["download_xlsx_bytes"] = xlsx_path.read_bytes()
+    if json_path is not None and json_path.is_file():
+        st.session_state["download_json_text"] = json_path.read_text(encoding="utf-8")
+    st.session_state[_PARSE_SYNCED_KEY] = True
+
+
+def _start_parse_worker(job: ParseJobState, cfg_inline: object) -> None:
+    def _on_progress(snap: ParseProgressSnapshot) -> None:
+        job.set_progress(snap)
+
+    try:
+        result = run_parse(
+            cfg_inline,
+            cli_overrides={"ui": True},
+            progress_callback=_on_progress,
+            cancel=job.cancel_token,
+        )
+        xlsx_path, json_path = _export_parse_result_to_disk(cfg_inline, result)
+        ui_message = None
+        if result.parse_warnings and "прерван" in result.parse_warnings.lower():
+            ui_message = (
+                "Парсинг отменён. Ниже — частичный результат (уже обработанные посты)."
+            )
+        job.finish_success(
+            result,
+            xlsx_path=xlsx_path,
+            json_path=json_path,
+            ui_message=ui_message,
+        )
+    except Exception as e:
+        job.finish_error(str(e))
+
+
 with tab_run:
     st.subheader("Прогресс в реальном времени")
     live_progress = st.progress(0.0, text="Нажмите «Запустить парсинг»")
@@ -558,9 +631,28 @@ with tab_run:
     live_table = st.empty()
     live_partial = st.empty()
 
-    # Виджеты (multiselect колонок и др.) вызывают полный rerun скрипта; результат должен жить
-    # вне «if st.button», иначе после любого изменения таблица пропадает (кнопка в новом прогоне False).
-    if st.button("Запустить парсинг", type="primary"):
+    job: ParseJobState | None = st.session_state.get(_PARSE_JOB_KEY)
+    if isinstance(job, ParseJobState):
+        job.mark_finished_if_thread_dead()
+    parse_running = bool(job and job.is_running())
+    btn_col_start, btn_col_stop = st.columns([1, 1])
+    with btn_col_start:
+        start_clicked = st.button(
+            "Запустить парсинг",
+            type="primary",
+            disabled=parse_running,
+        )
+    with btn_col_stop:
+        cancel_clicked = st.button(
+            "Отменить парсинг",
+            disabled=not parse_running,
+        )
+
+    if cancel_clicked and job is not None:
+        job.cancel_token.request_cancel()
+        live_status.warning("Остановка… дождитесь завершения текущих задач.")
+
+    if start_clicked and not parse_running:
         try:
             cfg_inline = rebuild_config_inline()
         except ConfigLoadError as e:
@@ -570,7 +662,29 @@ with tab_run:
             st.exception(e)
             st.stop()
 
-        def _on_progress(snap: ParseProgressSnapshot) -> None:
+        cancel_token = ParseCancellationToken()
+        job = ParseJobState(cancel_token=cancel_token)
+        st.session_state[_PARSE_JOB_KEY] = job
+        st.session_state.pop(_PARSE_SYNCED_KEY, None)
+        st.session_state.pop(_PARSE_UI_ERROR_KEY, None)
+
+        thread = threading.Thread(
+            target=_start_parse_worker,
+            args=(job, cfg_inline),
+            name="streamlit-parse",
+            daemon=True,
+        )
+        job.thread = thread
+        thread.start()
+        st.rerun()
+
+    if job is not None and not job.is_running() and not st.session_state.get(_PARSE_SYNCED_KEY):
+        _sync_finished_job_to_session(job)
+        st.rerun()
+
+    if parse_running and job is not None:
+        _running, snap, *_rest = job.snapshot()
+        if isinstance(snap, ParseProgressSnapshot):
             _render_live_progress(
                 snap,
                 progress_bar=live_progress,
@@ -578,28 +692,14 @@ with tab_run:
                 table_box=live_table,
                 partial_caption=live_partial,
             )
+        else:
+            live_status.info("Парсинг запущен…")
+        time.sleep(0.6)
+        st.rerun()
 
-        result = run_parse(
-            cfg_inline,
-            cli_overrides={"ui": True},
-            progress_callback=_on_progress,
-        )
-        st.session_state["last_result"] = result
-
-        out_dir = Path(cfg_inline.output.directory)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        xlsx_path = out_dir / cfg_inline.output.excel_filename
-        json_path = out_dir / cfg_inline.output.json_filename
-        export_excel(
-            xlsx_path,
-            result.vacancies_all,
-            result.vacancies_unique,
-            result.duplicates,
-            result.metrics,
-        )
-        export_json(result, json_path)
-        st.session_state["download_xlsx_bytes"] = xlsx_path.read_bytes()
-        st.session_state["download_json_text"] = json_path.read_text(encoding="utf-8")
+    ui_err = st.session_state.get(_PARSE_UI_ERROR_KEY)
+    if ui_err:
+        st.warning(str(ui_err))
 
     result = st.session_state.get("last_result")
     if result is None:

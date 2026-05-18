@@ -14,6 +14,7 @@ from tg_jobs_parser.ai.merger import merge_rules_and_ai
 from tg_jobs_parser.ai.search_context import SearchContext, build_search_context
 from tg_jobs_parser.ai.token_cost import TokenCostEstimate, estimate_run_cost
 from tg_jobs_parser.config.schema import AppConfig
+from tg_jobs_parser.parse_cancel import ParseCancellationToken, ParseCancelled
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.utils.logger import get_logger
 
@@ -154,8 +155,15 @@ class AIEnrichmentService:
             phase,
         )
 
-    def enrich(self, vacancy: Vacancy) -> Vacancy | None:
+    def enrich(
+        self,
+        vacancy: Vacancy,
+        *,
+        cancel: ParseCancellationToken | None = None,
+    ) -> Vacancy | None:
         """LLM-разбор; None если пост не вакансия или лимит/ошибка с drop."""
+        if cancel and cancel.is_cancelled():
+            raise ParseCancelled()
         if vacancy.vacancy_score < self._ai.skip_if_vacancy_score_below:
             with self.stats._lock:
                 self.stats.skipped_score += 1
@@ -188,6 +196,8 @@ class AIEnrichmentService:
                     self.stats.rate_limit_skipped += 1
                 return vacancy if self._ai.mode == "assist" else None
 
+            if cancel and cancel.is_cancelled():
+                raise ParseCancelled()
             with self.stats._lock:
                 self.stats.calls += 1
             self._log_llm_progress(vacancy, phase="запрос API")
