@@ -102,6 +102,11 @@ button:disabled {
   color: #e67700;
 }
 
+.run-timing-summary {
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.95rem;
+}
+
 .run-warnings {
   margin: 0.5rem 0 0;
   padding-left: 1.25rem;

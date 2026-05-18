@@ -30,7 +30,7 @@ export interface VacancyListResponse {
   page_size: number;
 }
 
-export type VacancyQueryParams = Record<string, string | number | string[]>;
+export type VacancyQueryParams = Record<string, string | number | boolean | string[]>;
 
 function appendSearchParams(q: URLSearchParams, params?: VacancyQueryParams) {
   if (!params) return;

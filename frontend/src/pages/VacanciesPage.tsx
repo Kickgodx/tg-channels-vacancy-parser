@@ -15,6 +15,7 @@ function vacancyFilterParams(
   workFormat: string,
   dateFrom: string,
   dateTo: string,
+  hasSalaryOnly: boolean,
 ): VacancyQueryParams {
   const params: VacancyQueryParams = {};
   if (q) params.q = q;
@@ -24,6 +25,7 @@ function vacancyFilterParams(
   if (workFormat) params.work_format = workFormat;
   if (dateFrom) params.date_from = dateFrom;
   if (dateTo) params.date_to = dateTo;
+  if (hasSalaryOnly) params.has_salary = true;
   return params;
 }
 
@@ -38,13 +40,24 @@ export default function VacanciesPage() {
   const [workFormat, setWorkFormat] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [hasSalaryOnly, setHasSalaryOnly] = useState(false);
   const [sortBy, setSortBy] = useState<VacancySortField>("post_date");
   const [sortOrder, setSortOrder] = useState<VacancySortOrder>("desc");
   const [tab, setTab] = useState<VacanciesTab>("list");
 
   const filterParams = useMemo(
-    () => vacancyFilterParams(q, sourceChannel, grade, specializations, workFormat, dateFrom, dateTo),
-    [q, sourceChannel, grade, specializations, workFormat, dateFrom, dateTo],
+    () =>
+      vacancyFilterParams(
+        q,
+        sourceChannel,
+        grade,
+        specializations,
+        workFormat,
+        dateFrom,
+        dateTo,
+        hasSalaryOnly,
+      ),
+    [q, sourceChannel, grade, specializations, workFormat, dateFrom, dateTo, hasSalaryOnly],
   );
 
   const metricsQ = useQuery({
@@ -118,6 +131,17 @@ export default function VacanciesPage() {
         <label>
           Дата до
           <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} />
+        </label>
+        <label className="checkbox-row filters-salary-only">
+          <input
+            type="checkbox"
+            checked={hasSalaryOnly}
+            onChange={(e) => {
+              setHasSalaryOnly(e.target.checked);
+              setPage(1);
+            }}
+          />
+          Только с указанной зарплатой
         </label>
       </div>
 

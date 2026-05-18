@@ -164,3 +164,35 @@ def test_vacancy_metrics_aggregated(client: TestClient):
     r_metrics = client.get("/api/v1/vacancies/metrics?specialization=Python")
     assert r_metrics.status_code == 200
     assert r_metrics.json()["unique_vacancies"] == 2
+
+    r_salary = client.get("/api/v1/vacancies?has_salary=true")
+    assert r_salary.status_code == 200
+    assert r_salary.json()["total"] == 2
+    assert all(
+        item.get("detected_salary_min") is not None
+        or item.get("detected_salary_max") is not None
+        or item.get("detected_salary_avg") is not None
+        for item in r_salary.json()["items"]
+    )
+
+    no_salary = Vacancy(
+        id="chan-3",
+        source_channel="chan",
+        source_url="https://t.me/s/chan",
+        post_url="https://t.me/chan/3",
+        post_date=datetime(2026, 3, 3, tzinfo=timezone.utc),
+        raw_text="Python dev",
+        cleaned_text="Python dev",
+        detected_specializations=["Python"],
+    )
+    session = factory()
+    try:
+        upsert_vacancies(session, [no_salary], parse_run_id=run_id)
+        session.commit()
+    finally:
+        session.close()
+
+    r_all = client.get("/api/v1/vacancies")
+    assert r_all.json()["total"] == 3
+    r_salary2 = client.get("/api/v1/vacancies?has_salary=true")
+    assert r_salary2.json()["total"] == 2
