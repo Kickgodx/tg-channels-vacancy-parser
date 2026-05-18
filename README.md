@@ -4,9 +4,7 @@
 
 **Основной способ работы** — веб-интерфейс на **React** + **FastAPI** backend + **PostgreSQL** (Docker Compose). Парсинг запускается из UI, прогресс идёт по SSE, вакансии сохраняются в БД.
 
-Также доступны **CLI (Typer)** и **Streamlit** (legacy UI) для локальной отладки и первой авторизации Telethon.
-
-Подробный план архитектуры и миграции: [`zrevise.md`](zrevise.md). Детали AI: [`zaddai.md`](zaddai.md).
+Дополнительно — **CLI (Typer)** для первой авторизации Telethon и отладки без UI.
 
 ---
 
@@ -132,10 +130,9 @@ tg_jobs_parser/
     src/pages/             — Dashboard, Run, Vacancies
     src/components/        — ParseForm, VacancyTable, MetricsCharts
 
-  tg_jobs_parser/          — ядро парсинга (общее для API, CLI, Streamlit)
+  tg_jobs_parser/          — ядро парсинга (общее для API и CLI)
     parse_runner.py
     cli/                   — Typer CLI
-    web/                   — Streamlit (legacy)
     config/                — YAML + Pydantic
     parsers/               — Telethon
     extraction/            — rules
@@ -221,33 +218,20 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 
 ---
 
-## CLI (legacy / отладка)
+## CLI (отладка и авторизация Telethon)
+
+Повседневный парсинг — через **React UI** → API. CLI нужен в основном для **первого входа в Telegram** (см. [Docker](#первая-авторизация-telethon)) и для работы без БД (пишет в `output/`).
 
 ```powershell
 python -m tg_jobs_parser.cli parse --config config.yaml
 python -m tg_jobs_parser.cli parse --ai
 python -m tg_jobs_parser.cli analyze --from-json output/vacancies.json
 python -m tg_jobs_parser.cli export --from-json output/vacancies.json --out reexport.xlsx
-python -m tg_jobs_parser.cli run-web    # Streamlit
 ```
 
 Короткая команда после `poetry install`: `poetry run tg-jobs-parser parse`
 
-Логи: консоль + `logs/app.log`.
-
----
-
-## Streamlit UI (legacy)
-
-Не целевой интерфейс; оставлен для совместимости.
-
-```powershell
-streamlit run tg_jobs_parser/web/streamlit_app.py
-# или
-poetry run python -m tg_jobs_parser.cli run-web
-```
-
-Для повседневной работы используйте **React UI** на http://localhost:5173.
+Логи: консоль + `logs/app.log`. Графики CLI: `output/charts/` (matplotlib).
 
 ---
 
@@ -255,7 +239,7 @@ poetry run python -m tg_jobs_parser.cli run-web
 
 - **PostgreSQL** — постоянное хранение уникальных вакансий и журнал прогонов (`parse_runs`).
 - **Экспорт из UI** — `GET /runs/{id}/export.xlsx` и `.json` (листы и метрики как в `exporters/`).
-- **CLI / Streamlit** — по-прежнему пишут в `output/` (`vacancies.xlsx`, `vacancies.json`, `output/charts/`).
+- **CLI** — при локальном `parse` пишет в `output/` (`vacancies.xlsx`, `vacancies.json`, `output/charts/`).
 
 ---
 
@@ -291,6 +275,5 @@ pytest
 
 - [x] FastAPI + PostgreSQL + React UI + Docker Compose
 - [ ] Alembic-миграции, восстановление прогресса после рестарта backend
-- [ ] Локальные LLM (Ollama) через OpenAI-compatible endpoint
 - [ ] Расширение Telethon: joinchat, rate-limit
 - [ ] JWT / multi-user (сейчас — один локальный оператор, опциональный `API_KEY`)
