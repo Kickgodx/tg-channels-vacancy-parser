@@ -39,7 +39,7 @@ def _vacancy_row_for_excel(v: Vacancy, *, include_parse_dedup_columns: bool = Tr
     """Колонки без префикса ``detected_``, читаемые имена для отчёта."""
     d = v.model_dump(mode="python")
     row: dict[str, Any] = {
-        "post_id": post_id_display(str(d.get("id") or "")),
+        "post_id": post_id_display(str(d.get("source_post_key") or "")),
         "source_channel": d.get("source_channel"),
         "post_url": d.get("post_url"),
         "post_date": _naive_utc_for_excel(d.get("post_date")),

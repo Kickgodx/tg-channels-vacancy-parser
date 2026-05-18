@@ -33,11 +33,12 @@ class ParseRunRow(Base):
 
 
 class VacancyRow(Base):
-    """Уникальная вакансия (UPSERT по ``id`` = channel + post)."""
+    """Уникальная вакансия по тексту (``id`` = sha256 normalize(cleaned_text))."""
 
     __tablename__ = "vacancies"
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source_post_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     source_channel: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
     post_url: Mapped[str | None] = mapped_column(Text, nullable=True)

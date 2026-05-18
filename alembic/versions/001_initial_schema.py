@@ -38,6 +38,7 @@ def upgrade() -> None:
     op.create_table(
         "vacancies",
         sa.Column("id", sa.String(length=128), nullable=False),
+        sa.Column("source_post_key", sa.String(length=128), nullable=False),
         sa.Column("source_channel", sa.String(length=128), nullable=False),
         sa.Column("source_url", sa.Text(), nullable=False),
         sa.Column("post_url", sa.Text(), nullable=True),
@@ -71,6 +72,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
+    op.create_index("ix_vacancies_source_post_key", "vacancies", ["source_post_key"], unique=False)
     op.create_index("ix_vacancies_source_channel", "vacancies", ["source_channel"], unique=False)
     op.create_index("ix_vacancies_post_date", "vacancies", ["post_date"], unique=False)
     op.create_index("ix_vacancies_detected_grade", "vacancies", ["detected_grade"], unique=False)
@@ -104,6 +106,7 @@ def downgrade() -> None:
     op.drop_index("ix_vacancies_work_format", table_name="vacancies")
     op.drop_index("ix_vacancies_detected_grade", table_name="vacancies")
     op.drop_index("ix_vacancies_post_date", table_name="vacancies")
+    op.drop_index("ix_vacancies_source_post_key", table_name="vacancies")
     op.drop_index("ix_vacancies_source_channel", table_name="vacancies")
     op.drop_table("vacancies")
     op.drop_index("ix_parse_runs_status", table_name="parse_runs")

@@ -41,6 +41,7 @@ from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import clamp_range_days, parse_date, resolve_search_date_to
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
+from tg_jobs_parser.utils.hashing import vacancy_content_id
 from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
 from tg_jobs_parser.utils.logger import get_logger
 from tg_jobs_parser.utils.thread_pool import DaemonThreadPoolExecutor
@@ -122,7 +123,8 @@ def raw_post_to_vacancy_rules(
     company = extract_company(raw)
 
     ch = normalize_channel_username(post.channel_username)
-    vid = f"{ch}-{post.post_id}"
+    source_post_key = f"{ch}-{post.post_id}"
+    vid = vacancy_content_id(cleaned)
 
     source_url = f"https://t.me/s/{ch}"
 
@@ -132,6 +134,7 @@ def raw_post_to_vacancy_rules(
 
     return Vacancy(
         id=vid,
+        source_post_key=source_post_key,
         source_channel=ch,
         source_url=source_url,
         post_url=post.post_url,

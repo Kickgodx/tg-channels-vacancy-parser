@@ -14,6 +14,7 @@ from tg_jobs_parser.models.vacancy import Vacancy
 def _vacancy() -> Vacancy:
     return Vacancy(
         id="ch-1",
+        source_post_key="ch-1",
         source_channel="ch",
         source_url="https://t.me/s/ch",
         raw_text="Senior Go dev remote 400k https://example.com/job",

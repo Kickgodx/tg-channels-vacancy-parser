@@ -23,6 +23,7 @@ def _clip(value: str | None, max_len: int) -> str | None:
 def vacancy_to_row(v: Vacancy, *, parse_run_id: uuid.UUID | None = None) -> VacancyRow:
     return VacancyRow(
         id=_clip(v.id, 128) or v.id[:128],
+        source_post_key=_clip(v.source_post_key, 128) or "",
         source_channel=_clip(v.source_channel, 128) or "",
         source_url=v.source_url,
         post_url=v.post_url,
@@ -59,6 +60,7 @@ def vacancy_to_row(v: Vacancy, *, parse_run_id: uuid.UUID | None = None) -> Vaca
 def row_to_vacancy(row: VacancyRow) -> Vacancy:
     return Vacancy(
         id=row.id,
+        source_post_key=row.source_post_key,
         source_channel=row.source_channel,
         source_url=row.source_url,
         post_url=row.post_url,

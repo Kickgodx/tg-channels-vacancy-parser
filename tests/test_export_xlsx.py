@@ -20,6 +20,7 @@ def _seed_run_with_vacancy(client: TestClient) -> uuid.UUID:
     from backend.db.session import get_session_factory
     from backend.db.repository import create_parse_run, upsert_vacancies, finalize_parse_run
     from tg_jobs_parser.models.vacancy import Vacancy
+    from tg_jobs_parser.utils.hashing import vacancy_content_id
     from tg_jobs_parser.models.parse_result import ParseResult
     from tg_jobs_parser.models.metrics import MetricsSummary
 
@@ -28,14 +29,16 @@ def _seed_run_with_vacancy(client: TestClient) -> uuid.UUID:
     try:
         row = create_parse_run(session, config_snapshot={})
         run_id = row.id
+        cleaned = "Python dev"
         v = Vacancy(
-            id="export-chan-1",
+            id=vacancy_content_id(cleaned),
+            source_post_key="export_chan-1",
             source_channel="export_chan",
             source_url="https://t.me/s/export_chan",
             post_url="https://t.me/export_chan/1",
             post_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
-            raw_text="Python dev",
-            cleaned_text="Python dev",
+            raw_text=cleaned,
+            cleaned_text=cleaned,
             detected_specializations=["Python"],
             detected_salary_avg=100000.0,
         )
