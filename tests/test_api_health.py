@@ -137,3 +137,16 @@ def test_vacancy_metrics_aggregated(client: TestClient):
     for count in body["vacancies_by_specialization"].values():
         assert count <= body["unique_vacancies"]
     assert len(body["daily"]) >= 1
+
+    r_list = client.get("/api/v1/vacancies?specialization=Backend")
+    assert r_list.status_code == 200
+    assert r_list.json()["total"] == 1
+    assert r_list.json()["items"][0]["id"] == "chan-2"
+
+    r_multi = client.get("/api/v1/vacancies?specialization=Python&specialization=Backend")
+    assert r_multi.status_code == 200
+    assert r_multi.json()["total"] == 2
+
+    r_metrics = client.get("/api/v1/vacancies/metrics?specialization=Python")
+    assert r_metrics.status_code == 200
+    assert r_metrics.json()["unique_vacancies"] == 2

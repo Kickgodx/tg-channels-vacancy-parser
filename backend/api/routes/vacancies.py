@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_db, verify_api_key
@@ -18,6 +18,7 @@ def _vacancy_query_from_params(
     page_size: int,
     source_channel: str | None,
     grade: str | None,
+    specializations: list[str],
     work_format: str | None,
     date_from: str | None,
     date_to: str | None,
@@ -34,6 +35,7 @@ def _vacancy_query_from_params(
         page_size=page_size,
         source_channel=source_channel,
         grade=grade,
+        specializations=specializations,
         work_format=work_format,
         date_from=df,
         date_to=dt,
@@ -47,6 +49,7 @@ def _vacancy_query_from_params(
 def vacancy_metrics(
     source_channel: str | None = None,
     grade: str | None = None,
+    specialization: list[str] = Query(default=[]),
     work_format: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -59,6 +62,7 @@ def vacancy_metrics(
         page_size=1,
         source_channel=source_channel,
         grade=grade,
+        specializations=specialization,
         work_format=work_format,
         date_from=date_from,
         date_to=date_to,
@@ -75,6 +79,7 @@ def list_vacancies(
     page_size: int = 50,
     source_channel: str | None = None,
     grade: str | None = None,
+    specialization: list[str] = Query(default=[]),
     work_format: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -88,6 +93,7 @@ def list_vacancies(
         page_size=page_size,
         source_channel=source_channel,
         grade=grade,
+        specializations=specialization,
         work_format=work_format,
         date_from=date_from,
         date_to=date_to,

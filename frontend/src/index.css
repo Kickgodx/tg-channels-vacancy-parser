@@ -284,6 +284,12 @@ tr.clickable:hover {
   align-items: end;
 }
 
+.filters-spec-chips {
+  margin-bottom: 1rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
 .page-tabs {
   display: flex;
   gap: 0.25rem;
