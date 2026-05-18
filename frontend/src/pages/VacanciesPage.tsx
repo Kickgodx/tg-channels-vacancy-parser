@@ -164,6 +164,12 @@ export default function VacanciesPage() {
         ))}
       </div>
 
+      <div className="export-links vacancies-export">
+        <a href={api.exportVacanciesUrl(filterParams)} download>
+          Скачать Excel (все по фильтрам)
+        </a>
+      </div>
+
       <div className="page-tabs" role="tablist" aria-label="Раздел вакансий">
         <button
           type="button"

@@ -112,6 +112,13 @@ export const api = {
     return request<MetricsSummary>(`/vacancies/metrics${qs ? `?${qs}` : ""}`);
   },
 
+  exportVacanciesUrl: (params?: VacancyQueryParams) => {
+    const q = new URLSearchParams();
+    appendSearchParams(q, params);
+    const qs = q.toString();
+    return `${API_BASE}/vacancies/export.xlsx${qs ? `?${qs}` : ""}`;
+  },
+
   listRunVacancies: (
     runId: string,
     page = 1,

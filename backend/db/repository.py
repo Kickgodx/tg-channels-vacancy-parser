@@ -151,16 +151,55 @@ def list_run_vacancies(
     run_id: uuid.UUID,
     query: VacancyQuery,
 ) -> tuple[list[Vacancy], int]:
-    stmt = select(VacancyRow).where(
+    conditions = [
         VacancyRow.last_parse_run_id == run_id,
         VacancyRow.is_duplicate.is_(False),
+    ]
+    stmt = select(VacancyRow).where(*conditions)
+    total = int(
+        session.scalar(select(func.count(VacancyRow.id)).where(*conditions)) or 0
     )
-    total = session.scalar(select(func.count(VacancyRow.id)).where(*stmt._where_criteria)) or 0
     offset = (query.page - 1) * query.page_size
     rows = session.scalars(
-        stmt.order_by(_vacancy_order_by(query), VacancyRow.id.asc()).offset(offset).limit(query.page_size)
+        stmt.order_by(_vacancy_order_by(query), VacancyRow.id.asc())
+        .offset(offset)
+        .limit(query.page_size)
     ).all()
-    return [row_to_vacancy(r) for r in rows], int(total)
+    return [row_to_vacancy(r) for r in rows], total
+
+
+def list_all_vacancies(session: Session, query: VacancyQuery) -> list[Vacancy]:
+    """Все вакансии по фильтрам (пагинация по 500 — лимит VacancyQuery)."""
+    page_size = min(query.page_size, 500)
+    page = 1
+    out: list[Vacancy] = []
+    while True:
+        batch, total = list_vacancies(
+            session,
+            query.model_copy(update={"page": page, "page_size": page_size}),
+        )
+        out.extend(batch)
+        if not batch or len(out) >= total:
+            break
+        page += 1
+    return out
+
+
+def list_all_run_vacancies(session: Session, run_id: uuid.UUID, query: VacancyQuery) -> list[Vacancy]:
+    page_size = min(query.page_size, 500)
+    page = 1
+    out: list[Vacancy] = []
+    while True:
+        batch, total = list_run_vacancies(
+            session,
+            run_id,
+            query.model_copy(update={"page": page, "page_size": page_size}),
+        )
+        out.extend(batch)
+        if not batch or len(out) >= total:
+            break
+        page += 1
+    return out
 
 
 def metrics_from_run(row: ParseRunRow) -> MetricsSummary | None:
