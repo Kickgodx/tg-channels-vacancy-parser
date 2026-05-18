@@ -6,6 +6,11 @@ import MetricsCharts from "../components/MetricsCharts";
 import VacancyTable from "../components/VacancyTable";
 import type { Vacancy } from "../types/api";
 import type { VacancySortField, VacancySortOrder } from "../types/sort";
+import {
+  elapsedSecondsBetween,
+  formatDuration,
+  parseSummaryFromRunParams,
+} from "../utils/formatDuration";
 import { filterActionableWarnings } from "../utils/runWarnings";
 
 function formatUsd(v: number): string {
@@ -52,6 +57,63 @@ function AiStats({ runParams }: { runParams?: Record<string, unknown> | null }) 
   );
 }
 
+function RunTimingSummary({
+  run,
+  progress,
+  isActive,
+}: {
+  run: {
+    started_at?: string | null;
+    finished_at?: string | null;
+    posts_fetched: number;
+    run_params?: Record<string, unknown> | null;
+  };
+  progress: ProgressEvent | null;
+  isActive: boolean;
+}) {
+  const summary = parseSummaryFromRunParams(run.run_params);
+  const elapsedSec =
+    summary?.total_elapsed_seconds ??
+    elapsedSecondsBetween(run.started_at, run.finished_at) ??
+    (isActive && run.started_at
+      ? elapsedSecondsBetween(run.started_at, new Date().toISOString())
+      : null);
+
+  const postsProcessed = summary?.posts_processed ?? progress?.posts_total ?? run.posts_fetched;
+  const postsSkipped =
+    summary?.posts_skipped ??
+    (progress && progress.posts_total > 0
+      ? Math.max(0, progress.posts_processed - progress.vacancies_found)
+      : null);
+
+  if (elapsedSec == null && postsSkipped == null && !postsProcessed) return null;
+
+  return (
+    <p className="run-timing-summary">
+      {elapsedSec != null && (
+        <>
+          Время парсинга: <strong>{formatDuration(elapsedSec)}</strong>
+        </>
+      )}
+      {postsProcessed != null && postsProcessed > 0 && (
+        <>
+          {elapsedSec != null && " · "}
+          обработано постов: <strong>{postsProcessed.toLocaleString()}</strong>
+        </>
+      )}
+      {postsSkipped != null && (
+        <>
+          {(elapsedSec != null || postsProcessed) && " · "}
+          пропущено постов: <strong>{postsSkipped.toLocaleString()}</strong>
+          {!summary && isActive && (
+            <span className="caption"> (без вакансии после фильтров, оценка)</span>
+          )}
+        </>
+      )}
+    </p>
+  );
+}
+
 export default function RunPage() {
   const { runId } = useParams<{ runId: string }>();
   const qc = useQueryClient();
@@ -59,6 +121,7 @@ export default function RunPage() {
   const [liveVacancies, setLiveVacancies] = useState<Vacancy[]>([]);
   const [sortBy, setSortBy] = useState<VacancySortField>("post_date");
   const [sortOrder, setSortOrder] = useState<VacancySortOrder>("desc");
+  const [tick, setTick] = useState(0);
 
   const run = useQuery({
     queryKey: ["run", runId],
@@ -84,6 +147,12 @@ export default function RunPage() {
     mutationFn: () => api.cancelRun(runId!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["run", runId] }),
   });
+
+  useEffect(() => {
+    if (!run.data?.started_at || run.data.status !== "running") return;
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [run.data?.started_at, run.data?.status]);
 
   useEffect(() => {
     if (!runId || (run.data?.status !== "running" && run.data?.status !== "pending")) return;
@@ -144,6 +213,8 @@ export default function RunPage() {
               </ul>
             )}
             {run.data.error_message && <p className="error">{run.data.error_message}</p>}
+
+            <RunTimingSummary run={run.data} progress={progress} isActive={isActive} />
 
             {isActive && (
               <>

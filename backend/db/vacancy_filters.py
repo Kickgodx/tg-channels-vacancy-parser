@@ -50,6 +50,14 @@ def vacancy_filter_conditions(
         conditions.append(c.post_date <= dt_to)
     if query.q:
         conditions.append(c.cleaned_text.ilike(f"%{query.q}%"))
+    if query.has_salary:
+        conditions.append(
+            or_(
+                c.detected_salary_min.isnot(None),
+                c.detected_salary_max.isnot(None),
+                c.detected_salary_avg.isnot(None),
+            )
+        )
     return conditions
 
 

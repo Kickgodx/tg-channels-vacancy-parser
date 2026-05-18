@@ -83,6 +83,10 @@ class VacancyQuery(BaseModel):
     work_format: str | None = None
     date_from: date | None = None
     date_to: date | None = None
+    has_salary: bool | None = Field(
+        default=None,
+        description="True — только вакансии с указанной зарплатой (min/max/avg).",
+    )
     q: str | None = Field(default=None, description="Поиск по cleaned_text (ILIKE)")
     sort_by: VacancySortField = "post_date"
     sort_order: VacancySortOrder = "desc"

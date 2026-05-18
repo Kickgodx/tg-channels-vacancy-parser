@@ -183,14 +183,18 @@ def _build_parse_result(
     posts_fetched: int,
     candidates: list[Vacancy],
     ai_service: AIEnrichmentService | None,
+    posts_processed: int = 0,
+    fetch_elapsed_sec: float = 0.0,
+    process_elapsed_sec: float = 0.0,
 ) -> ParseResult:
     dedup_started = time.monotonic()
     unique, dups = deduplicate_vacancies(candidates, config)
+    dedup_elapsed_sec = time.monotonic() - dedup_started
     _LOG.info(
         "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
         len(unique),
         len(dups),
-        time.monotonic() - dedup_started,
+        dedup_elapsed_sec,
     )
 
     sort_vacancies_for_report(candidates)
@@ -205,7 +209,20 @@ def _build_parse_result(
     )
     metrics.warnings.extend(all_warnings)
 
+    posts_skipped = max(0, posts_processed - len(candidates))
+    total_elapsed_sec = fetch_elapsed_sec + process_elapsed_sec + dedup_elapsed_sec
+
     run_params = config.to_serializable_dict()
+    run_params["parse_summary"] = {
+        "total_elapsed_seconds": round(total_elapsed_sec, 1),
+        "fetch_elapsed_seconds": round(fetch_elapsed_sec, 1),
+        "process_elapsed_seconds": round(process_elapsed_sec, 1),
+        "dedup_elapsed_seconds": round(dedup_elapsed_sec, 1),
+        "posts_fetched": posts_fetched,
+        "posts_processed": posts_processed,
+        "posts_skipped": posts_skipped,
+        "vacancy_candidates": len(candidates),
+    }
     if ai_service is not None:
         run_params["ai_stats"] = ai_service.stats.to_dict(
             catalog=config.llm_model_catalog,
@@ -351,6 +368,7 @@ def run_parse(
     except ParseCancelled:
         _LOG.warning("Выборка прервана до завершения обхода каналов.")
         all_warnings.append("Прогон прерван пользователем во время выборки постов.")
+        fetch_elapsed = time.monotonic() - fetch_started
         return _build_parse_result(
             config=config,
             cli_overrides=cli_overrides,
@@ -358,6 +376,7 @@ def run_parse(
             posts_fetched=0,
             candidates=[],
             ai_service=None,
+            fetch_elapsed_sec=fetch_elapsed,
         )
     fetch_elapsed = time.monotonic() - fetch_started
 
@@ -406,6 +425,7 @@ def run_parse(
             all_warnings.append(f"AI не запущен: {e}")
             _LOG.error("AI не инициализирован: %s", e)
 
+    process_elapsed = 0.0
     try:
 
         def _process_one(post: RawPost) -> Vacancy | None:
@@ -529,6 +549,9 @@ def run_parse(
             posts_fetched=posts_fetched,
             candidates=candidates,
             ai_service=ai_service,
+            posts_processed=len(all_posts),
+            fetch_elapsed_sec=fetch_elapsed,
+            process_elapsed_sec=process_elapsed,
         )
     except ParseCancelled:
         _LOG.warning("Прогон прерван (отмена).")
@@ -540,6 +563,9 @@ def run_parse(
             posts_fetched=posts_fetched,
             candidates=candidates,
             ai_service=ai_service,
+            posts_processed=len(all_posts),
+            fetch_elapsed_sec=fetch_elapsed,
+            process_elapsed_sec=process_elapsed,
         )
     except KeyboardInterrupt:
         if cancel is not None:
