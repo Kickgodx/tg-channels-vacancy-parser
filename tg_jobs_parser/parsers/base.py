@@ -6,7 +6,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 
+from typing import TYPE_CHECKING
+
 from tg_jobs_parser.config.schema import AppConfig
+
+if TYPE_CHECKING:
+    from tg_jobs_parser.parse_cancel import ParseCancellationToken
 
 
 @dataclass
@@ -23,8 +28,14 @@ class RawPost:
 class BaseChannelParser(ABC):
     """Абстракция источника постов (Telethon и др.)."""
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        cancellation: ParseCancellationToken | None = None,
+    ) -> None:
         self.config = config
+        self.cancellation = cancellation
 
     @abstractmethod
     def fetch_posts(self, channel_username: str) -> tuple[list[RawPost], str | None]:
@@ -44,6 +55,8 @@ class BaseChannelParser(ABC):
         """
         out: list[tuple[str, list[RawPost], str | None]] = []
         for ch in channel_usernames:
+            if self.cancellation:
+                self.cancellation.check()
             posts, warn = self.fetch_posts(ch)
             out.append((ch, posts, warn))
         return out

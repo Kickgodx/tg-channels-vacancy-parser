@@ -25,6 +25,7 @@ from tg_jobs_parser.exporters.excel_exporter import export_excel
 from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
 from tg_jobs_parser.exporters.json_exporter import export_json, load_parse_result_json
 from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.parse_cancel import ParseCancellationToken
 from tg_jobs_parser.parse_runner import run_parse
 from tg_jobs_parser.utils.logger import get_logger, setup_logging
 
@@ -172,7 +173,12 @@ def parse(
         "config_path": str(config_path),
         "ai": ai,
     }
-    result = run_parse(cfg, cli_overrides=overrides)
+    cancel = ParseCancellationToken()
+    try:
+        result = run_parse(cfg, cli_overrides=overrides, cancel=cancel)
+    except KeyboardInterrupt:
+        typer.echo(typer.style("Прервано (Ctrl+C).", fg=typer.colors.YELLOW), err=True)
+        raise typer.Exit(130) from None
 
     xlsx_path = out_dir / cfg.output.excel_filename
     json_path = out_dir / cfg.output.json_filename
