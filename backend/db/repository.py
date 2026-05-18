@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, time, timezone
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -17,6 +18,16 @@ from backend.db.models import ParseRunRow, VacancyRow
 from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
 from backend.db.vacancy_mapper import row_to_vacancy, vacancy_to_row
 from backend.schemas import RunStatus, VacancyQuery, VacancySortField
+
+@dataclass(frozen=True)
+class VacancyUpsertStats:
+    inserted: int = 0
+    updated_existing: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.inserted + self.updated_existing
+
 
 _SORT_COLUMNS: dict[VacancySortField, object] = {
     "post_date": VacancyRow.post_date,
@@ -112,25 +123,57 @@ def upsert_vacancies(
     vacancies: list[Vacancy],
     *,
     parse_run_id: uuid.UUID,
-) -> int:
+) -> VacancyUpsertStats:
+    """
+    Вставка уникальных вакансий по ``id`` (content hash).
+
+    При совпадении текста обновляются только ``last_parse_run_id`` и ``updated_at``.
+    """
     if not vacancies:
-        return 0
+        return VacancyUpsertStats()
     now = datetime.now(timezone.utc)
-    count = 0
+    ids = [v.id for v in vacancies]
+    existing_ids = set(
+        session.scalars(select(VacancyRow.id).where(VacancyRow.id.in_(ids))).all()
+    )
+    inserted = 0
+    updated_existing = 0
     for v in vacancies:
         row = vacancy_to_row(v, parse_run_id=parse_run_id)
         data = {c.name: getattr(row, c.name) for c in VacancyRow.__table__.columns}
-        # updated_at NOT NULL — не передаём None; на INSERT сработает server_default
         data.pop("updated_at", None)
         if not data.get("parsed_at"):
             data["parsed_at"] = now
         stmt = insert(VacancyRow).values(**data)
-        update_cols = {k: val for k, val in data.items() if k != "id"}
-        update_cols["updated_at"] = now
-        stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_cols)
+        if v.id in existing_ids:
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["id"],
+                set_={
+                    "last_parse_run_id": parse_run_id,
+                    "updated_at": now,
+                },
+            )
+            updated_existing += 1
+        else:
+            stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
+            inserted += 1
+            existing_ids.add(v.id)
         session.execute(stmt)
-        count += 1
-    return count
+    return VacancyUpsertStats(inserted=inserted, updated_existing=updated_existing)
+
+
+def patch_run_vacancy_upsert_stats(
+    session: Session,
+    run_id: uuid.UUID,
+    stats: VacancyUpsertStats,
+) -> None:
+    row = session.get(ParseRunRow, run_id)
+    if row is None:
+        return
+    params = dict(row.run_params or {})
+    params["vacancies_inserted"] = stats.inserted
+    params["vacancies_existing"] = stats.updated_existing
+    row.run_params = params
 
 
 def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[Vacancy], int]:

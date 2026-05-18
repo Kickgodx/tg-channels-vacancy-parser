@@ -89,7 +89,8 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
             repo.finalize_parse_run(session, run_id, result, status=final_status)
         try:
             with session_scope() as session:
-                repo.upsert_vacancies(session, result.vacancies_unique, parse_run_id=run_id)
+                stats = repo.upsert_vacancies(session, result.vacancies_unique, parse_run_id=run_id)
+                repo.patch_run_vacancy_upsert_stats(session, run_id, stats)
         except Exception as vac_err:
             _LOG.exception("Прогон %s: не удалось сохранить вакансии: %s", run_id, vac_err)
             with session_scope() as session:
@@ -97,7 +98,13 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
                 if row is not None:
                     row.error_message = f"Вакансии не сохранены в БД: {vac_err}"
             raise
-        _LOG.info("Прогон %s завершён: %s уникальных вакансий", run_id, len(result.vacancies_unique))
+        _LOG.info(
+            "Прогон %s завершён: %s уникальных в прогоне, в БД +%s новых, %s уже были",
+            run_id,
+            len(result.vacancies_unique),
+            stats.inserted,
+            stats.updated_existing,
+        )
     except ParseCancelled:
         active.status = "cancelled"
         partial = result or active.result
@@ -106,7 +113,8 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
                 repo.finalize_parse_run(session, run_id, partial, status="cancelled")
             try:
                 with session_scope() as session:
-                    repo.upsert_vacancies(session, partial.vacancies_unique, parse_run_id=run_id)
+                    stats = repo.upsert_vacancies(session, partial.vacancies_unique, parse_run_id=run_id)
+                    repo.patch_run_vacancy_upsert_stats(session, run_id, stats)
             except Exception as vac_err:
                 _LOG.warning("Прогон %s отменён; вакансии не сохранены: %s", run_id, vac_err)
         else:

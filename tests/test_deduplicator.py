@@ -8,6 +8,7 @@ from tg_jobs_parser.models.vacancy import Vacancy
 def _v(text: str, vid: str) -> Vacancy:
     return Vacancy(
         id=vid,
+        source_post_key=vid,
         source_channel="ch",
         source_url="https://t.me/s/ch",
         post_url="https://t.me/ch/1",

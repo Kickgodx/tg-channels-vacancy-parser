@@ -11,6 +11,7 @@ from tg_jobs_parser.models.vacancy import Vacancy
 def _vacancy(**kwargs) -> Vacancy:
     base = dict(
         id="ch-1",
+        source_post_key="ch-1",
         source_channel="ch",
         source_url="https://t.me/s/ch",
         raw_text="text",

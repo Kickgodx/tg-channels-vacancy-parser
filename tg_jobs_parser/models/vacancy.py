@@ -12,7 +12,10 @@ from tg_jobs_parser.extraction.grade_extractor import normalize_grade
 class Vacancy(BaseModel):
     """Вакансия, спарсенная из поста Telegram."""
 
-    id: str
+    id: str = Field(description="Канонический id: sha256(normalize(cleaned_text))")
+    source_post_key: str = Field(
+        description="Идентификатор поста в Telegram: {channel}-{post_id}",
+    )
     source_channel: str = Field(description="Username канала без @")
     source_url: str = Field(description="Базовая ссылка на канал (t.me/s/...)")
     post_url: str | None = None

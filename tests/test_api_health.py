@@ -97,16 +97,19 @@ def test_vacancy_metrics_aggregated(client: TestClient):
     from backend.db.session import get_session_factory
     from backend.db.repository import upsert_vacancies
     from tg_jobs_parser.models.vacancy import Vacancy
+    from tg_jobs_parser.utils.hashing import vacancy_content_id
 
     run_id = uuid.uuid4()
+    text1 = "Python dev remote"
     v = Vacancy(
-        id="chan-1",
+        id=vacancy_content_id(text1),
+        source_post_key="chan-1",
         source_channel="chan",
         source_url="https://t.me/s/chan",
         post_url="https://t.me/chan/1",
         post_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
-        raw_text="Python dev remote",
-        cleaned_text="Python dev remote",
+        raw_text=text1,
+        cleaned_text=text1,
         detected_specializations=["Python"],
         detected_grade="middle",
         work_format="remote",
@@ -120,14 +123,16 @@ def test_vacancy_metrics_aggregated(client: TestClient):
     finally:
         session.close()
 
+    text2 = "Python backend"
     v2 = Vacancy(
-        id="chan-2",
+        id=vacancy_content_id(text2),
+        source_post_key="chan-2",
         source_channel="chan",
         source_url="https://t.me/s/chan",
         post_url="https://t.me/chan/2",
         post_date=datetime(2026, 3, 2, tzinfo=timezone.utc),
-        raw_text="Python backend",
-        cleaned_text="Python backend",
+        raw_text=text2,
+        cleaned_text=text2,
         detected_specializations=["Python", "Backend"],
         detected_grade="senior",
         work_format="remote",
@@ -155,7 +160,7 @@ def test_vacancy_metrics_aggregated(client: TestClient):
     r_list = client.get("/api/v1/vacancies?specialization=Backend")
     assert r_list.status_code == 200
     assert r_list.json()["total"] == 1
-    assert r_list.json()["items"][0]["id"] == "chan-2"
+    assert r_list.json()["items"][0]["id"] == vacancy_content_id(text2)
 
     r_multi = client.get("/api/v1/vacancies?specialization=Python&specialization=Backend")
     assert r_multi.status_code == 200
@@ -175,14 +180,16 @@ def test_vacancy_metrics_aggregated(client: TestClient):
         for item in r_salary.json()["items"]
     )
 
+    text3 = "Python analyst"
     no_salary = Vacancy(
-        id="chan-3",
+        id=vacancy_content_id(text3),
+        source_post_key="chan-3",
         source_channel="chan",
         source_url="https://t.me/s/chan",
         post_url="https://t.me/chan/3",
         post_date=datetime(2026, 3, 3, tzinfo=timezone.utc),
-        raw_text="Python dev",
-        cleaned_text="Python dev",
+        raw_text=text3,
+        cleaned_text=text3,
         detected_specializations=["Python"],
     )
     session = factory()
