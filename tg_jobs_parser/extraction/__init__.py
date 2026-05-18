@@ -1,6 +1,12 @@
 from tg_jobs_parser.extraction.company_extractor import extract_company
 from tg_jobs_parser.extraction.contact_extractor import extract_contact
-from tg_jobs_parser.extraction.grade_extractor import GRADE_RANK, UNKNOWN_GRADE, extract_grade
+from tg_jobs_parser.extraction.grade_extractor import (
+    GRADE_OPTIONS,
+    GRADE_RANK,
+    UNKNOWN_GRADE,
+    extract_grade,
+    normalize_grade,
+)
 from tg_jobs_parser.extraction.location_extractor import detect_work_format, extract_country_city
 from tg_jobs_parser.extraction.normalizer import clean_display_text, normalize_for_match
 from tg_jobs_parser.extraction.salary_extractor import extract_salary
@@ -14,7 +20,9 @@ __all__ = [
     "compute_vacancy_score",
     "extract_company",
     "extract_contact",
+    "GRADE_OPTIONS",
     "extract_grade",
+    "normalize_grade",
     "GRADE_RANK",
     "UNKNOWN_GRADE",
     "extract_country_city",

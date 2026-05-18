@@ -4,31 +4,46 @@ from __future__ import annotations
 
 from datetime import datetime, time, timezone
 
-from sqlalchemy import ColumnElement, and_
+from sqlalchemy import ColumnElement, Table, and_
 from sqlalchemy.sql import Select
 
 from backend.db.models import VacancyRow
 from backend.schemas import VacancyQuery
 
 
-def apply_vacancy_filters(stmt: Select, query: VacancyQuery) -> Select:
-    """Ограничить выборку уникальными вакансиями и параметрами запроса."""
-    conditions: list[ColumnElement[bool]] = [VacancyRow.is_duplicate.is_(False)]
+def vacancy_filter_conditions(
+    query: VacancyQuery,
+    *,
+    table: Table | None = None,
+) -> list[ColumnElement[bool]]:
+    """Условия WHERE для вакансий. table — Core-алиас (vacancies AS t), иначе ORM VacancyRow."""
+    c = table.c if table is not None else VacancyRow
+    conditions: list[ColumnElement[bool]] = [c.is_duplicate.is_(False)]
     if query.source_channel:
-        conditions.append(VacancyRow.source_channel == query.source_channel.lstrip("@"))
+        conditions.append(c.source_channel == query.source_channel.lstrip("@"))
     if query.grade:
-        conditions.append(VacancyRow.detected_grade == query.grade)
+        conditions.append(c.detected_grade == query.grade)
     if query.work_format:
-        conditions.append(VacancyRow.work_format == query.work_format)
+        conditions.append(c.work_format == query.work_format)
     if query.date_from:
         dt_from = datetime.combine(query.date_from, time.min, tzinfo=timezone.utc)
-        conditions.append(VacancyRow.post_date >= dt_from)
+        conditions.append(c.post_date >= dt_from)
     if query.date_to:
         dt_to = datetime.combine(query.date_to, time.max, tzinfo=timezone.utc)
-        conditions.append(VacancyRow.post_date <= dt_to)
+        conditions.append(c.post_date <= dt_to)
     if query.q:
-        conditions.append(VacancyRow.cleaned_text.ilike(f"%{query.q}%"))
-    return stmt.where(and_(*conditions))
+        conditions.append(c.cleaned_text.ilike(f"%{query.q}%"))
+    return conditions
+
+
+def apply_vacancy_filters(
+    stmt: Select,
+    query: VacancyQuery,
+    *,
+    table: Table | None = None,
+) -> Select:
+    """Ограничить выборку уникальными вакансиями и параметрами запроса."""
+    return stmt.where(and_(*vacancy_filter_conditions(query, table=table)))
 
 
 def vacancy_count_stmt(query: VacancyQuery) -> Select:

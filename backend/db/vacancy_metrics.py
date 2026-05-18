@@ -30,6 +30,25 @@ def _salary_expr():
     )
 
 
+def _salary_by_grade(session: Session, query: VacancyQuery) -> dict[str, SalaryStats]:
+    sal = _salary_expr()
+    stmt = apply_vacancy_filters(
+        select(
+            VacancyRow.detected_grade,
+            func.avg(sal),
+            func.count(VacancyRow.id),
+        )
+        .where(sal.isnot(None))
+        .group_by(VacancyRow.detected_grade),
+        query,
+    )
+    out: dict[str, SalaryStats] = {}
+    for grade, avg_val, cnt in session.execute(stmt).all():
+        if grade and cnt and avg_val is not None:
+            out[str(grade)] = SalaryStats(mean=float(avg_val), count_with_salary=int(cnt))
+    return out
+
+
 def _count_by_column(session: Session, query: VacancyQuery, column, *, null_label: str | None = None) -> dict[str, int]:
     label = func.coalesce(column, null_label) if null_label else column
     stmt = apply_vacancy_filters(
@@ -55,8 +74,9 @@ def _daily_buckets(session: Session, query: VacancyQuery) -> list[TimeSeriesBuck
     return [TimeSeriesBucket(period=str(d), count=int(c)) for d, c in session.execute(stmt).all() if d is not None]
 
 
-def _vacancies_table():
-    return VacancyRow.__table__
+def _vacancies_alias():
+    """Алиас обязателен: без correlate() LATERAL получает лишний FROM vacancies."""
+    return VacancyRow.__table__.alias("v")
 
 
 def _salary_expr_table(table):
@@ -68,27 +88,27 @@ def _salary_expr_table(table):
     )
 
 
-def _pg_spec_lateral(table):
-    """LATERAL unnest специализаций (Core SQL — ORM join к lateral alias ломается)."""
+def _pg_spec_lateral(v):
+    """LATERAL unnest специализаций; v — алиас vacancies с .correlate(v)."""
     from sqlalchemy.dialects.postgresql import JSONB
 
-    return lateral(
-        select(
-            func.jsonb_array_elements_text(cast(table.c.detected_specializations, JSONB)).label("spec")
-        )
-    ).alias("spec_el")
+    spec_q = select(
+        func.jsonb_array_elements_text(cast(v.c.detected_specializations, JSONB)).label("spec")
+    ).correlate(v)
+    return lateral(spec_q).alias("spec_el")
 
 
 def _spec_counts_postgresql(session: Session, query: VacancyQuery) -> dict[str, int]:
-    t = _vacancies_table()
-    spec_lat = _pg_spec_lateral(t)
+    v = _vacancies_alias()
+    spec_lat = _pg_spec_lateral(v)
     stmt = apply_vacancy_filters(
-        select(spec_lat.c.spec, func.count(t.c.id))
-        .select_from(t.join(spec_lat, true()))
+        select(spec_lat.c.spec, func.count(v.c.id))
+        .select_from(v.join(spec_lat, true()))
         .group_by(spec_lat.c.spec)
-        .order_by(func.count(t.c.id).desc())
+        .order_by(func.count(v.c.id).desc())
         .limit(_TOP_SPECS),
         query,
+        table=v,
     )
     return {str(s): int(c) for s, c in session.execute(stmt).all() if s}
 
@@ -97,7 +117,8 @@ def _spec_counts_sqlite(session: Session, query: VacancyQuery) -> dict[str, int]
     je = func.json_each(VacancyRow.detected_specializations).table_valued("value", with_ordinality=False)
     stmt = apply_vacancy_filters(
         select(je.c.value, func.count(VacancyRow.id))
-        .select_from(VacancyRow, je)
+        .select_from(VacancyRow)
+        .join(je, true())
         .group_by(je.c.value)
         .order_by(func.count(VacancyRow.id).desc())
         .limit(_TOP_SPECS),
@@ -107,21 +128,22 @@ def _spec_counts_sqlite(session: Session, query: VacancyQuery) -> dict[str, int]
 
 
 def _salary_by_spec_postgresql(session: Session, query: VacancyQuery) -> dict[str, SalaryStats]:
-    t = _vacancies_table()
-    spec_lat = _pg_spec_lateral(t)
-    sal = _salary_expr_table(t)
+    v = _vacancies_alias()
+    spec_lat = _pg_spec_lateral(v)
+    sal = _salary_expr_table(v)
     stmt = apply_vacancy_filters(
         select(
             spec_lat.c.spec,
             func.avg(sal),
-            func.count(t.c.id),
+            func.count(v.c.id),
         )
-        .select_from(t.join(spec_lat, true()))
+        .select_from(v.join(spec_lat, true()))
         .where(sal.isnot(None))
         .group_by(spec_lat.c.spec)
-        .order_by(func.count(t.c.id).desc())
+        .order_by(func.count(v.c.id).desc())
         .limit(_TOP_SALARY_SPECS),
         query,
+        table=v,
     )
     out: dict[str, SalaryStats] = {}
     for s, avg_val, cnt in session.execute(stmt).all():
@@ -135,7 +157,8 @@ def _salary_by_spec_sqlite(session: Session, query: VacancyQuery) -> dict[str, S
     sal = _salary_expr()
     stmt = apply_vacancy_filters(
         select(je.c.value, func.avg(sal), func.count(VacancyRow.id))
-        .select_from(VacancyRow, je)
+        .select_from(VacancyRow)
+        .join(je, true())
         .where(sal.isnot(None))
         .group_by(je.c.value)
         .order_by(func.count(VacancyRow.id).desc())
@@ -191,5 +214,6 @@ def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsS
         vacancies_with_salary=with_salary,
         vacancies_without_salary=total - with_salary,
         salary_by_specialization=salary_spec,
+        salary_by_grade=_salary_by_grade(session, query),
         grade_distribution=_count_by_column(session, query, VacancyRow.detected_grade),
     )

@@ -6,6 +6,7 @@ import json
 
 from tg_jobs_parser.ai.schema import VacancyAIExtraction
 from tg_jobs_parser.ai.search_context import SearchContext
+from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 
 SYSTEM_PROMPT_V1 = """You extract structured IT job vacancy fields from Telegram posts (Russian and/or English).
 Return ONE JSON object only. No markdown, no commentary outside JSON.
@@ -16,7 +17,8 @@ Rules:
 - Numbers in URLs (vacancy id in path, e.g. /76348/) are NOT salary — salary_min/max must be null if pay is not stated in prose.
 - detected_specializations: canonical role names; you MAY add a new role name if clearly stated (e.g. Rust) even if not in ALLOWED list.
 - work_format: one of remote, hybrid, office, relocation, unknown (or null).
-- detected_grade: intern, junior, middle, senior, lead, principal, unknown.
+- detected_grade: one of """ + ", ".join(GRADE_OPTIONS) + """ (use unknown if not stated).
+  Title/role grade wins (e.g. "Senior QA" → senior). Do NOT treat verb "to staff" / "staffing" as grade staff.
 - salary_currency: RUB, USD, EUR, etc. (uppercase) when salary is mentioned.
 - application_urls: external apply links (hh.ru, careers pages, forms). Exclude t.me channel links unless they are the apply form.
 - confidence: 0..1 how sure you are about the main fields."""

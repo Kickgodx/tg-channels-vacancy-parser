@@ -54,6 +54,7 @@ export interface ConfigDefaults {
   telegram: { telethon_session_file: string };
   specialization_options: string[];
   work_format_options: string[];
+  grade_options: string[];
 }
 
 export interface LlmModelOption {
@@ -82,6 +83,8 @@ export interface MetricsSummary {
   vacancies_without_salary: number;
   technology_top: Record<string, number>;
   salary_by_specialization: Record<string, { mean?: number; median?: number; count_with_salary: number }>;
+  salary_by_grade: Record<string, { mean?: number; median?: number; count_with_salary: number }>;
+  grade_distribution: Record<string, number>;
   warnings: string[];
 }
 

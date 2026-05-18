@@ -31,12 +31,39 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("senior+", re.compile(r"\b(senior\+|сеньор\+|синьор\+)\b", re.I)),
     ("senior", re.compile(r"\b(senior|сеньор|синьор|\bsr\.?\b)\b", re.I)),
     ("lead", re.compile(r"\b(lead|лид|team\s*lead|tech\s*lead)\b", re.I)),
-    ("staff", re.compile(r"\b(staff\s+engineer|staff)\b", re.I)),
+    # Не «to staff teams» — только уровень вроде Staff Engineer / staff-level
+    ("staff", re.compile(r"\bstaff(?:\s+|-)(?:engineer|level)\b", re.I)),
     ("principal", re.compile(r"\b(principal\s+engineer|principal)\b", re.I)),
 ]
 
 
 UNKNOWN_GRADE = "unknown"
+
+GRADE_OPTIONS: tuple[str, ...] = tuple(_ORDER) + (UNKNOWN_GRADE,)
+_GRADE_SET = frozenset(GRADE_OPTIONS)
+
+_ALIASES: dict[str, str] = {
+    "jr": "junior",
+    "jr.": "junior",
+    "sr": "senior",
+    "sr.": "senior",
+    "mid": "middle",
+    "trainee": "intern",
+    "стажер": "intern",
+    "стажёр": "intern",
+}
+
+
+def normalize_grade(value: object) -> str:
+    """Привести грейд к каноническому значению из GRADE_OPTIONS."""
+    if value is None or (isinstance(value, str) and not str(value).strip()):
+        return UNKNOWN_GRADE
+    g = str(value).strip().lower().replace(" ", "")
+    if g in _ALIASES:
+        g = _ALIASES[g]
+    if g in _GRADE_SET:
+        return g
+    return UNKNOWN_GRADE
 
 
 def extract_grade(text: str) -> str:
@@ -50,4 +77,4 @@ def extract_grade(text: str) -> str:
             if rnk > best_rank:
                 best_rank = rnk
                 best = grade
-    return best if best is not None else UNKNOWN_GRADE
+    return normalize_grade(best) if best is not None else UNKNOWN_GRADE

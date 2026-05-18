@@ -119,6 +119,7 @@ class AiMergeConfig(BaseModel):
             "detected_salary_max",
             "salary_currency",
             "work_format",
+            "detected_grade",
             "country",
             "city",
             "application_urls",
