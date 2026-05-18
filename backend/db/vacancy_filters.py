@@ -4,17 +4,32 @@ from __future__ import annotations
 
 from datetime import datetime, time, timezone
 
-from sqlalchemy import ColumnElement, Table, and_
+from sqlalchemy import ColumnElement, Table, and_, cast, exists, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import Select
 
 from backend.db.models import VacancyRow
 from backend.schemas import VacancyQuery
 
 
+def _specializations_match(c, specs: list[str], dialect: str) -> ColumnElement[bool]:
+    """Хотя бы одна из выбранных специализаций в JSON-массиве вакансии."""
+    if dialect == "postgresql":
+        return or_(
+            *[
+                cast(c.detected_specializations, JSONB).contains([spec])
+                for spec in specs
+            ]
+        )
+    je = func.json_each(c.detected_specializations).table_valued("value")
+    return exists(select(literal(1)).select_from(je).where(je.c.value.in_(specs)))
+
+
 def vacancy_filter_conditions(
     query: VacancyQuery,
     *,
     table: Table | None = None,
+    dialect: str = "postgresql",
 ) -> list[ColumnElement[bool]]:
     """Условия WHERE для вакансий. table — Core-алиас (vacancies AS t), иначе ORM VacancyRow."""
     c = table.c if table is not None else VacancyRow
@@ -23,6 +38,8 @@ def vacancy_filter_conditions(
         conditions.append(c.source_channel == query.source_channel.lstrip("@"))
     if query.grade:
         conditions.append(c.detected_grade == query.grade)
+    if query.specializations:
+        conditions.append(_specializations_match(c, query.specializations, dialect))
     if query.work_format:
         conditions.append(c.work_format == query.work_format)
     if query.date_from:
@@ -41,13 +58,14 @@ def apply_vacancy_filters(
     query: VacancyQuery,
     *,
     table: Table | None = None,
+    dialect: str = "postgresql",
 ) -> Select:
     """Ограничить выборку уникальными вакансиями и параметрами запроса."""
-    return stmt.where(and_(*vacancy_filter_conditions(query, table=table)))
+    return stmt.where(and_(*vacancy_filter_conditions(query, table=table, dialect=dialect)))
 
 
-def vacancy_count_stmt(query: VacancyQuery) -> Select:
+def vacancy_count_stmt(query: VacancyQuery, *, dialect: str = "postgresql") -> Select:
     from sqlalchemy import func, select
 
     base = select(func.count(VacancyRow.id))
-    return apply_vacancy_filters(base, query)
+    return apply_vacancy_filters(base, query, dialect=dialect)

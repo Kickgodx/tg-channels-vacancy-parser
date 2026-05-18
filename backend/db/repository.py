@@ -134,8 +134,9 @@ def upsert_vacancies(
 
 
 def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[Vacancy], int]:
-    stmt = apply_vacancy_filters(select(VacancyRow), query)
-    total = int(session.scalar(vacancy_count_stmt(query)) or 0)
+    dialect = session.get_bind().dialect.name
+    stmt = apply_vacancy_filters(select(VacancyRow), query, dialect=dialect)
+    total = int(session.scalar(vacancy_count_stmt(query, dialect=dialect)) or 0)
     offset = (query.page - 1) * query.page_size
     rows = session.scalars(
         stmt.order_by(_vacancy_order_by(query), VacancyRow.id.asc())

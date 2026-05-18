@@ -76,6 +76,10 @@ class VacancyQuery(BaseModel):
     page_size: int = Field(default=50, ge=1, le=500)
     source_channel: str | None = None
     grade: str | None = None
+    specializations: list[str] = Field(
+        default_factory=list,
+        description="Вакансии с любой из перечисленных специализаций в detected_specializations",
+    )
     work_format: str | None = None
     date_from: date | None = None
     date_to: date | None = None

@@ -30,6 +30,22 @@ export interface VacancyListResponse {
   page_size: number;
 }
 
+export type VacancyQueryParams = Record<string, string | number | string[]>;
+
+function appendSearchParams(q: URLSearchParams, params?: VacancyQueryParams) {
+  if (!params) return;
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === "" || v === undefined) return;
+    if (Array.isArray(v)) {
+      v.forEach((item) => {
+        if (item !== "") q.append(k, String(item));
+      });
+    } else {
+      q.set(k, String(v));
+    }
+  });
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -76,25 +92,17 @@ export const api = {
 
   cancelRun: (id: string) => request<{ ok: boolean }>(`/runs/${id}/cancel`, { method: "POST" }),
 
-  listVacancies: (params?: Record<string, string | number>) => {
+  listVacancies: (params?: VacancyQueryParams) => {
     const q = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([k, v]) => {
-        if (v !== "" && v !== undefined) q.set(k, String(v));
-      });
-    }
+    appendSearchParams(q, params);
     const qs = q.toString();
     return request<VacancyListResponse>(`/vacancies${qs ? `?${qs}` : ""}`);
   },
 
   /** Агрегаты для графиков (те же фильтры, что у listVacancies, без пагинации). */
-  getVacancyMetrics: (params?: Record<string, string>) => {
+  getVacancyMetrics: (params?: VacancyQueryParams) => {
     const q = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([k, v]) => {
-        if (v !== "" && v !== undefined) q.set(k, String(v));
-      });
-    }
+    appendSearchParams(q, params);
     const qs = q.toString();
     return request<MetricsSummary>(`/vacancies/metrics${qs ? `?${qs}` : ""}`);
   },
