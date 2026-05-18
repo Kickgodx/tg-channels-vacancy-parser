@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,10 +17,21 @@ from tg_jobs_parser.utils.logger import setup_logging
 setup_logging()
 try_load_dotenv()
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    log = logging.getLogger(__name__)
+    log.info("Инициализация БД…")
+    init_db()
+    log.info("Backend готов.")
+    yield
+
+
 app = FastAPI(
     title="tg-jobs-parser API",
     version="0.2.0",
     description="Backend: Telethon parsing, AI enrichment, PostgreSQL storage",
+    lifespan=lifespan,
 )
 
 settings = get_settings()
@@ -37,14 +49,6 @@ app.include_router(channels.router, prefix="/api/v1")
 app.include_router(runs.router, prefix="/api/v1")
 app.include_router(vacancies.router, prefix="/api/v1")
 app.include_router(ai_cache.router, prefix="/api/v1")
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    log = logging.getLogger(__name__)
-    log.info("Инициализация БД…")
-    init_db()
-    log.info("Backend готов.")
 
 
 def main() -> None:
