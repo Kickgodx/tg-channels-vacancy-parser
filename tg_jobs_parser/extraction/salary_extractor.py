@@ -6,6 +6,12 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import NamedTuple
 
+from tg_jobs_parser.extraction.salary_period import (
+    currency_with_hourly_suffix,
+    hourly_markers_in_text,
+    monthly_salary_markers_in_text,
+)
+
 
 class SalaryResult(NamedTuple):
     min_value: float | None
@@ -42,6 +48,21 @@ _SALARY_ANCHOR = (
 
 _CURRENCY_TOKEN = r"usd|eur|rub|руб|₽|€|\$|gbp|kzt|сум|тенге"
 
+# Вилка с почасовой оплатой: 2000–4000 ₽/час, от $15 до $30 в час
+_HOURLY_RANGE_RE = re.compile(
+    r"(?:от|from)?\s*"
+    r"(?:\$|usd|₽|руб\.?|rub)?\s*"
+    r"(\d[\d\s.,]*)\s*(?:до|[-–])\s*"
+    r"(?:\$|usd|₽|руб\.?|rub)?\s*"
+    r"(\d[\d\s.,]*)\s*"
+    r"(?:(?:\$|usd|₽|руб\.?|rub)\s*)?"
+    r"(?:"
+    r"(?:₽|руб\.?|rub|rur|\$|usd)\s*/\s*(?:час|ч)\b|"
+    r"в\s+час\b|/час\b|/ч\b|/h(?:r|our)?s?|per\s+hour"
+    r")",
+    re.I,
+)
+
 
 def _to_float(s: str) -> float | None:
     s = s.replace(" ", "").replace("\u202f", "").replace(",", ".")
@@ -52,7 +73,13 @@ def _to_float(s: str) -> float | None:
 
 
 def _scale_if_k(amount: float, fragment: str) -> float:
-    if re.search(r"\bk\b|\bтыс\b|\bк\b", fragment, re.I) and amount < 1000:
+    if amount >= 1000:
+        return amount
+    if re.search(
+        r"\bk\b|\bтыс\b|\bк\b|\bтр\b|\d+k\b|\d+\s*к\b|\d+\s*тр\b",
+        fragment,
+        re.I,
+    ):
         return amount * 1000
     return amount
 
@@ -69,6 +96,11 @@ def _is_plausible_anchored_salary(amount: float) -> bool:
     if _looks_like_year(amount):
         return False
     return amount <= 1_000_000_000
+
+
+def _is_plausible_hourly_rate(amount: float) -> bool:
+    """Почасовая ставка (USD/RUB за час): обычно 1–50 000, не путаем с годом."""
+    return 0 < amount <= 50_000
 
 
 def _is_plausible_bare_salary(amount: float) -> bool:
@@ -95,6 +127,18 @@ def _guess_currency(text_lower: str, explicit: str | None) -> str | None:
     if "руб" in text_lower or "rub" in text_lower or "₽" in text_lower:
         return "RUB"
     return None
+
+
+def _finalize_currency(currency: str | None, text: str, *, context: str = "") -> str | None:
+    cur = _guess_currency(text, currency)
+    if not cur:
+        return None
+    scope = context or text
+    hourly = hourly_markers_in_text(scope) or (
+        hourly_markers_in_text(text)
+        and not monthly_salary_markers_in_text(text)
+    )
+    return currency_with_hourly_suffix(cur, hourly=hourly)
 
 
 def _norm_currency(token: str | None) -> str | None:
@@ -124,6 +168,65 @@ def extract_salary(text: str) -> SalaryResult:
     low_compact = re.sub(r"(\d+)\s*к\b", r"\1k", cleaned)
     low_compact = re.sub(r"(\d+)\s*k\b", r"\1k", low_compact)
 
+    tr_range_m = re.search(
+        r"(?:от|from)?\s*(\d[\d\s.,]*)\s*тр\b\s*(?:до|[-–])\s*(\d[\d\s.,]*)\s*тр\b",
+        low_compact,
+        re.I,
+    )
+    if tr_range_m:
+        ctx = tr_range_m.group(0)
+        a = _to_float(tr_range_m.group(1))
+        b = _to_float(tr_range_m.group(2))
+        if a is not None and b is not None:
+            a, b = min(a, b), max(a, b)
+            a = _scale_if_k(a, ctx)
+            b = _scale_if_k(b, ctx)
+            return SalaryResult(
+                a, b, (a + b) / 2, _finalize_currency("RUB", low_compact, context=ctx)
+            )
+
+    k_gross_pair = re.search(
+        r"(\d[\d\s.,]*)\s*k\b[^.\d\n]{0,60}?(?:и|до|[-–])\s*(\d[\d\s.,]*)\s*k\b",
+        low_compact,
+        re.I,
+    )
+    if k_gross_pair and re.search(r"гросс|gross|вилк|оклад|зп|зарплат", k_gross_pair.group(0), re.I):
+        ctx = k_gross_pair.group(0)
+        a = _to_float(k_gross_pair.group(1))
+        b = _to_float(k_gross_pair.group(2))
+        if a is not None and b is not None:
+            a, b = min(a, b), max(a, b)
+            a = _scale_if_k(a, ctx)
+            b = _scale_if_k(b, ctx)
+            return SalaryResult(
+                a, b, (a + b) / 2, _finalize_currency("RUB", low_compact, context=ctx)
+            )
+
+    hourly_range_m = _HOURLY_RANGE_RE.search(low_compact)
+    if hourly_range_m:
+        ctx = hourly_range_m.group(0)
+        a = _to_float(hourly_range_m.group(1))
+        b = _to_float(hourly_range_m.group(2))
+        if a is not None and b is not None and _is_plausible_hourly_rate(a) and _is_plausible_hourly_rate(b):
+            a, b = min(a, b), max(a, b)
+            cur_guess = "RUB" if re.search(r"₽|руб|rub", ctx, re.I) else "USD"
+            cur = _finalize_currency(cur_guess, low_compact, context=ctx)
+            if cur:
+                return SalaryResult(a, b, (a + b) / 2, cur)
+
+    rub_hourly_single = re.search(
+        r"(\d[\d\s.,]*)\s*(?:₽|руб\.?|rub)\s*/\s*(?:час|ч)\b",
+        low_compact,
+        re.I,
+    )
+    if rub_hourly_single:
+        ctx = rub_hourly_single.group(0)
+        a = _to_float(rub_hourly_single.group(1))
+        if a is not None and _is_plausible_hourly_rate(a):
+            return SalaryResult(
+                a, None, a, _finalize_currency("RUB", low_compact, context=ctx)
+            )
+
     range_m = re.search(
         r"(\d[\d\s]*(?:[.,]\d+)?)\s*[-–]\s*(\d[\d\s]*(?:[.,]\d+)?)"
         r"(?:\s*k)?"
@@ -143,10 +246,29 @@ def extract_salary(text: str) -> SalaryResult:
             # Если рядом нет валютного токена — фильтруем диапазоны вроде «3-5 лет», «5–10 человек».
             if cur_raw or (_is_plausible_bare_salary(a) and _is_plausible_bare_salary(b)):
                 avg = (a + b) / 2
-                return SalaryResult(a, b, avg, _guess_currency(low_compact, cur_raw))
+                return SalaryResult(
+                    a, b, avg, _finalize_currency(cur_raw, low_compact, context=ctx)
+                )
+
+    tr_from_to = re.search(
+        r"\b(?:от|from)\s*:?\s*(\d[\d\s.,]*)\s*тр\b\s*(?:до|[-–])\s*(\d[\d\s.,]*)\s*тр\b",
+        low_compact,
+        re.I,
+    )
+    if tr_from_to:
+        ctx = tr_from_to.group(0)
+        a = _to_float(tr_from_to.group(1))
+        b = _to_float(tr_from_to.group(2))
+        if a is not None and b is not None:
+            a, b = min(a, b), max(a, b)
+            a = _scale_if_k(a, ctx)
+            b = _scale_if_k(b, ctx)
+            return SalaryResult(
+                a, b, (a + b) / 2, _finalize_currency("RUB", low_compact, context=ctx)
+            )
 
     from_m = re.search(
-        r"\b(?:от|from)\s*:?\s*(\d[\d\s]*(?:[.,]\d+)?)(?:\s*k)?(?:\s*(" + _CURRENCY_TOKEN + r"))?",
+        r"\b(?:от|from)\s*:?\s*(\d[\d\s]*(?:[.,]\d+)?)(?:\s*(?:k|тр\b))?(?:\s*(" + _CURRENCY_TOKEN + r"))?",
         low_compact,
         re.I,
     )
@@ -157,7 +279,9 @@ def extract_salary(text: str) -> SalaryResult:
         if a is not None:
             a = _scale_if_k(a, ctx)
             if cur_raw or _is_plausible_bare_salary(a):
-                return SalaryResult(a, None, a, _guess_currency(low_compact, cur_raw))
+                return SalaryResult(
+                    a, None, a, _finalize_currency(cur_raw, low_compact, context=ctx)
+                )
 
     to_m = re.search(
         r"\b(?:до)\s*:?\s*(\d[\d\s]*(?:[.,]\d+)?)(?:\s*k)?(?:\s*(" + _CURRENCY_TOKEN + r"))?",
@@ -171,7 +295,9 @@ def extract_salary(text: str) -> SalaryResult:
         if a is not None:
             a = _scale_if_k(a, ctx)
             if cur_raw or _is_plausible_bare_salary(a):
-                return SalaryResult(None, a, a, _guess_currency(low_compact, cur_raw))
+                return SalaryResult(
+                    None, a, a, _finalize_currency(cur_raw, low_compact, context=ctx)
+                )
 
     # Якорь зарплаты рядом с числом ("salary 150000", "оклад 200к", "rate 50/hr").
     # Допускает до 30 не-цифровых символов между ключевым словом и числом.
@@ -188,7 +314,9 @@ def extract_salary(text: str) -> SalaryResult:
         if a is not None:
             a = _scale_if_k(a, ctx)
             if _is_plausible_anchored_salary(a):
-                return SalaryResult(a, None, a, _guess_currency(low_compact, cur_raw))
+                return SalaryResult(
+                    a, None, a, _finalize_currency(cur_raw, low_compact, context=ctx)
+                )
 
     # Число с явной валютой или k-маркером (без якорного слова рядом).
     currency_before = re.search(
@@ -197,12 +325,19 @@ def extract_salary(text: str) -> SalaryResult:
         re.I,
     )
     if currency_before:
+        ctx_before = currency_before.group(0)
         a = _to_float(currency_before.group(2))
         if a is not None and _is_plausible_anchored_salary(a):
-            return SalaryResult(a, None, a, _guess_currency(low_compact, currency_before.group(1)))
+            return SalaryResult(
+                a,
+                None,
+                a,
+                _finalize_currency(currency_before.group(1), low_compact, context=ctx_before),
+            )
 
     currency_after = re.search(
-        r"(\d[\d\s]{2,}(?:[.,]\d+)?)\s*(k\b|\$|€|₽|usd|eur|rub|руб)",
+        r"(\d[\d\s]{2,}(?:[.,]\d+)?)\s*"
+        r"(k\b|(?:₽|руб\.?|rub)\s*/\s*(?:час|ч)\b|\$|€|₽|usd|eur|rub|руб)",
         low_compact,
         re.I,
     )
@@ -211,10 +346,18 @@ def extract_salary(text: str) -> SalaryResult:
         a = _to_float(currency_after.group(1))
         if a is not None:
             a = _scale_if_k(a, ctx)
-            if _is_plausible_anchored_salary(a):
-                tail = currency_after.group(2)
-                cur_raw = None if tail.lower().strip() == "k" else tail
-                return SalaryResult(a, None, a, _guess_currency(low_compact, cur_raw))
+            hourly_tail = re.search(r"/\s*(?:час|ч)\b", tail if (tail := currency_after.group(2)) else "", re.I)
+            plausible = _is_plausible_hourly_rate(a) if hourly_tail else _is_plausible_anchored_salary(a)
+            if plausible:
+                if tail.lower().strip() == "k":
+                    cur_raw = None
+                elif hourly_tail:
+                    cur_raw = "RUB" if re.search(r"₽|руб|rub", tail, re.I) else tail
+                else:
+                    cur_raw = tail
+                return SalaryResult(
+                    a, None, a, _finalize_currency(cur_raw, low_compact, context=ctx)
+                )
 
     # Финальный фоллбэк: голое число (например, «150000» без слова «зарплата» и без валюты).
     # Телефоны уже замаскированы; здесь применяем строгий диапазон, чтобы не ловить

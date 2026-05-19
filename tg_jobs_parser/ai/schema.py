@@ -58,7 +58,13 @@ class VacancyAIExtraction(BaseModel):
     detected_grade: str = "unknown"
     salary_min: float | None = None
     salary_max: float | None = None
-    salary_currency: str | None = None
+    salary_currency: str | None = Field(
+        default=None,
+        description=(
+            "RUB, USD, EUR. /HOUR only for explicit hourly pay (₽/час, $/hour). "
+            "Monthly: «200 тр», «300к гросс» → RUB without /HOUR."
+        ),
+    )
     work_format: str | None = None
     country: str | None = None
     city: str | None = None

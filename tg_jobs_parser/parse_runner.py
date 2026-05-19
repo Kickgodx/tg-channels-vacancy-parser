@@ -20,6 +20,10 @@ from tg_jobs_parser.extraction.grade_extractor import extract_grade
 from tg_jobs_parser.extraction.location_extractor import detect_work_format, extract_country_city
 from tg_jobs_parser.extraction.normalizer import clean_display_text, normalize_for_match
 from tg_jobs_parser.extraction.salary_extractor import extract_salary
+from tg_jobs_parser.extraction.salary_period import (
+    apply_hourly_currency_from_text,
+    sanitize_salary_currency_period,
+)
 from tg_jobs_parser.extraction.specialization_extractor import extract_specializations
 from tg_jobs_parser.extraction.technology_extractor import extract_technologies
 from tg_jobs_parser.extraction.vacancy_detector import compute_vacancy_score
@@ -133,7 +137,7 @@ def raw_post_to_vacancy_rules(
     if salary.min_value is not None and salary.max_value is not None:
         avg = (salary.min_value + salary.max_value) / 2
 
-    return Vacancy(
+    vacancy = Vacancy(
         id=vid,
         source_post_key=source_post_key,
         source_channel=ch,
@@ -163,6 +167,9 @@ def raw_post_to_vacancy_rules(
         duplicate_reason=None,
         parsed_at=datetime.now(timezone.utc),
     )
+    apply_hourly_currency_from_text(vacancy)
+    sanitize_salary_currency_period(vacancy)
+    return vacancy
 
 
 def raw_post_to_vacancy(

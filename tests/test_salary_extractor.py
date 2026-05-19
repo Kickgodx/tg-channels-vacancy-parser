@@ -81,7 +81,62 @@ def test_job_url_id_is_not_salary():
     assert r.max_value is None
 
 
+def test_hourly_rub_per_hour_range():
+    text = "Оплата: 2 000–4 000 ₽/час. Удалённо."
+    r = extract_salary(text)
+    assert r.min_value == 2000.0
+    assert r.max_value == 4000.0
+    assert r.currency == "RUB/HOUR"
+
+
+def test_hourly_rub_per_hour_single():
+    text = "Senior Manual QA 1 000 ₽ / час удалённо"
+    r = extract_salary(text)
+    assert r.min_value == 1000.0
+    assert r.currency == "RUB/HOUR"
+
+
+def test_hourly_rub_slash_chas_text():
+    text = "Оплата: 2000 руб/час full-time"
+    r = extract_salary(text)
+    assert r.min_value == 2000.0
+    assert r.currency == "RUB/HOUR"
+
+
+def test_hourly_usd_range_in_text():
+    text = (
+        "Условия и з.п. от $15 до $30 в час. "
+        "Формат: Фриланс, почасовая оплата раз в месяц."
+    )
+    r = extract_salary(text)
+    assert r.min_value == 15.0
+    assert r.max_value == 30.0
+    assert r.avg_value == 22.5
+    assert r.currency == "USD/HOUR"
+
+
 def test_experience_range_is_not_salary():
     """Диапазон 'опыт 3-5 лет' без валюты — не зарплата."""
     r = extract_salary("Требуется senior, опыт 3-5 лет работы с PostgreSQL.")
     assert r.min_value is None and r.max_value is None
+
+
+def test_monthly_tr_range_not_hourly():
+    text = (
+        "Вилка: от 200 тр до 300 тр. "
+        "критерии перевода в регресс) в части контроля качества"
+    )
+    r = extract_salary(text)
+    assert r.min_value == 200_000.0
+    assert r.max_value == 300_000.0
+    assert r.avg_value == 250_000.0
+    assert r.currency == "RUB"
+
+
+def test_monthly_k_gross_pair_not_hourly():
+    text = "Вилка: 300к гросс по ТК и 320к гросс по ИП, удалённо."
+    r = extract_salary(text)
+    assert r.min_value == 300_000.0
+    assert r.max_value == 320_000.0
+    assert r.avg_value == 310_000.0
+    assert r.currency == "RUB"
