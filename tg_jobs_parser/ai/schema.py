@@ -76,7 +76,10 @@ class VacancyAIExtraction(BaseModel):
     application_urls: list[str] = Field(default_factory=list)
 
     confidence: float = Field(default=0.5, ge=0, le=1)
-    notes: str | None = None
+    notes: str | None = Field(
+        default=None,
+        description="Краткие пояснения на русском: неоднозначности, пропуски в тексте, допущения; null если нечего добавить.",
+    )
 
     @field_validator(
         "rejection_reason",

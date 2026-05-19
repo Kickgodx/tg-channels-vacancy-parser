@@ -138,6 +138,8 @@ def merge_rules_and_ai(
 
     updates["extraction_source"] = source
     updates["ai_confidence"] = conf
+    if ai.notes and str(ai.notes).strip():
+        updates["ai_notes"] = str(ai.notes).strip()
 
     out = vacancy.model_copy(update=updates)
     # primary: период оплаты (RUB vs RUB/HOUR) — ответ LLM + sanitize; regex по тексту не трогаем

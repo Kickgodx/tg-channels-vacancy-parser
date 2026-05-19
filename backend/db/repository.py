@@ -178,6 +178,9 @@ def upsert_vacancies(
                     "last_parse_run_id": parse_run_id,
                     "updated_at": now,
                     "detected_salary_avg_rub": data["detected_salary_avg_rub"],
+                    "ai_notes": data["ai_notes"],
+                    "ai_confidence": data["ai_confidence"],
+                    "extraction_source": data["extraction_source"],
                 },
             )
             updated_existing += 1

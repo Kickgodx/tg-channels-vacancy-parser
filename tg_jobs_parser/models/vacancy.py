@@ -59,6 +59,10 @@ class Vacancy(BaseModel):
         description="rules | ai | hybrid",
     )
     ai_confidence: float | None = Field(default=None, ge=0, le=1)
+    ai_notes: str | None = Field(
+        default=None,
+        description="Краткие пояснения от LLM (поле notes в VacancyAIExtraction).",
+    )
 
     vacancy_score: int = 0
     vacancy_substantive_score: int = Field(

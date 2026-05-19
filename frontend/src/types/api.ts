@@ -24,6 +24,8 @@ export interface Vacancy {
   application_urls?: string[];
   vacancy_score?: number;
   extraction_source?: string;
+  ai_confidence?: number | null;
+  ai_notes?: string | null;
 }
 
 export interface ConfigDefaults {

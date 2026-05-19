@@ -151,6 +151,19 @@ def test_parse_extraction_coerces_list_required_experience():
     assert ext.required_experience == "3 years of QA experience; Redis and Hazelcast"
 
 
+def test_merge_ai_notes():
+    cfg = AppConfig()
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "assist"})})
+    v = _vacancy()
+    ai = VacancyAIExtraction(
+        is_job_post=True,
+        notes="Salary range unclear; company name not in post.",
+        confidence=0.7,
+    )
+    out = merge_rules_and_ai(v, ai, cfg)
+    assert out.ai_notes == "Salary range unclear; company name not in post."
+
+
 def test_openrouter_parse_json_fence():
     from tg_jobs_parser.ai.clients.openrouter import _parse_extraction
 

@@ -73,6 +73,7 @@ def upgrade() -> None:
         sa.Column("application_urls", sa.JSON(), nullable=False),
         sa.Column("extraction_source", sa.String(length=16), nullable=False),
         sa.Column("ai_confidence", sa.Float(), nullable=True),
+        sa.Column("ai_notes", sa.Text(), nullable=True),
         sa.Column("vacancy_score", sa.Integer(), nullable=False),
         sa.Column("vacancy_substantive_score", sa.Integer(), nullable=False),
         sa.Column("is_duplicate", sa.Boolean(), nullable=False),
