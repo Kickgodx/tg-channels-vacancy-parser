@@ -50,6 +50,11 @@ function dictToBarData(d: Record<string, number>, limit = 25) {
     .slice(0, limit);
 }
 
+function formatSharePercent(count: number, total: number): string {
+  if (total <= 0) return "0%";
+  return `${((count / total) * 100).toFixed(1)}%`;
+}
+
 interface Props {
   metrics: MetricsSummary;
 }
@@ -65,6 +70,7 @@ export default function MetricsCharts({ metrics }: Props) {
   const specData = dictToBarData(metrics.vacancies_by_specialization ?? {}, 20);
   const gradeData = dictToBarData(metrics.vacancies_by_grade ?? {});
   const wfData = dictToBarData(metrics.vacancies_by_work_format ?? {});
+  const wfTotal = wfData.reduce((sum, row) => sum + row.count, 0);
   const dailyData = (metrics.daily ?? []).map((b) => ({ period: b.period, count: b.count }));
   const salarySpec = Object.entries(metrics.salary_by_specialization ?? {})
     .filter(([, st]) => st.count_with_salary > 0 && st.mean != null)
@@ -136,13 +142,29 @@ export default function MetricsCharts({ metrics }: Props) {
         ) : (
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
-              <Pie data={wfData} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={90} label>
+              <Pie data={wfData} dataKey="count" nameKey="name" cx="50%" cy="45%" outerRadius={72}>
                 {wfData.map((entry, i) => (
                   <Cell key={entry.name} fill={workFormatColor(entry.name, i)} />
                 ))}
               </Pie>
-              <Tooltip />
-              <Legend />
+              <Tooltip
+                formatter={(value: number, _name, item) => {
+                  const count = Number(value);
+                  const label = String(item.payload?.name ?? "");
+                  return [
+                    `${count} (${formatSharePercent(count, wfTotal)})`,
+                    label,
+                  ];
+                }}
+              />
+              <Legend
+                verticalAlign="bottom"
+                formatter={(value, entry) => {
+                  const row = entry.payload as { count?: number } | undefined;
+                  const count = Number(row?.count ?? 0);
+                  return `${value} — ${formatSharePercent(count, wfTotal)}`;
+                }}
+              />
             </PieChart>
           </ResponsiveContainer>
         )}
