@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api, type VacancyQueryParams } from "../api/client";
 import MetricsCharts from "../components/MetricsCharts";
@@ -30,7 +30,23 @@ function vacancyFilterParams(
 }
 
 export default function VacanciesPage() {
+  const queryClient = useQueryClient();
   const defaultsQ = useQuery({ queryKey: ["config-defaults"], queryFn: () => api.getConfigDefaults() });
+
+  const fxRatesQ = useQuery({
+    queryKey: ["fx-rates"],
+    queryFn: () => api.getFxRates(),
+    staleTime: 60_000,
+  });
+
+  const fxRefreshM = useMutation({
+    mutationFn: () => api.refreshFxRates(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["fx-rates"] });
+      void queryClient.invalidateQueries({ queryKey: ["vacancy-metrics"] });
+      void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
+    },
+  });
 
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
@@ -168,6 +184,39 @@ export default function VacanciesPage() {
         <a href={api.exportVacanciesUrl(filterParams)} download>
           Скачать Excel (все по фильтрам)
         </a>
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={fxRefreshM.isPending}
+          onClick={() => fxRefreshM.mutate()}
+          title="Загрузить курсы ЦБ и пересчитать зарплаты в рублях для всех вакансий"
+        >
+          {fxRefreshM.isPending ? "Обновление курсов…" : "Обновить курсы ЦБ"}
+        </button>
+        {fxRatesQ.data?.rate_date && fxRatesQ.data.rates.length > 0 && (
+          <span className="caption">
+            Курсы в БД на {fxRatesQ.data.rate_date}:{" "}
+            {fxRatesQ.data.rates
+              .filter((r) => r.currency !== "RUB")
+              .slice(0, 6)
+              .map((r) => `${r.currency}=${r.rate_to_rub.toFixed(2)}`)
+              .join(", ")}
+            {fxRatesQ.data.rates.length > 7 ? "…" : ""}
+          </span>
+        )}
+        {fxRefreshM.isSuccess && (
+          <span className="caption">
+            Обновлено вакансий: {fxRefreshM.data.vacancies_updated_rub} / {fxRefreshM.data.vacancies_processed}
+            {fxRefreshM.data.vacancies_skipped_no_rate > 0
+              ? ` (без курса: ${fxRefreshM.data.vacancies_skipped_no_rate})`
+              : ""}
+          </span>
+        )}
+        {fxRefreshM.isError && (
+          <span className="caption" style={{ color: "var(--color-danger, #c92a2a)" }}>
+            {fxRefreshM.error.message}
+          </span>
+        )}
       </div>
 
       <div className="page-tabs" role="tablist" aria-label="Раздел вакансий">

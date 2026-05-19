@@ -63,6 +63,7 @@ class VacancyListResponse(BaseModel):
 VacancySortField = Literal[
     "post_date",
     "detected_salary_avg",
+    "detected_salary_avg_rub",
     "work_format",
     "detected_grade",
     "salary_currency",

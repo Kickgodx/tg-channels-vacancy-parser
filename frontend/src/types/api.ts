@@ -13,6 +13,7 @@ export interface Vacancy {
   detected_salary_min?: number | null;
   detected_salary_max?: number | null;
   detected_salary_avg?: number | null;
+  detected_salary_avg_rub?: number | null;
   salary_currency?: string | null;
   work_format?: string | null;
   country?: string | null;
@@ -85,6 +86,7 @@ export interface MetricsSummary {
   salary_by_specialization: Record<string, { mean?: number; median?: number; count_with_salary: number }>;
   salary_by_grade: Record<string, { mean?: number; median?: number; count_with_salary: number }>;
   grade_distribution: Record<string, number>;
+  salary_display?: { display_currency: string; rates_as_of?: string | null; rates_source: string } | null;
   warnings: string[];
 }
 

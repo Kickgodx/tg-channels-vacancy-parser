@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,7 +16,11 @@ from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
 
+from backend.fx.apply import apply_salary_rub_for_vacancy, preload_fx_rates_for_vacancies
 from backend.db.models import ParseRunRow, VacancyRow
+from backend.settings import get_settings
+from tg_jobs_parser.config.loader import load_config
+from tg_jobs_parser.config.schema import FxConfig
 from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
 from backend.db.vacancy_mapper import row_to_vacancy, vacancy_to_row
 from backend.schemas import RunStatus, VacancyQuery, VacancySortField
@@ -29,9 +35,12 @@ class VacancyUpsertStats:
         return self.inserted + self.updated_existing
 
 
+_LOG = logging.getLogger(__name__)
+
 _SORT_COLUMNS: dict[VacancySortField, object] = {
     "post_date": VacancyRow.post_date,
     "detected_salary_avg": VacancyRow.detected_salary_avg,
+    "detected_salary_avg_rub": VacancyRow.detected_salary_avg_rub,
     "work_format": VacancyRow.work_format,
     "detected_grade": VacancyRow.detected_grade,
     "salary_currency": VacancyRow.salary_currency,
@@ -118,11 +127,18 @@ def save_parse_cancelled(
         set_run_status(session, run_id, status)
 
 
+def _fx_config(fx_config: FxConfig | None) -> FxConfig:
+    if fx_config is not None:
+        return fx_config
+    return load_config(get_settings().config_path).fx
+
+
 def upsert_vacancies(
     session: Session,
     vacancies: list[Vacancy],
     *,
     parse_run_id: uuid.UUID,
+    fx_config: FxConfig | None = None,
 ) -> VacancyUpsertStats:
     """
     Вставка уникальных вакансий по ``id`` (content hash).
@@ -131,26 +147,37 @@ def upsert_vacancies(
     """
     if not vacancies:
         return VacancyUpsertStats()
+    started = time.monotonic()
     now = datetime.now(timezone.utc)
     ids = [v.id for v in vacancies]
     existing_ids = set(
         session.scalars(select(VacancyRow.id).where(VacancyRow.id.in_(ids))).all()
     )
+    fx = _fx_config(fx_config)
+    _LOG.info("Сохранение %s вакансий в БД (уже есть %s)…", len(vacancies), len(existing_ids))
+    rates_cache = preload_fx_rates_for_vacancies(session, vacancies, fx)
+    if rates_cache:
+        _LOG.info("Курсы для сохранения: %s дат в кэше", len(rates_cache))
     inserted = 0
     updated_existing = 0
     for v in vacancies:
+        is_existing = v.id in existing_ids
+        apply_salary_rub_for_vacancy(
+            v, session, fx, rates_cache=rates_cache, force=is_existing
+        )
         row = vacancy_to_row(v, parse_run_id=parse_run_id)
         data = {c.name: getattr(row, c.name) for c in VacancyRow.__table__.columns}
         data.pop("updated_at", None)
         if not data.get("parsed_at"):
             data["parsed_at"] = now
         stmt = insert(VacancyRow).values(**data)
-        if v.id in existing_ids:
+        if is_existing:
             stmt = stmt.on_conflict_do_update(
                 index_elements=["id"],
                 set_={
                     "last_parse_run_id": parse_run_id,
                     "updated_at": now,
+                    "detected_salary_avg_rub": data["detected_salary_avg_rub"],
                 },
             )
             updated_existing += 1
@@ -159,6 +186,12 @@ def upsert_vacancies(
             inserted += 1
             existing_ids.add(v.id)
         session.execute(stmt)
+    _LOG.info(
+        "Сохранение вакансий завершено за %.1f с: +%s новых, %s привязано к прогону",
+        time.monotonic() - started,
+        inserted,
+        updated_existing,
+    )
     return VacancyUpsertStats(inserted=inserted, updated_existing=updated_existing)
 
 

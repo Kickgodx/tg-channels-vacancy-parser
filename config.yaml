@@ -83,6 +83,14 @@ filters:
   work_formats:
     - any
 
+fx:
+  enabled: true
+  provider: cbr
+  default_currency_if_missing: RUB
+  display_currency: RUB
+  sync_days_on_startup: 14
+  request_timeout_seconds: 20
+
 parser:
   progress_batch_posts: 25
   vacancy_score_threshold: 1

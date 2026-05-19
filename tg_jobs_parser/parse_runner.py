@@ -41,6 +41,7 @@ from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import clamp_range_days, parse_date, resolve_search_date_to
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
+from tg_jobs_parser.fx.vacancy_rub import enrich_vacancies_salary_rub
 from tg_jobs_parser.utils.hashing import vacancy_content_id
 from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
 from tg_jobs_parser.utils.logger import get_logger
@@ -203,6 +204,19 @@ def _build_parse_result(
     sort_vacancies_for_report(candidates)
     sort_vacancies_for_report(unique)
     sort_vacancies_for_report(dups)
+
+    if config.fx.enabled:
+        enrich_started = time.monotonic()
+        enrich_vacancies_salary_rub(
+            unique,
+            default_currency_if_missing=config.fx.default_currency_if_missing,
+            request_timeout_seconds=config.fx.request_timeout_seconds,
+        )
+        _LOG.info(
+            "Курсы для метрик прогона: %s вакансий за %.1f с.",
+            len(unique),
+            time.monotonic() - enrich_started,
+        )
 
     metrics = build_metrics(
         vacancies_all=candidates,

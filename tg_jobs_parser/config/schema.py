@@ -321,6 +321,25 @@ class ParserConfig(BaseModel):
     fuzzy_compare_prefix_len: int = 500
 
 
+class FxConfig(BaseModel):
+    """Курсы валют для зарплат в рублях (ЦБ РФ)."""
+
+    enabled: bool = True
+    provider: str = Field(default="cbr", description="Источник курсов (пока только cbr).")
+    default_currency_if_missing: str = Field(
+        default="RUB",
+        description="Если salary_currency пуст — считать эту валюту.",
+    )
+    display_currency: str = Field(default="RUB")
+    sync_days_on_startup: int = Field(
+        default=7,
+        ge=1,
+        le=90,
+        description="Сколько последних дней подтянуть в exchange_rates при старте API.",
+    )
+    request_timeout_seconds: float = 20.0
+
+
 class OutputConfig(BaseModel):
     directory: str = "output"
     excel_filename: str = "vacancies.xlsx"
@@ -363,6 +382,7 @@ class AppConfig(BaseModel):
     search: SearchConfig = Field(default_factory=SearchConfig)
     filters: FiltersConfig = Field(default_factory=FiltersConfig)
     parser: ParserConfig = Field(default_factory=ParserConfig)
+    fx: FxConfig = Field(default_factory=FxConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     dictionaries: DictionariesConfig = Field(default_factory=DictionariesConfig)

@@ -8,9 +8,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routes import ai_cache, channels, config, health, runs, vacancies
-from backend.db.session import init_db
+from backend.api.routes import ai_cache, channels, config, fx, health, runs, vacancies
+from backend.db import fx_repository as fx_repo
+from backend.db.session import init_db, session_scope
 from backend.settings import get_settings
+from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
 from tg_jobs_parser.utils.logger import setup_logging
 
@@ -23,6 +25,14 @@ async def lifespan(_app: FastAPI):
     log = logging.getLogger(__name__)
     log.info("Инициализация БД…")
     init_db()
+    try:
+        cfg = load_config(get_settings().config_path)
+        if cfg.fx.enabled:
+            with session_scope() as session:
+                n = fx_repo.sync_recent_days(session, cfg.fx)
+            log.info("Курсы ЦБ: синхронизировано записей за последние %s дн.: %s", cfg.fx.sync_days_on_startup, n)
+    except Exception as e:
+        log.warning("Курсы ЦБ при старте не загружены: %s", e)
     log.info("Backend готов.")
     yield
 
@@ -49,6 +59,7 @@ app.include_router(channels.router, prefix="/api/v1")
 app.include_router(runs.router, prefix="/api/v1")
 app.include_router(vacancies.router, prefix="/api/v1")
 app.include_router(ai_cache.router, prefix="/api/v1")
+app.include_router(fx.router, prefix="/api/v1")
 
 
 def main() -> None:

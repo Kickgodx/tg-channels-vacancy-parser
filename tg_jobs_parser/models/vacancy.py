@@ -31,6 +31,10 @@ class Vacancy(BaseModel):
     detected_salary_min: float | None = None
     detected_salary_max: float | None = None
     detected_salary_avg: float | None = None
+    detected_salary_avg_rub: float | None = Field(
+        default=None,
+        description="Зарплата в RUB по последнему курсу ЦБ (на сегодня / из кэша).",
+    )
     salary_currency: str | None = None
 
     work_format: str | None = Field(

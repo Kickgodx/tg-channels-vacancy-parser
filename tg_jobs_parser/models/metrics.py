@@ -18,6 +18,12 @@ class SalaryStats(BaseModel):
     count_with_salary: int = 0
 
 
+class SalaryDisplayMeta(BaseModel):
+    display_currency: str = "RUB"
+    rates_as_of: str | None = None
+    rates_source: str = "cbr"
+
+
 class MetricsSummary(BaseModel):
     """Сводные метрики запуска."""
 
@@ -42,6 +48,7 @@ class MetricsSummary(BaseModel):
 
     vacancies_with_salary: int = 0
     vacancies_without_salary: int = 0
+    salary_display: SalaryDisplayMeta | None = None
 
     grade_distribution: dict[str, int] = Field(default_factory=dict)
     mean_grade_rank_by_specialization: dict[str, float] = Field(default_factory=dict)
