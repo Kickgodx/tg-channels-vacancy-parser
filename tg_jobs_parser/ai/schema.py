@@ -48,7 +48,13 @@ class VacancyAIExtraction(BaseModel):
     is_job_post: bool = True
     rejection_reason: str | None = None
 
-    detected_specializations: list[str] = Field(default_factory=list)
+    detected_specializations: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Primary hired role(s) in this post, usually one entry (e.g. ['Go']). "
+            "Do not add QA, analyst, or DevOps from skill/tool mentions unless that role is explicitly hired."
+        ),
+    )
     detected_grade: str = "unknown"
     salary_min: float | None = None
     salary_max: float | None = None
@@ -111,4 +117,6 @@ class VacancyAIExtraction(BaseModel):
     def norm_currency(cls, v: object) -> str | None:
         if v is None or (isinstance(v, str) and not str(v).strip()):
             return None
-        return str(v).strip().upper()[:8]
+        from tg_jobs_parser.fx.convert import normalize_currency
+
+        return normalize_currency(str(v).strip().upper()[:8], default_if_missing="RUB")

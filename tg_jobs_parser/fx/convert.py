@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-# В ЦБ нет «стейблкоинов» — для курса к RUB используем ближайший аналог (паритет к доллару).
-_FX_RATE_LOOKUP_ALIASES: dict[str, str] = {
+# Коды и символы валют → канонический код в exchange_rates / ЦБ.
+_CURRENCY_ALIASES: dict[str, str] = {
+    "RUR": "RUB",
+    "₽": "RUB",
+    "$": "USD",
+    "US$": "USD",
+    "€": "EUR",
     "USDT": "USD",
     "USDC": "USD",
 }
@@ -13,16 +18,22 @@ _FX_RATE_LOOKUP_ALIASES: dict[str, str] = {
 
 def currency_for_rate_lookup(code: str | None) -> str | None:
     """Код валюты для поиска курса в ``exchange_rates`` / ответе ЦБ."""
-    if not code:
+    if not code or not str(code).strip():
         return None
     u = str(code).upper().strip()
-    return _FX_RATE_LOOKUP_ALIASES.get(u, u)
+    return _CURRENCY_ALIASES.get(u, u)
 
 
 def normalize_currency(currency: str | None, *, default_if_missing: str = "RUB") -> str | None:
     if not currency or not str(currency).strip():
         return default_if_missing
-    return str(currency).upper().strip()
+    u = str(currency).upper().strip()
+    return _CURRENCY_ALIASES.get(u, u)
+
+
+def is_ruble_currency(currency: str | None) -> bool:
+    """RUB и RUR — одна валюта (рубль)."""
+    return normalize_currency(currency, default_if_missing="") == "RUB"
 
 
 def effective_salary_amount(
@@ -69,6 +80,8 @@ def salary_amount_to_rub(
     cur = normalize_currency(currency, default_if_missing=default_currency_if_missing)
     if cur is None:
         return None
+    if is_ruble_currency(cur):
+        return float(amount)
     lookup = currency_for_rate_lookup(cur)
     rate = rates.get(lookup) if lookup else None
     if rate is None:

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from backend.db.models import ExchangeRateRow
 from tg_jobs_parser.config.schema import FxConfig
 from tg_jobs_parser.fx.cbr import fetch_cbr_rates
-from tg_jobs_parser.fx.convert import currency_for_rate_lookup
+from tg_jobs_parser.fx.convert import currency_for_rate_lookup, is_ruble_currency
 
 _LOG = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def get_rate_to_rub(
     Курс валюты к рублю на дату; если на день нет — последний известный курс на эту дату или раньше.
     """
     cur = str(currency).upper().strip()
-    if cur == "RUB":
+    if is_ruble_currency(cur):
         return 1.0
     lookup = currency_for_rate_lookup(cur) or cur
     rates = get_rates(session, rate_date)

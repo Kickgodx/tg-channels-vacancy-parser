@@ -2,7 +2,12 @@
 
 from datetime import datetime, timezone
 
-from tg_jobs_parser.fx.convert import effective_salary_amount, salary_amount_to_rub
+from tg_jobs_parser.fx.convert import (
+    effective_salary_amount,
+    is_ruble_currency,
+    normalize_currency,
+    salary_amount_to_rub,
+)
 from tg_jobs_parser.fx.vacancy_rub import enrich_vacancy_salary_rub
 from tg_jobs_parser.models.vacancy import Vacancy
 
@@ -10,6 +15,17 @@ from tg_jobs_parser.models.vacancy import Vacancy
 def test_salary_amount_to_rub_usd():
     rates = {"RUB": 1.0, "USD": 90.0}
     assert salary_amount_to_rub(1000, "USD", rates) == 90000.0
+
+
+def test_rur_equals_rub():
+    assert normalize_currency("RUR") == "RUB"
+    assert is_ruble_currency("RUR")
+    assert salary_amount_to_rub(125000, "RUR", {"RUB": 1.0, "USD": 90.0}) == 125000.0
+
+
+def test_dollar_sign_equals_usd():
+    assert normalize_currency("$") == "USD"
+    assert salary_amount_to_rub(2100, "$", {"RUB": 1.0, "USD": 90.0}) == 189000.0
 
 
 def test_salary_amount_to_rub_usdt_uses_usd_rate():
