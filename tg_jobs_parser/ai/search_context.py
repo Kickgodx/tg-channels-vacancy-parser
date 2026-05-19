@@ -22,7 +22,7 @@ class SearchContext:
         if self.any_specialization:
             target_line = (
                 "  target_specializations: (any IT role — backend, frontend, mobile, "
-                "QA, DevOps, data, PHP, Rust, etc.)"
+                "QA, DevOps, AI/ML, data, PHP, Rust, etc.)"
             )
             policy = (
                 "ANY_IT_SPECIALIZATION=true: This is an IT job aggregator run. "
