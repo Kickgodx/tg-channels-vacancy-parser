@@ -11,7 +11,7 @@ from tg_jobs_parser.config.schema import FxConfig
 from tg_jobs_parser.fx.convert import (
     currency_for_rate_lookup,
     is_ruble_currency,
-    normalize_currency,
+    monthly_salary_amount,
 )
 from tg_jobs_parser.fx.vacancy_rub import effective_salary_amount_for_vacancy
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -33,6 +33,7 @@ def apply_salary_rub_for_vacancy(
     *,
     rates_cache: dict[date, dict[str, float]] | None = None,
     force: bool = False,
+    db_rates_only: bool = False,
 ) -> None:
     if not force and v.detected_salary_avg_rub is not None:
         return
@@ -40,22 +41,25 @@ def apply_salary_rub_for_vacancy(
     if amount is None:
         v.detected_salary_avg_rub = None
         return
-    cur = normalize_currency(
-        v.salary_currency,
-        default_if_missing=config.default_currency_if_missing,
-    )
-    if is_ruble_currency(cur):
-        v.detected_salary_avg_rub = float(amount)
+    monthly = monthly_salary_amount(amount, v.salary_currency)
+    if monthly is None:
+        v.detected_salary_avg_rub = None
+        return
+    if is_ruble_currency(v.salary_currency):
+        v.detected_salary_avg_rub = monthly
         return
     if not config.enabled:
         v.detected_salary_avg_rub = None
         return
     _, rates = _rates_from_cache(rates_cache)
     if not rates:
-        _, rates = fx_repo.ensure_latest_rates(session, config)
-    lookup = currency_for_rate_lookup(cur) if cur else None
+        if db_rates_only:
+            _, rates = fx_repo.get_latest_rates(session)
+        else:
+            _, rates = fx_repo.ensure_latest_rates(session, config)
+    lookup = currency_for_rate_lookup(v.salary_currency)
     rate = rates.get(lookup) if lookup and rates else None
-    v.detected_salary_avg_rub = float(amount) * rate if rate is not None else None
+    v.detected_salary_avg_rub = monthly * rate if rate is not None else None
 
 
 def preload_fx_rates_for_vacancies(

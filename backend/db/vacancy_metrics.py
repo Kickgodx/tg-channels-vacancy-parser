@@ -13,6 +13,7 @@ from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
 from backend.schemas import VacancyQuery
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
+from tg_jobs_parser.fx.convert import HOURS_PER_MONTH
 from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta, SalaryStats, TimeSeriesBucket
 
 _TOP_SPECS = 50
@@ -25,23 +26,40 @@ def _dialect_name(session: Session) -> str:
     return bind.dialect.name if bind is not None else "postgresql"
 
 
+def _hourly_to_monthly_factor(column=VacancyRow):
+    cur = func.upper(func.coalesce(column.salary_currency, literal("")))
+    return case(
+        (cur.like("%/HOUR%"), literal(float(HOURS_PER_MONTH))),
+        (cur.like("%/ЧАС%"), literal(float(HOURS_PER_MONTH))),
+        else_=literal(1.0),
+    )
+
+
 def _salary_native_expr(column=VacancyRow):
-    """Сумма зарплаты в исходной валюте."""
-    return func.coalesce(
+    """Сумма зарплаты в исходной валюте (месячный эквивалент при RUB/HOUR и т.п.)."""
+    native = func.coalesce(
         column.detected_salary_avg,
         (column.detected_salary_min + column.detected_salary_max) / 2.0,
         column.detected_salary_min,
         column.detected_salary_max,
     )
+    return native * _hourly_to_monthly_factor(column)
 
 
 def _salary_native_expr_table(table):
-    return func.coalesce(
+    native = func.coalesce(
         table.c.detected_salary_avg,
         (table.c.detected_salary_min + table.c.detected_salary_max) / 2.0,
         table.c.detected_salary_min,
         table.c.detected_salary_max,
     )
+    cur = func.upper(func.coalesce(table.c.salary_currency, literal("")))
+    factor = case(
+        (cur.like("%/HOUR%"), literal(float(HOURS_PER_MONTH))),
+        (cur.like("%/ЧАС%"), literal(float(HOURS_PER_MONTH))),
+        else_=literal(1.0),
+    )
+    return native * factor
 
 
 def _latest_rate_date_subquery():
@@ -52,18 +70,29 @@ def _currency_expr(column=VacancyRow):
     return func.upper(func.coalesce(column.salary_currency, literal("RUB")))
 
 
-def _currency_for_fx_join(column=VacancyRow):
-    """Код валюты в exchange_rates (символы и алиасы → ISO)."""
+def _currency_iso_expr(column=VacancyRow):
+    """ISO-код валюты без суффикса периода (RUB/HOUR → RUB)."""
     u = _currency_expr(column)
     return case(
-        (u == "RUR", literal("RUB")),
-        (u == "₽", literal("RUB")),
-        (u == "$", literal("USD")),
-        (u == "USDT", literal("USD")),
-        (u == "USDC", literal("USD")),
-        (u == "€", literal("EUR")),
+        (u.in_(["RUR", "RUB", "₽"]), literal("RUB")),
+        (u.like("RUR/%"), literal("RUB")),
+        (u.like("RUB/%"), literal("RUB")),
+        (u.like("₽/%"), literal("RUB")),
+        (u.in_(["$", "USD", "USDT", "USDC"]), literal("USD")),
+        (u.like("USD/%"), literal("USD")),
+        (u.like("USDT/%"), literal("USD")),
+        (u.like("USDC/%"), literal("USD")),
+        (u.like("$/%"), literal("USD")),
+        (u.in_(["€", "EUR"]), literal("EUR")),
+        (u.like("EUR/%"), literal("EUR")),
+        (u.like("€/%"), literal("EUR")),
         else_=u,
     )
+
+
+def _currency_for_fx_join(column=VacancyRow):
+    """Код валюты в exchange_rates (символы и алиасы → ISO)."""
+    return _currency_iso_expr(column)
 
 
 def _fx_rate_subquery(column=VacancyRow):
@@ -93,12 +122,18 @@ def _salary_rub_expr_table(table):
     native = _salary_native_expr_table(table)
     u = func.upper(func.coalesce(table.c.salary_currency, literal("RUB")))
     cur_for_fx = case(
-        (u == "RUR", literal("RUB")),
-        (u == "₽", literal("RUB")),
-        (u == "$", literal("USD")),
-        (u == "USDT", literal("USD")),
-        (u == "USDC", literal("USD")),
-        (u == "€", literal("EUR")),
+        (u.in_(["RUR", "RUB", "₽"]), literal("RUB")),
+        (u.like("RUR/%"), literal("RUB")),
+        (u.like("RUB/%"), literal("RUB")),
+        (u.like("₽/%"), literal("RUB")),
+        (u.in_(["$", "USD", "USDT", "USDC"]), literal("USD")),
+        (u.like("USD/%"), literal("USD")),
+        (u.like("USDT/%"), literal("USD")),
+        (u.like("USDC/%"), literal("USD")),
+        (u.like("$/%"), literal("USD")),
+        (u.in_(["€", "EUR"]), literal("EUR")),
+        (u.like("EUR/%"), literal("EUR")),
+        (u.like("€/%"), literal("EUR")),
         else_=u,
     )
     rate_sq = (

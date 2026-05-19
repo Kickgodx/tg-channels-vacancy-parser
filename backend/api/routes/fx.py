@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -32,6 +32,13 @@ class FxRefreshResponse(BaseModel):
     rate_date: date
     rates_count: int
     history_days_synced: int
+    vacancies_processed: int
+    vacancies_updated_rub: int
+    vacancies_skipped_no_rate: int
+
+
+class FxRecalculateRubResponse(BaseModel):
+    rate_date: date | None = None
     vacancies_processed: int
     vacancies_updated_rub: int
     vacancies_skipped_no_rate: int
@@ -67,6 +74,29 @@ def refresh_fx_rates(db: Session = Depends(get_db)) -> FxRefreshResponse:
         rate_date=rate_date,
         rates_count=rates_count,
         history_days_synced=history_synced,
+        vacancies_processed=backfill.processed,
+        vacancies_updated_rub=backfill.updated,
+        vacancies_skipped_no_rate=backfill.skipped_no_rate,
+    )
+
+
+@router.post("/recalculate-rub", response_model=FxRecalculateRubResponse)
+def recalculate_salary_rub(db: Session = Depends(get_db)) -> FxRecalculateRubResponse:
+    """
+    Пересчитать ``detected_salary_avg_rub`` по последнему курсу в БД, без запроса к ЦБ.
+    """
+    cfg = load_config(get_settings().config_path)
+    if not cfg.fx.enabled:
+        raise HTTPException(status_code=400, detail="Конвертация валют отключена в config (fx.enabled).")
+    rate_date, rates = fx_repo.get_latest_rates(db)
+    if rate_date is None or not rates:
+        raise HTTPException(
+            status_code=400,
+            detail="В БД нет курсов. Сначала нажмите «Обновить курсы ЦБ».",
+        )
+    backfill = backfill_vacancies_salary_rub(db, cfg.fx, db_rates_only=True)
+    return FxRecalculateRubResponse(
+        rate_date=rate_date,
         vacancies_processed=backfill.processed,
         vacancies_updated_rub=backfill.updated,
         vacancies_skipped_no_rate=backfill.skipped_no_rate,

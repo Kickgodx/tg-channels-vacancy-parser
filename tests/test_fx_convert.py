@@ -3,9 +3,12 @@
 from datetime import datetime, timezone
 
 from tg_jobs_parser.fx.convert import (
+    HOURS_PER_MONTH,
     effective_salary_amount,
     is_ruble_currency,
+    monthly_salary_amount,
     normalize_currency,
+    parse_salary_currency,
     salary_amount_to_rub,
 )
 from tg_jobs_parser.fx.vacancy_rub import enrich_vacancy_salary_rub
@@ -21,6 +24,13 @@ def test_rur_equals_rub():
     assert normalize_currency("RUR") == "RUB"
     assert is_ruble_currency("RUR")
     assert salary_amount_to_rub(125000, "RUR", {"RUB": 1.0, "USD": 90.0}) == 125000.0
+
+
+def test_rub_per_hour_to_monthly_rub():
+    assert parse_salary_currency("RUB/HOUR") == ("RUB", "hour")
+    assert normalize_currency("RUB/HOUR") == "RUB"
+    assert monthly_salary_amount(700, "RUB/HOUR") == 700 * HOURS_PER_MONTH
+    assert salary_amount_to_rub(700, "RUB/HOUR", {"RUB": 1.0}) == 700 * HOURS_PER_MONTH
 
 
 def test_dollar_sign_equals_usd():
