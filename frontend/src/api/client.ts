@@ -120,6 +120,15 @@ export const api = {
       vacancies_skipped_no_rate: number;
     }>("/fx/refresh", { method: "POST" }),
 
+  /** Пересчёт зарплат в ₽ по последнему курсу в БД, без запроса к ЦБ. */
+  recalculateSalaryRub: () =>
+    request<{
+      rate_date: string | null;
+      vacancies_processed: number;
+      vacancies_updated_rub: number;
+      vacancies_skipped_no_rate: number;
+    }>("/fx/recalculate-rub", { method: "POST" }),
+
   getVacancyMetrics: (params?: VacancyQueryParams) => {
     const q = new URLSearchParams();
     appendSearchParams(q, params);

@@ -48,6 +48,14 @@ export default function VacanciesPage() {
     },
   });
 
+  const fxRecalcRubM = useMutation({
+    mutationFn: () => api.recalculateSalaryRub(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["vacancy-metrics"] });
+      void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
+    },
+  });
+
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [sourceChannel, setSourceChannel] = useState("");
@@ -187,11 +195,20 @@ export default function VacanciesPage() {
         <button
           type="button"
           className="btn-secondary"
-          disabled={fxRefreshM.isPending}
+          disabled={fxRefreshM.isPending || fxRecalcRubM.isPending}
           onClick={() => fxRefreshM.mutate()}
           title="Загрузить курсы ЦБ и пересчитать зарплаты в рублях для всех вакансий"
         >
           {fxRefreshM.isPending ? "Обновление курсов…" : "Обновить курсы ЦБ"}
+        </button>
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={fxRefreshM.isPending || fxRecalcRubM.isPending}
+          onClick={() => fxRecalcRubM.mutate()}
+          title="Пересчитать колонку «Зарплата, ₽» по последнему курсу из БД (без запроса к ЦБ)"
+        >
+          {fxRecalcRubM.isPending ? "Пересчёт ₽…" : "Пересчитать зарплаты в ₽"}
         </button>
         {fxRatesQ.data?.rate_date && fxRatesQ.data.rates.length > 0 && (
           <span className="caption">
@@ -206,15 +223,24 @@ export default function VacanciesPage() {
         )}
         {fxRefreshM.isSuccess && (
           <span className="caption">
-            Обновлено вакансий: {fxRefreshM.data.vacancies_updated_rub} / {fxRefreshM.data.vacancies_processed}
+            Курсы ЦБ: обновлено {fxRefreshM.data.vacancies_updated_rub} / {fxRefreshM.data.vacancies_processed}
             {fxRefreshM.data.vacancies_skipped_no_rate > 0
               ? ` (без курса: ${fxRefreshM.data.vacancies_skipped_no_rate})`
               : ""}
           </span>
         )}
-        {fxRefreshM.isError && (
+        {fxRecalcRubM.isSuccess && (
+          <span className="caption">
+            Пересчёт ₽ (курс на {fxRecalcRubM.data.rate_date ?? "—"}):{" "}
+            {fxRecalcRubM.data.vacancies_updated_rub} / {fxRecalcRubM.data.vacancies_processed}
+            {fxRecalcRubM.data.vacancies_skipped_no_rate > 0
+              ? ` (без курса: ${fxRecalcRubM.data.vacancies_skipped_no_rate})`
+              : ""}
+          </span>
+        )}
+        {(fxRefreshM.isError || fxRecalcRubM.isError) && (
           <span className="caption" style={{ color: "var(--color-danger, #c92a2a)" }}>
-            {fxRefreshM.error.message}
+            {(fxRecalcRubM.error ?? fxRefreshM.error)?.message}
           </span>
         )}
       </div>
