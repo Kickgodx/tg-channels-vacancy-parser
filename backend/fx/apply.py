@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 
 from backend.db import fx_repository as fx_repo
 from tg_jobs_parser.config.schema import FxConfig
-from tg_jobs_parser.fx.convert import currency_for_rate_lookup, normalize_currency
+from tg_jobs_parser.fx.convert import (
+    currency_for_rate_lookup,
+    is_ruble_currency,
+    normalize_currency,
+)
 from tg_jobs_parser.fx.vacancy_rub import effective_salary_amount_for_vacancy
 from tg_jobs_parser.models.vacancy import Vacancy
 
@@ -40,7 +44,7 @@ def apply_salary_rub_for_vacancy(
         v.salary_currency,
         default_if_missing=config.default_currency_if_missing,
     )
-    if cur == "RUB":
+    if is_ruble_currency(cur):
         v.detected_salary_avg_rub = float(amount)
         return
     if not config.enabled:

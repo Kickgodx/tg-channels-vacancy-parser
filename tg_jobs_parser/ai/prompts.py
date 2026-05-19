@@ -8,6 +8,18 @@ from tg_jobs_parser.ai.schema import VacancyAIExtraction
 from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 
+_SPECIALIZATION_RULES = """
+- detected_specializations — ONLY the job role(s) this post is hiring for (usually ONE primary role).
+- Read the TITLE / first lines first: "Go разработчик", "Senior Backend", "QA Engineer" define the role.
+- Do NOT tag extra roles from skills, tools, or infra mentioned in requirements:
+  • "тестирование", "unit tests", "качество кода" in a developer post → NOT QA / Manual QA / AQA / SDET.
+  • Kubernetes, Docker, CI/CD, client-go, SRE practices in a developer post → NOT DevOps unless the title is DevOps/SRE.
+  • "аналитик", "архитектура", "бизнес" in prose without hiring an analyst → NOT System Analyst / Business Analyst / Analyst.
+- Channel footers ("база знаний", "другие вакансии в канале", @mentions) are NOT part of the vacancy — ignore for role.
+- One clear developer vacancy → list that developer role only (e.g. ["Go"]), not QA + analyst + DevOps.
+- Prefer one canonical name from ALLOWED_SPECIALIZATIONS (e.g. "Go" OR "Golang", not both unless two roles are hired).
+- You MAY add a new role name only if clearly stated in the vacancy (e.g. Rust) even if not in ALLOWED list."""
+
 SYSTEM_PROMPT_V1 = """You extract structured IT job vacancy fields from Telegram posts (Russian and/or English).
 Return ONE JSON object only. No markdown, no commentary outside JSON.
 Rules:
@@ -15,7 +27,7 @@ Rules:
 - If SEARCH_CONTEXT sets ANY_IT_SPECIALIZATION=true — do not reject an IT job only because the role/stack is outside target_specializations (e.g. PHP, Ruby, .NET are valid).
 - Do NOT invent salary, company, or URLs: use null/[] when absent in text.
 - Numbers in URLs (vacancy id in path, e.g. /76348/) are NOT salary — salary_min/max must be null if pay is not stated in prose.
-- detected_specializations: canonical role names; you MAY add a new role name if clearly stated (e.g. Rust) even if not in ALLOWED list.
+""" + _SPECIALIZATION_RULES + """
 - work_format: one of remote, hybrid, office, relocation, unknown (or null).
 - detected_grade: one of """ + ", ".join(GRADE_OPTIONS) + """ (use unknown if not stated).
   Title/role grade wins (e.g. "Senior QA" → senior). Do NOT treat verb "to staff" / "staffing" as grade staff.
@@ -40,6 +52,24 @@ Example JSON:
         "city": None,
         "application_urls": ["https://example.com/careers/go"],
         "confidence": 0.9,
+    },
+    ensure_ascii=False,
+)
+
+_FEW_SHOT_GO_K8S = """Example (developer only — skills must not become extra roles):
+"Senior Go разработчик. Требования: Go, тестирование, Kubernetes client-go, RBAC. База знаний по Golang @channel"
+Example JSON:
+""" + json.dumps(
+    {
+        "is_job_post": True,
+        "rejection_reason": None,
+        "detected_specializations": ["Go"],
+        "detected_grade": "senior",
+        "salary_min": None,
+        "salary_max": None,
+        "salary_currency": None,
+        "work_format": "unknown",
+        "confidence": 0.92,
     },
     ensure_ascii=False,
 )
@@ -70,7 +100,15 @@ def build_messages(
         text,
     ]
     if use_few_shot:
-        user_parts.insert(0, _FEW_SHOT_USER + "\n\n" + _FEW_SHOT_RESUME + "\n\n---\n\n")
+        user_parts.insert(
+            0,
+            _FEW_SHOT_USER
+            + "\n\n"
+            + _FEW_SHOT_GO_K8S
+            + "\n\n"
+            + _FEW_SHOT_RESUME
+            + "\n\n---\n\n",
+        )
 
     return [
         {"role": "system", "content": SYSTEM_PROMPT_V1},

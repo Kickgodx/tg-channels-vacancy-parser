@@ -53,11 +53,15 @@ def _currency_expr(column=VacancyRow):
 
 
 def _currency_for_fx_join(column=VacancyRow):
-    """Код валюты в exchange_rates (USDT/USDC → USD)."""
+    """Код валюты в exchange_rates (символы и алиасы → ISO)."""
     u = _currency_expr(column)
     return case(
+        (u == "RUR", literal("RUB")),
+        (u == "₽", literal("RUB")),
+        (u == "$", literal("USD")),
         (u == "USDT", literal("USD")),
         (u == "USDC", literal("USD")),
+        (u == "€", literal("EUR")),
         else_=u,
     )
 
@@ -89,8 +93,12 @@ def _salary_rub_expr_table(table):
     native = _salary_native_expr_table(table)
     u = func.upper(func.coalesce(table.c.salary_currency, literal("RUB")))
     cur_for_fx = case(
+        (u == "RUR", literal("RUB")),
+        (u == "₽", literal("RUB")),
+        (u == "$", literal("USD")),
         (u == "USDT", literal("USD")),
         (u == "USDC", literal("USD")),
+        (u == "€", literal("EUR")),
         else_=u,
     )
     rate_sq = (

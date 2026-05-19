@@ -70,6 +70,22 @@ def test_primary_unknown_grade_not_rules_fallback():
     assert out.detected_grade == "unknown"
 
 
+def test_primary_specs_only_from_ai_not_rules():
+    """В primary rule-based ложные QA/аналитик не должны попадать в итог."""
+    cfg = AppConfig()
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"})})
+    v = _vacancy(
+        detected_specializations=["QA", "Go", "Golang", "System Analyst", "Business Analyst"],
+    )
+    ai = VacancyAIExtraction(
+        is_job_post=True,
+        detected_specializations=["Go"],
+        confidence=0.95,
+    )
+    out = merge_rules_and_ai(v, ai, cfg)
+    assert out.detected_specializations == ["Go"]
+
+
 def test_primary_clears_rules_salary_when_ai_null():
     cfg = AppConfig()
     cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"})})

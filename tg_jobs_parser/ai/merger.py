@@ -68,8 +68,10 @@ def merge_rules_and_ai(
             return True
         return field in prefer and conf >= merge_cfg.min_confidence
 
+    # primary: только роли от LLM (rules часто дают ложные QA/аналитик по подстрокам)
+    rules_specs = [] if ai_cfg.mode == "primary" else vacancy.detected_specializations
     specs = _merge_specs(
-        vacancy.detected_specializations,
+        rules_specs,
         ai.detected_specializations,
         allow_unknown=ai_cfg.allow_unknown_specializations,
         allowed=allowed_specs,

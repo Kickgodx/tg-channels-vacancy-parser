@@ -105,7 +105,7 @@ def _norm_currency(token: str | None) -> str | None:
         return "USD"
     if t in {"€", "eur"}:
         return "EUR"
-    if t in {"rub", "руб", "₽"}:
+    if t in {"rub", "rur", "руб", "₽"}:
         return "RUB"
     return token.upper()
 
