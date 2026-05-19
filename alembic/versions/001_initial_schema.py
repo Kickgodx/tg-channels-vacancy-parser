@@ -36,6 +36,16 @@ def upgrade() -> None:
     op.create_index("ix_parse_runs_status", "parse_runs", ["status"], unique=False)
 
     op.create_table(
+        "exchange_rates",
+        sa.Column("rate_date", sa.Date(), nullable=False),
+        sa.Column("currency", sa.String(length=8), nullable=False),
+        sa.Column("rate_to_rub", sa.Float(), nullable=False),
+        sa.Column("source", sa.String(length=16), nullable=False),
+        sa.Column("fetched_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("rate_date", "currency"),
+    )
+
+    op.create_table(
         "vacancies",
         sa.Column("id", sa.String(length=128), nullable=False),
         sa.Column("source_post_key", sa.String(length=128), nullable=False),
@@ -50,6 +60,7 @@ def upgrade() -> None:
         sa.Column("detected_salary_min", sa.Float(), nullable=True),
         sa.Column("detected_salary_max", sa.Float(), nullable=True),
         sa.Column("detected_salary_avg", sa.Float(), nullable=True),
+        sa.Column("detected_salary_avg_rub", sa.Float(), nullable=True),
         sa.Column("salary_currency", sa.String(length=16), nullable=True),
         sa.Column("work_format", sa.String(length=32), nullable=True),
         sa.Column("country", sa.String(length=256), nullable=True),
@@ -109,5 +120,6 @@ def downgrade() -> None:
     op.drop_index("ix_vacancies_source_post_key", table_name="vacancies")
     op.drop_index("ix_vacancies_source_channel", table_name="vacancies")
     op.drop_table("vacancies")
+    op.drop_table("exchange_rates")
     op.drop_index("ix_parse_runs_status", table_name="parse_runs")
     op.drop_table("parse_runs")

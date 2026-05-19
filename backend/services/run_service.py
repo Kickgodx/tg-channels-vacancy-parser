@@ -88,6 +88,11 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
         with session_scope() as session:
             repo.finalize_parse_run(session, run_id, result, status=final_status)
         try:
+            _LOG.info(
+                "Прогон %s: сохранение %s вакансий в PostgreSQL…",
+                run_id,
+                len(result.vacancies_unique),
+            )
             with session_scope() as session:
                 stats = repo.upsert_vacancies(session, result.vacancies_unique, parse_run_id=run_id)
                 repo.patch_run_vacancy_upsert_stats(session, run_id, stats)

@@ -54,7 +54,14 @@ interface Props {
   metrics: MetricsSummary;
 }
 
+function salaryChartSuffix(metrics: MetricsSummary): string {
+  const sd = metrics.salary_display;
+  if (!sd || sd.display_currency !== "RUB") return "";
+  return sd.rates_as_of ? `, ₽ (курс ЦБ ${sd.rates_as_of})` : ", ₽";
+}
+
 export default function MetricsCharts({ metrics }: Props) {
+  const salarySuffix = salaryChartSuffix(metrics);
   const specData = dictToBarData(metrics.vacancies_by_specialization ?? {}, 20);
   const gradeData = dictToBarData(metrics.vacancies_by_grade ?? {});
   const wfData = dictToBarData(metrics.vacancies_by_work_format ?? {});
@@ -143,7 +150,7 @@ export default function MetricsCharts({ metrics }: Props) {
 
       {salaryGrade.length > 0 && (
         <div className="card chart-card">
-          <h4>Средняя зарплата по грейдам</h4>
+          <h4>Средняя зарплата по грейдам{salarySuffix}</h4>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={salaryGrade}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -158,7 +165,7 @@ export default function MetricsCharts({ metrics }: Props) {
 
       {salarySpec.length > 0 && (
         <div className="card chart-card chart-wide">
-          <h4>Средняя зарплата по специализациям</h4>
+          <h4>Средняя зарплата по специализациям{salarySuffix}</h4>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={salarySpec} margin={{ bottom: 80 }}>
               <CartesianGrid strokeDasharray="3 3" />

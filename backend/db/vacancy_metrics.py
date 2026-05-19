@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from sqlalchemy import cast, func, lateral, select, true
+from datetime import datetime, timezone
+
+from sqlalchemy import case, cast, func, lateral, literal, select, true
 from sqlalchemy.orm import Session
 
-from backend.db.models import VacancyRow
+from backend.db import fx_repository as fx_repo
+from backend.db.models import ExchangeRateRow, VacancyRow
 from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.models.metrics import MetricsSummary, SalaryStats, TimeSeriesBucket
+from backend.settings import get_settings
+from tg_jobs_parser.config.loader import load_config
+from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta, SalaryStats, TimeSeriesBucket
 
 _TOP_SPECS = 50
 _TOP_SALARY_SPECS = 25
@@ -20,18 +25,107 @@ def _dialect_name(session: Session) -> str:
     return bind.dialect.name if bind is not None else "postgresql"
 
 
-def _salary_expr():
-    """Средняя зарплата для агрегатов (как в metrics_builder, упрощённо)."""
+def _salary_native_expr(column=VacancyRow):
+    """Сумма зарплаты в исходной валюте."""
     return func.coalesce(
-        VacancyRow.detected_salary_avg,
-        (VacancyRow.detected_salary_min + VacancyRow.detected_salary_max) / 2.0,
-        VacancyRow.detected_salary_min,
-        VacancyRow.detected_salary_max,
+        column.detected_salary_avg,
+        (column.detected_salary_min + column.detected_salary_max) / 2.0,
+        column.detected_salary_min,
+        column.detected_salary_max,
+    )
+
+
+def _salary_native_expr_table(table):
+    return func.coalesce(
+        table.c.detected_salary_avg,
+        (table.c.detected_salary_min + table.c.detected_salary_max) / 2.0,
+        table.c.detected_salary_min,
+        table.c.detected_salary_max,
+    )
+
+
+def _latest_rate_date_subquery():
+    return select(func.max(ExchangeRateRow.rate_date)).scalar_subquery()
+
+
+def _currency_expr(column=VacancyRow):
+    return func.upper(func.coalesce(column.salary_currency, literal("RUB")))
+
+
+def _currency_for_fx_join(column=VacancyRow):
+    """Код валюты в exchange_rates (USDT/USDC → USD)."""
+    u = _currency_expr(column)
+    return case(
+        (u == "USDT", literal("USD")),
+        (u == "USDC", literal("USD")),
+        else_=u,
+    )
+
+
+def _fx_rate_subquery(column=VacancyRow):
+    return (
+        select(ExchangeRateRow.rate_to_rub)
+        .where(
+            ExchangeRateRow.currency == _currency_for_fx_join(column),
+            ExchangeRateRow.rate_date == _latest_rate_date_subquery(),
+        )
+        .correlate(column)
+        .scalar_subquery()
+    )
+
+
+def _salary_rub_expr(column=VacancyRow):
+    """
+    RUB: сохранённый ``detected_salary_avg_rub`` или fallback native × курс из exchange_rates.
+    """
+    native = _salary_native_expr(column)
+    return func.coalesce(
+        column.detected_salary_avg_rub,
+        native * _fx_rate_subquery(column),
+    )
+
+
+def _salary_rub_expr_table(table):
+    native = _salary_native_expr_table(table)
+    u = func.upper(func.coalesce(table.c.salary_currency, literal("RUB")))
+    cur_for_fx = case(
+        (u == "USDT", literal("USD")),
+        (u == "USDC", literal("USD")),
+        else_=u,
+    )
+    rate_sq = (
+        select(ExchangeRateRow.rate_to_rub)
+        .where(
+            ExchangeRateRow.currency == cur_for_fx,
+            ExchangeRateRow.rate_date == _latest_rate_date_subquery(),
+        )
+        .correlate(table)
+        .scalar_subquery()
+    )
+    return func.coalesce(table.c.detected_salary_avg_rub, native * rate_sq)
+
+
+def _prepare_fx(session: Session) -> SalaryDisplayMeta:
+    cfg = load_config(get_settings().config_path)
+    if cfg.fx.enabled:
+        fx_repo.sync_recent_days(session, cfg.fx)
+        rate_date, _ = fx_repo.ensure_latest_rates(session, cfg.fx)
+    else:
+        rate_date = None
+    rates_as_of = (
+        rate_date.isoformat()
+        if rate_date is not None
+        else datetime.now(timezone.utc).date().isoformat()
+    )
+    return SalaryDisplayMeta(
+        display_currency=cfg.fx.display_currency,
+        rates_as_of=rates_as_of,
+        rates_source=cfg.fx.provider,
     )
 
 
 def _salary_by_grade(session: Session, query: VacancyQuery, *, dialect: str) -> dict[str, SalaryStats]:
-    sal = _salary_expr()
+    sal = _salary_rub_expr()
     stmt = apply_vacancy_filters(
         select(
             VacancyRow.detected_grade,
@@ -89,15 +183,6 @@ def _vacancies_alias():
     return VacancyRow.__table__.alias("v")
 
 
-def _salary_expr_table(table):
-    return func.coalesce(
-        table.c.detected_salary_avg,
-        (table.c.detected_salary_min + table.c.detected_salary_max) / 2.0,
-        table.c.detected_salary_min,
-        table.c.detected_salary_max,
-    )
-
-
 def _pg_spec_lateral(v):
     """LATERAL unnest специализаций; v — алиас vacancies с .correlate(v)."""
     from sqlalchemy.dialects.postgresql import JSONB
@@ -142,7 +227,7 @@ def _spec_counts_sqlite(session: Session, query: VacancyQuery, *, dialect: str) 
 def _salary_by_spec_postgresql(session: Session, query: VacancyQuery, *, dialect: str) -> dict[str, SalaryStats]:
     v = _vacancies_alias()
     spec_lat = _pg_spec_lateral(v)
-    sal = _salary_expr_table(v)
+    sal = _salary_rub_expr_table(v)
     stmt = apply_vacancy_filters(
         select(
             spec_lat.c.spec,
@@ -167,7 +252,7 @@ def _salary_by_spec_postgresql(session: Session, query: VacancyQuery, *, dialect
 
 def _salary_by_spec_sqlite(session: Session, query: VacancyQuery, *, dialect: str) -> dict[str, SalaryStats]:
     je = func.json_each(VacancyRow.detected_specializations).table_valued("value", with_ordinality=False)
-    sal = _salary_expr()
+    sal = _salary_rub_expr()
     stmt = apply_vacancy_filters(
         select(je.c.value, func.avg(sal), func.count(VacancyRow.id))
         .select_from(VacancyRow)
@@ -189,9 +274,10 @@ def _salary_by_spec_sqlite(session: Session, query: VacancyQuery, *, dialect: st
 def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsSummary:
     """Сводка для графиков; те же фильтры, что у GET /vacancies."""
     dialect = _dialect_name(session)
+    salary_display = _prepare_fx(session)
     total = int(session.scalar(vacancy_count_stmt(query, dialect=dialect)) or 0)
     if total == 0:
-        return MetricsSummary(unique_vacancies=0, total_vacancies=0)
+        return MetricsSummary(unique_vacancies=0, total_vacancies=0, salary_display=salary_display)
 
     by_spec = (
         _spec_counts_postgresql(session, query, dialect=dialect)
@@ -204,11 +290,11 @@ def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsS
         else _salary_by_spec_sqlite(session, query, dialect=dialect)
     )
 
-    sal_expr = _salary_expr()
+    sal_rub = _salary_rub_expr()
     with_salary = int(
         session.scalar(
             apply_vacancy_filters(
-                select(func.count(VacancyRow.id)).where(sal_expr.isnot(None)),
+                select(func.count(VacancyRow.id)).where(sal_rub.isnot(None)),
                 query,
                 dialect=dialect,
             )
@@ -235,4 +321,5 @@ def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsS
         grade_distribution=_count_by_column(
             session, query, VacancyRow.detected_grade, dialect=dialect
         ),
+        salary_display=salary_display,
     )

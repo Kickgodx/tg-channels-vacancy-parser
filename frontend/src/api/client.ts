@@ -105,6 +105,21 @@ export const api = {
   },
 
   /** Агрегаты для графиков (те же фильтры, что у listVacancies, без пагинации). */
+  getFxRates: () =>
+    request<{ rate_date: string | null; source: string; rates: { currency: string; rate_to_rub: number }[] }>(
+      "/fx/rates",
+    ),
+
+  refreshFxRates: () =>
+    request<{
+      rate_date: string;
+      rates_count: number;
+      history_days_synced: number;
+      vacancies_processed: number;
+      vacancies_updated_rub: number;
+      vacancies_skipped_no_rate: number;
+    }>("/fx/refresh", { method: "POST" }),
+
   getVacancyMetrics: (params?: VacancyQueryParams) => {
     const q = new URLSearchParams();
     appendSearchParams(q, params);

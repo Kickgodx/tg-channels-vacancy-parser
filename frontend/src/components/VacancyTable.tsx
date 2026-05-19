@@ -9,6 +9,7 @@ const ALL_COLUMNS = [
   { key: "source_channel", label: "Канал", sortable: false },
   { key: "post_date", label: "Дата", sortable: true },
   { key: "detected_salary_avg", label: "Зарплата", sortable: true },
+  { key: "detected_salary_avg_rub", label: "Зарплата, ₽", sortable: true },
   { key: "salary_currency", label: "Валюта", sortable: true },
   { key: "work_format", label: "Формат", sortable: true },
   { key: "detected_grade", label: "Грейд", sortable: true },
@@ -65,6 +66,7 @@ export default function VacancyTable({
     "source_channel",
     "post_date",
     "detected_salary_avg",
+    "detected_salary_avg_rub",
     "salary_currency",
     "work_format",
     "detected_grade",
@@ -111,7 +113,13 @@ export default function VacancyTable({
       case "post_date":
         return v.post_date ? new Date(v.post_date).toLocaleDateString() : "—";
       case "detected_salary_avg":
-        return v.detected_salary_avg != null ? Math.round(v.detected_salary_avg).toLocaleString() : "—";
+        return v.detected_salary_avg != null
+          ? `${Math.round(v.detected_salary_avg).toLocaleString()} ${v.salary_currency || ""}`.trim()
+          : "—";
+      case "detected_salary_avg_rub":
+        return v.detected_salary_avg_rub != null
+          ? `${Math.round(v.detected_salary_avg_rub).toLocaleString()} ₽`
+          : "—";
       case "detected_specializations":
         return (v.detected_specializations || []).join(", ") || "—";
       case "cleaned_text":

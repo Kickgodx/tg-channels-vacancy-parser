@@ -5,7 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, JSON, String, Text, func
+from datetime import date
+
+from sqlalchemy import Date, DateTime, Float, Integer, JSON, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,6 +34,18 @@ class ParseRunRow(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class ExchangeRateRow(Base):
+    """Курс валюты к рублю на дату (источник — ЦБ РФ)."""
+
+    __tablename__ = "exchange_rates"
+
+    rate_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    currency: Mapped[str] = mapped_column(String(8), primary_key=True)
+    rate_to_rub: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="cbr")
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class VacancyRow(Base):
     """Уникальная вакансия по тексту (``id`` = sha256 normalize(cleaned_text))."""
 
@@ -51,6 +65,7 @@ class VacancyRow(Base):
     detected_salary_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     detected_salary_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     detected_salary_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    detected_salary_avg_rub: Mapped[float | None] = mapped_column(Float, nullable=True)
     salary_currency: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     work_format: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)

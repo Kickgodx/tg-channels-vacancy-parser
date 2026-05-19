@@ -10,21 +10,16 @@ from typing import Iterable
 import pandas as pd
 
 from tg_jobs_parser.extraction.grade_extractor import GRADE_RANK
-from tg_jobs_parser.models.metrics import MetricsSummary, SalaryStats, TimeSeriesBucket
+from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta, SalaryStats, TimeSeriesBucket
 from tg_jobs_parser.models.vacancy import Vacancy
 
 
-def _salary_values(vs: Iterable[Vacancy]) -> list[float]:
+def _salary_values_rub(vs: Iterable[Vacancy]) -> list[float]:
+    """Суммы в RUB для графиков (только если удалось сконвертировать)."""
     out: list[float] = []
     for v in vs:
-        if v.detected_salary_avg is not None:
-            out.append(float(v.detected_salary_avg))
-        elif v.detected_salary_min is not None and v.detected_salary_max is not None:
-            out.append((v.detected_salary_min + v.detected_salary_max) / 2)
-        elif v.detected_salary_min is not None:
-            out.append(float(v.detected_salary_min))
-        elif v.detected_salary_max is not None:
-            out.append(float(v.detected_salary_max))
+        if v.detected_salary_avg_rub is not None:
+            out.append(float(v.detected_salary_avg_rub))
     return out
 
 
@@ -86,7 +81,7 @@ def build_metrics(
 
     # salary stats
     def stats_for(vs: list[Vacancy]) -> SalaryStats:
-        vals = _salary_values(vs)
+        vals = _salary_values_rub(vs)
         if not vals:
             return SalaryStats(count_with_salary=0)
         return SalaryStats(
@@ -115,8 +110,9 @@ def build_metrics(
             if st.count_with_salary or vs:
                 ms.salary_by_specialization_grade[key] = st
 
-    ms.vacancies_with_salary = sum(1 for v in vacancies_unique if bool(_salary_values([v])))
+    ms.vacancies_with_salary = sum(1 for v in vacancies_unique if bool(_salary_values_rub([v])))
     ms.vacancies_without_salary = len(vacancies_unique) - ms.vacancies_with_salary
+    ms.salary_display = SalaryDisplayMeta(display_currency="RUB", rates_source="cbr")
 
     # time series
     dates: list[datetime] = []
