@@ -34,7 +34,7 @@ export function formFromDefaults(d: ConfigDefaults): ParseFormState {
     anySpecialization: d.filters.any_specialization,
     specializations: d.filters.specializations.length
       ? d.filters.specializations
-      : ["Python", "Backend", "QA"],
+      : ["Python", "Backend", "QA", "AI"],
     excludeKeywordsText: d.filters.exclude_keywords.join("\n"),
     countriesText: d.filters.countries.join(", "),
     citiesText: d.filters.cities.join(", "),
