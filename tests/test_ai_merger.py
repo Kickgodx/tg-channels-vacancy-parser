@@ -86,6 +86,35 @@ def test_primary_specs_only_from_ai_not_rules():
     assert out.detected_specializations == ["Go"]
 
 
+def test_primary_does_not_apply_regex_hourly_from_v_chasti():
+    """В primary regex «в части» не должен превращать RUB от LLM в RUB/HOUR."""
+    cfg = AppConfig()
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"})})
+    text = (
+        "Вилка: от 200 тр до 300 тр. "
+        "критерии перевода в регресс) в части контроля качества"
+    )
+    v = _vacancy(
+        raw_text=text,
+        cleaned_text=text,
+        detected_salary_min=200_000.0,
+        detected_salary_max=300_000.0,
+        detected_salary_avg=250_000.0,
+        salary_currency="RUB/HOUR",
+    )
+    ai = VacancyAIExtraction(
+        is_job_post=True,
+        detected_specializations=["Manual QA"],
+        salary_min=200_000,
+        salary_max=300_000,
+        salary_currency="RUB",
+        confidence=0.9,
+    )
+    out = merge_rules_and_ai(v, ai, cfg)
+    assert out.salary_currency == "RUB"
+    assert out.detected_salary_avg == 250_000.0
+
+
 def test_primary_clears_rules_salary_when_ai_null():
     cfg = AppConfig()
     cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"})})

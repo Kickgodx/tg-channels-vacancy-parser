@@ -31,7 +31,7 @@ Rules:
 - work_format: one of remote, hybrid, office, relocation, unknown (or null).
 - detected_grade: one of """ + ", ".join(GRADE_OPTIONS) + """ (use unknown if not stated).
   Title/role grade wins (e.g. "Senior QA" → senior). Do NOT treat verb "to staff" / "staffing" as grade staff.
-- salary_currency: ISO code (RUB, USD, EUR). Hourly rate → append /HOUR (e.g. RUB/HOUR, USD/HOUR); monthly is plain RUB/USD.
+- salary_currency: ISO code (RUB, USD, EUR). /HOUR suffix ONLY for explicit hourly pay («₽/час», «$15–30 в час», «почасовая оплата», «р/ч»). Monthly RUB: «200 тр», «300к», «гросс», «вилка» → RUB without /HOUR (never RUB/HOUR for «тр» or «к»).
 - application_urls: external apply links (hh.ru, careers pages, forms). Exclude t.me channel links unless they are the apply form.
 - confidence: 0..1 how sure you are about the main fields."""
 

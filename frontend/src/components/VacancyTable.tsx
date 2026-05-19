@@ -112,10 +112,12 @@ export default function VacancyTable({
         return `@${v.source_channel}`;
       case "post_date":
         return v.post_date ? new Date(v.post_date).toLocaleDateString() : "—";
-      case "detected_salary_avg":
-        return v.detected_salary_avg != null
-          ? `${Math.round(v.detected_salary_avg).toLocaleString()} ${v.salary_currency || ""}`.trim()
-          : "—";
+      case "detected_salary_avg": {
+        if (v.detected_salary_avg == null) return "—";
+        const cur = (v.salary_currency || "").trim();
+        const curLabel = cur.replace(/\/HOUR$/i, "/ч");
+        return `${Math.round(v.detected_salary_avg).toLocaleString()} ${curLabel}`.trim();
+      }
       case "detected_salary_avg_rub":
         return v.detected_salary_avg_rub != null
           ? `${Math.round(v.detected_salary_avg_rub).toLocaleString()} ₽`

@@ -26,6 +26,11 @@ def test_rur_equals_rub():
     assert salary_amount_to_rub(125000, "RUR", {"RUB": 1.0, "USD": 90.0}) == 125000.0
 
 
+def test_rub_hourly_monthly_conversion():
+    assert monthly_salary_amount(3000, "RUB/HOUR") == 3000 * HOURS_PER_MONTH
+    assert salary_amount_to_rub(1000, "RUB/HOUR", {"RUB": 1.0}) == 1000 * HOURS_PER_MONTH
+
+
 def test_rub_per_hour_to_monthly_rub():
     assert parse_salary_currency("RUB/HOUR") == ("RUB", "hour")
     assert normalize_currency("RUB/HOUR") == "RUB"

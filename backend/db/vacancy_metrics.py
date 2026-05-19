@@ -30,6 +30,7 @@ def _hourly_to_monthly_factor(column=VacancyRow):
     cur = func.upper(func.coalesce(column.salary_currency, literal("")))
     return case(
         (cur.like("%/HOUR%"), literal(float(HOURS_PER_MONTH))),
+        (cur.like("%/Ч%"), literal(float(HOURS_PER_MONTH))),
         (cur.like("%/ЧАС%"), literal(float(HOURS_PER_MONTH))),
         else_=literal(1.0),
     )
@@ -56,6 +57,7 @@ def _salary_native_expr_table(table):
     cur = func.upper(func.coalesce(table.c.salary_currency, literal("")))
     factor = case(
         (cur.like("%/HOUR%"), literal(float(HOURS_PER_MONTH))),
+        (cur.like("%/Ч%"), literal(float(HOURS_PER_MONTH))),
         (cur.like("%/ЧАС%"), literal(float(HOURS_PER_MONTH))),
         else_=literal(1.0),
     )
