@@ -56,3 +56,6 @@ models:
   - id: anthropic/claude-3-haiku
     name: Claude 3 Haiku
     cost: "0.25/1.25"
+  - id: xiaomi/mimo-v2-flash
+    name: Xiaomi Mimio V2 Flash
+    cost: "0.1/0.3"

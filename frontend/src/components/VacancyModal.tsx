@@ -52,6 +52,19 @@ export default function VacancyModal({ vacancy: v, index, onClose }: Props) {
         )}
         <hr />
         <div className="vacancy-full-text">{v.cleaned_text || v.raw_text || "_(пусто)_"}</div>
+        {v.ai_notes && (
+          <aside className="vacancy-ai-notes">
+            <div className="vacancy-ai-notes-header">
+              <strong>Заметки AI</strong>
+              {v.ai_confidence != null && (
+                <span className="vacancy-ai-notes-confidence">
+                  уверенность {(v.ai_confidence * 100).toFixed(0)}%
+                </span>
+              )}
+            </div>
+            <p>{v.ai_notes}</p>
+          </aside>
+        )}
       </div>
     </div>
   );

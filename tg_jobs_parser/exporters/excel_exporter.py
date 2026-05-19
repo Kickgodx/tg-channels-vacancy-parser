@@ -57,6 +57,7 @@ def _vacancy_row_for_excel(v: Vacancy, *, include_parse_dedup_columns: bool = Tr
         "application_urls": ", ".join(d.get("application_urls") or []),
         "extraction_source": d.get("extraction_source"),
         "ai_confidence": d.get("ai_confidence"),
+        "ai_notes": d.get("ai_notes"),
         "technologies": ", ".join(d.get("technologies") or []),
         "required_experience": d.get("required_experience"),
         "employment_type": d.get("employment_type"),

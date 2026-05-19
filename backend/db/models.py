@@ -81,6 +81,7 @@ class VacancyRow(Base):
 
     extraction_source: Mapped[str] = mapped_column(String(16), default="rules")
     ai_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     vacancy_score: Mapped[int] = mapped_column(Integer, default=0)
     vacancy_substantive_score: Mapped[int] = mapped_column(Integer, default=0)
 

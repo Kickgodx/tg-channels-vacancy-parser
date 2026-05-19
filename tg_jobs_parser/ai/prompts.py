@@ -33,10 +33,13 @@ Rules:
   Title/role grade wins (e.g. "Senior QA" → senior). Do NOT treat verb "to staff" / "staffing" as grade staff.
 - salary_currency: ISO code (RUB, USD, EUR). /HOUR suffix ONLY for explicit hourly pay («₽/час», «$15–30 в час», «почасовая оплата», «р/ч»). Monthly RUB: «200 тр», «300к», «гросс», «вилка» → RUB without /HOUR (never RUB/HOUR for «тр» or «к»).
 - application_urls: external apply links (hh.ru, careers pages, forms). Exclude t.me channel links unless they are the apply form.
-- confidence: 0..1 how sure you are about the main fields."""
+- confidence: 0..1 how sure you are about the main fields.
+- notes: optional short clarifications (ambiguity, missing data, assumptions) — always in Russian, 1–3 sentences; null if nothing useful to add.
+- rejection_reason: when is_job_post=false — brief reason in Russian."""
 
 _FEW_SHOT_USER = """Example job post:
-"Senior Go Developer, remote EU, 350-450k RUB, apply: https://example.com/careers/go"
+"Senior Go Developer, remote EU, 350-450k RUB, Requirements: Go, Kubernetes, Docker, apply: https://example.com/careers/go".
+(developer only — if skills exists, they should not become extra roles, they should be listed in technologies)
 Example JSON:
 """ + json.dumps(
     {
@@ -50,26 +53,10 @@ Example JSON:
         "work_format": "remote",
         "country": None,
         "city": None,
+        "technologies": ["Go", "Kubernetes", "Docker"],
         "application_urls": ["https://example.com/careers/go"],
         "confidence": 0.9,
-    },
-    ensure_ascii=False,
-)
-
-_FEW_SHOT_GO_K8S = """Example (developer only — skills must not become extra roles):
-"Senior Go разработчик. Требования: Go, тестирование, Kubernetes client-go, RBAC. База знаний по Golang @channel"
-Example JSON:
-""" + json.dumps(
-    {
-        "is_job_post": True,
-        "rejection_reason": None,
-        "detected_specializations": ["Go"],
-        "detected_grade": "senior",
-        "salary_min": None,
-        "salary_max": None,
-        "salary_currency": None,
-        "work_format": "unknown",
-        "confidence": 0.92,
+        "notes": "Компания в тексте не указана.",
     },
     ensure_ascii=False,
 )
@@ -78,7 +65,12 @@ _FEW_SHOT_RESUME = """Example NOT a job:
 "Ищу работу Go разработчиком, резюме в личку"
 Example JSON:
 """ + json.dumps(
-    {"is_job_post": False, "rejection_reason": "candidate resume, not hiring", "confidence": 0.95},
+    {
+        "is_job_post": False,
+        "rejection_reason": "резюме кандидата, не вакансия",
+        "confidence": 0.95,
+        "notes": None,
+    },
     ensure_ascii=False,
 )
 
@@ -103,8 +95,6 @@ def build_messages(
         user_parts.insert(
             0,
             _FEW_SHOT_USER
-            + "\n\n"
-            + _FEW_SHOT_GO_K8S
             + "\n\n"
             + _FEW_SHOT_RESUME
             + "\n\n---\n\n",

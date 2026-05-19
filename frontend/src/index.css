@@ -403,3 +403,33 @@ tr.clickable:hover {
   font-size: 0.9rem;
   line-height: 1.55;
 }
+
+.vacancy-ai-notes {
+  margin-top: 1.25rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  background: #f1f3ff;
+  border-left: 3px solid #748ffc;
+  font-size: 0.88rem;
+}
+
+.vacancy-ai-notes-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.vacancy-ai-notes-confidence {
+  color: #868e96;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.vacancy-ai-notes p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  color: #343a40;
+}
