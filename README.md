@@ -250,6 +250,29 @@ python -m tg_jobs_parser.cli export --from-json output/vacancies.json --out reex
 
 Короткая команда после `poetry install`: `poetry run tg-jobs-parser parse`
 
+### Перенос данных между инстансами (дамп / импорт БД)
+
+Экспорт всех таблиц приложения (прогоны, вакансии, курсы ЦБ, кэш LLM) в JSON:
+
+```powershell
+# локально (DATABASE_URL в .env)
+poetry run tg-jobs-parser db dump -o backup/tgjobs_dump.json
+
+# из контейнера backend
+docker compose exec backend tg-jobs-parser db dump -o /app/backup/tgjobs_dump.json
+```
+
+Импорт в другой инстанс (целевой `DATABASE_URL`):
+
+```powershell
+poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json
+# полная замена данных в целевой БД (с подтверждением):
+poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
+```
+
+По умолчанию `--mode merge` — UPSERT по первичному ключу (существующие строки обновляются).  
+`replace` — сначала очищает все четыре таблицы, затем загружает дамп.
+
 Логи: консоль + `logs/app.log`. Графики CLI: `output/charts/` (matplotlib).
 
 ---
@@ -268,7 +291,7 @@ python -m tg_jobs_parser.cli export --from-json output/vacancies.json --out reex
 pytest
 ```
 
-В том числе: `tests/test_api_health.py`, `tests/test_upsert_vacancies.py`, тесты ядра extraction/AI.
+В том числе: `tests/test_api_health.py`, `tests/test_upsert_vacancies.py`, `tests/test_db_transfer.py`, тесты ядра extraction/AI.
 
 ---
 

@@ -25,9 +25,11 @@ from tg_jobs_parser.exporters.json_exporter import export_json, load_parse_resul
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_cancel import ParseCancellationToken
 from tg_jobs_parser.parse_runner import run_parse
+from tg_jobs_parser.cli.db import db_app
 from tg_jobs_parser.utils.logger import get_logger, setup_logging
 
 app = typer.Typer(help="Парсер IT-вакансий из Telegram-каналов через Telethon (MVP).")
+app.add_typer(db_app, name="db")
 _LOG = get_logger(__name__)
 
 
