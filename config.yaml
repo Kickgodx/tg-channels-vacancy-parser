@@ -3,6 +3,7 @@ telegram:
 
 sources:
   channels:
+    - g_jobbot
     - qa_jobs
     - qajobsoffers
     - relocatesme
@@ -25,9 +26,54 @@ sources:
     - Remoteit
     - goutstaff
     - GolangJobsit
-    - godevjob
     - fordev
     - DarikaINITVacancies
+    - zarubezhom_jobs
+    - evacuatejobs
+    - remocate
+    - opento_dev
+    - hiring_relocatin_hr_it
+    - forfrontend
+    - jsdevjob
+    - revacancy_global
+    - jobsearchIT
+    - hr_breakfast_emergency
+    - cyprusithr
+    - javascript_jobs
+    - javascript_jobs_feed
+    - findmyremote_frontend
+    - theyseeku
+    - finder
+    - finderwork
+    - opento_crypto
+    - jobs_in_it_remoute
+    - good_workers
+    - job_react
+    - findfrontendjobs
+    - vakansii_it
+    - it_vakansii_jobs
+    - dev_connectablejobs
+    - cvjobge
+    - theyseeku_it
+    - cryptoheadhunter
+    - jc_it
+    - careers_crypto
+    - remote_frontend_jobs
+    - cryptoDevJobs
+    - workingincrypto
+    - hrlunapark
+    - job_web3
+    - JScript_jobs
+    - devs_it
+    - progjob
+    - jobGeeks
+    - hiddengurus
+    - doglobal
+    - vacancy_cs
+    - geekjobs
+    - easy_frontend_jobs
+    - vacancy_it_ulbitv
+    - sparklesjobs
 
 # Опциональный AI (OpenRouter). Включите enabled: true и задайте OPENROUTER_API_KEY в .env
 ai:
