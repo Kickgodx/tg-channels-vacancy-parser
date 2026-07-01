@@ -7,7 +7,7 @@ default_model: google/gemini-2.5-flash-lite
 
 default_fallbacks:
   - mistralai/mistral-small-3.2-24b-instruct
-  -mistralai/mistral-small-24b-instruct-2501
+  - mistralai/mistral-small-24b-instruct-2501
   - google/gemini-2.5-flash-lite
   - meta-llama/llama-3.3-70b-instruct
   - deepseek/deepseek-v4-flash

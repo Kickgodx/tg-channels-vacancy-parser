@@ -28,6 +28,16 @@ export default function ParseForm({ onSubmit, disabled, isSubmitting }: Props) {
     onSuccess: (data) => setChannelResults({ found: data.found, backend: data.backend }),
   });
 
+  if (defaultsQ.isError) {
+    const msg =
+      defaultsQ.error instanceof Error ? defaultsQ.error.message : "Не удалось загрузить config.yaml";
+    return (
+      <p className="error">
+        Ошибка загрузки настроек: {msg}. Проверьте config.yaml и llm_models.yaml.
+      </p>
+    );
+  }
+
   if (!form || !defaultsQ.data) {
     return <p>Загрузка настроек из config.yaml…</p>;
   }
