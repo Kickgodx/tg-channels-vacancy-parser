@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import signal
 import threading
 from typing import Callable
@@ -16,9 +17,42 @@ class ParseCancellationToken:
 
     def __init__(self) -> None:
         self._event = threading.Event()
+        self._async_lock = threading.Lock()
+        self._async_loop: asyncio.AbstractEventLoop | None = None
+        self._async_tasks: list[asyncio.Task] = []
+
+    def bind_async_tasks(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        tasks: list[asyncio.Task],
+    ) -> None:
+        """Регистрирует asyncio-задачи Telethon для прерывания из другого потока (кнопка «Отменить»)."""
+        with self._async_lock:
+            self._async_loop = loop
+            self._async_tasks = list(tasks)
+
+    def clear_async_tasks(self) -> None:
+        with self._async_lock:
+            self._async_loop = None
+            self._async_tasks = []
 
     def request_cancel(self) -> None:
         self._event.set()
+        with self._async_lock:
+            loop = self._async_loop
+            tasks = list(self._async_tasks)
+        if loop is None or not tasks:
+            return
+
+        def _cancel_all() -> None:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+
+        try:
+            loop.call_soon_threadsafe(_cancel_all)
+        except RuntimeError:
+            pass
 
     def is_cancelled(self) -> bool:
         return self._event.is_set()

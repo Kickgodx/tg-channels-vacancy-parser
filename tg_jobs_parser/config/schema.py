@@ -357,9 +357,9 @@ class FxConfig(BaseModel):
     display_currency: str = Field(default="RUB")
     sync_days_on_startup: int = Field(
         default=7,
-        ge=1,
+        ge=0,
         le=90,
-        description="Сколько последних дней подтянуть в exchange_rates при старте API.",
+        description="Сколько последних дней подтянуть в exchange_rates при старте API (0 — не грузить).",
     )
     request_timeout_seconds: float = 20.0
 

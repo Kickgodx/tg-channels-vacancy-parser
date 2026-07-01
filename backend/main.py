@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -20,20 +21,35 @@ setup_logging()
 try_load_dotenv()
 
 
+def _sync_fx_on_startup() -> None:
+    """Фоновая подгрузка курсов ЦБ — не блокирует приём HTTP-запросов."""
+    log = logging.getLogger(__name__)
+    try:
+        cfg = load_config(get_settings().config_path)
+        if not cfg.fx.enabled or cfg.fx.sync_days_on_startup <= 0:
+            return
+        with session_scope() as session:
+            n = fx_repo.sync_recent_days(session, cfg.fx)
+        log.info(
+            "Курсы ЦБ: синхронизировано записей за последние %s дн.: %s",
+            cfg.fx.sync_days_on_startup,
+            n,
+        )
+    except Exception as e:
+        log.warning("Курсы ЦБ при старте не загружены: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     log = logging.getLogger(__name__)
     log.info("Инициализация БД…")
     init_db()
-    try:
-        cfg = load_config(get_settings().config_path)
-        if cfg.fx.enabled:
-            with session_scope() as session:
-                n = fx_repo.sync_recent_days(session, cfg.fx)
-            log.info("Курсы ЦБ: синхронизировано записей за последние %s дн.: %s", cfg.fx.sync_days_on_startup, n)
-    except Exception as e:
-        log.warning("Курсы ЦБ при старте не загружены: %s", e)
     log.info("Backend готов.")
+    threading.Thread(
+        target=_sync_fx_on_startup,
+        name="fx-startup-sync",
+        daemon=True,
+    ).start()
     yield
 
 

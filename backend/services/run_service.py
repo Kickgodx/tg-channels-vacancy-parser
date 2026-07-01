@@ -83,8 +83,8 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
             cancel=cancel_token,
         )
         active.result = result
-        active.status = "completed"
         final_status = "cancelled" if cancel_token.is_cancelled() else "completed"
+        active.status = final_status
         with session_scope() as session:
             repo.finalize_parse_run(session, run_id, result, status=final_status)
         try:

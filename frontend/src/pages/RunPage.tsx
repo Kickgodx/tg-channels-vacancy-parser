@@ -143,9 +143,17 @@ export default function RunPage() {
     enabled: !!runId && !!runFinished,
   });
 
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
   const cancel = useMutation({
     mutationFn: () => api.cancelRun(runId!),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["run", runId] }),
+    onSuccess: () => {
+      setCancelError(null);
+      void qc.invalidateQueries({ queryKey: ["run", runId] });
+    },
+    onError: (err: Error) => {
+      setCancelError(err.message || "Не удалось отправить отмену");
+    },
   });
 
   useEffect(() => {
@@ -237,9 +245,12 @@ export default function RunPage() {
                   <p>Сохранение в базу…</p>
                 )}
                 {run.data.status === "running" && progress?.phase !== "post_processing_done" && (
-                  <button className="secondary" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
-                    Отменить
-                  </button>
+                  <>
+                    <button className="secondary" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
+                      {cancel.isPending ? "Отмена…" : "Отменить"}
+                    </button>
+                    {cancelError && <p className="error">{cancelError}</p>}
+                  </>
                 )}
               </>
             )}

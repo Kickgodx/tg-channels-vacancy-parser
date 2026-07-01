@@ -175,9 +175,11 @@ def sync_recent_days(session: Session, config: FxConfig, *, days: int | None = N
     if not config.enabled:
         return 0
     n = days if days is not None else config.sync_days_on_startup
+    if n <= 0:
+        return 0
     today = datetime.now(timezone.utc).date()
     total = 0
-    for i in range(max(1, n)):
+    for i in range(n):
         d = today - timedelta(days=i)
         before = len(get_rates(session, d))
         ensure_rates(session, d, config)

@@ -172,12 +172,45 @@ class TelegramTelethonParser(BaseChannelParser):
                         return u, [], f"@{u}: Telethon — {e}"
 
             tasks = [asyncio.create_task(_one(u)) for u in usernames]
+            task_to_user = {t: u for t, u in zip(tasks, usernames, strict=True)}
+            if cancel:
+                cancel.bind_async_tasks(asyncio.get_running_loop(), tasks)
             try:
-                return list(await asyncio.gather(*tasks))
+                pending = set(tasks)
+                results: list[tuple[str, list[RawPost], str | None]] = []
+                while pending:
+                    if cancel and cancel.is_cancelled():
+                        for t in pending:
+                            t.cancel()
+                        done, pending = await asyncio.wait(pending)
+                        for t in done:
+                            if t.cancelled():
+                                continue
+                            try:
+                                results.append(t.result())
+                            except Exception as e:  # noqa: BLE001
+                                u = task_to_user.get(t, "?")
+                                results.append((u, [], f"@{u}: Telethon — {e}"))
+                        break
+                    done, pending = await asyncio.wait(
+                        pending,
+                        timeout=0.5,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for t in done:
+                        if t.cancelled():
+                            continue
+                        try:
+                            results.append(t.result())
+                        except asyncio.CancelledError:
+                            continue
+                        except Exception as e:  # noqa: BLE001
+                            u = task_to_user.get(t, "?")
+                            results.append((u, [], f"@{u}: Telethon — {e}"))
+                return results
             finally:
-                if cancel and cancel.is_cancelled():
-                    for t in tasks:
-                        t.cancel()
+                if cancel:
+                    cancel.clear_async_tasks()
         finally:
             await _disconnect_client(client)
 
