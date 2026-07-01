@@ -66,6 +66,7 @@ def test_prometheus_metrics(client: TestClient):
     body = r.text
     assert "http_requests_total" in body
     assert "http_request_duration_seconds" in body
+    assert "llm_requests_total" in body
 
 
 def test_list_vacancies_empty(client: TestClient):

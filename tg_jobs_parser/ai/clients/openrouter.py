@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,7 @@ from tg_jobs_parser.ai.rate_limit import (
 from tg_jobs_parser.ai.schema import VacancyAIExtraction
 from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.config.schema import AiConfig
+from tg_jobs_parser.observability.llm_metrics import record_request, record_tokens
 from tg_jobs_parser.utils.logger import get_logger
 
 _LOG = get_logger(__name__)
@@ -204,28 +206,49 @@ class OpenRouterClient:
         if extra_body:
             kwargs["extra_body"] = extra_body
 
-        response = self._create_completion(kwargs)
-
-        if not response.choices:
-            raise RuntimeError("OpenRouter: пустой choices в ответе")
-
-        message = response.choices[0].message
-        content = _message_content(message)
-        if not content:
-            raise RuntimeError("OpenRouter: пустой ответ модели")
-
-        usage_raw = response.usage
-        usage = LLMUsage(
-            prompt_tokens=int(getattr(usage_raw, "prompt_tokens", None) or 0),
-            completion_tokens=int(getattr(usage_raw, "completion_tokens", None) or 0),
-            model=use_model,
-        )
+        start = time.perf_counter()
+        outcome = "error"
+        usage: LLMUsage | None = None
         try:
-            extraction = _parse_extraction(content)
-        except (json.JSONDecodeError, ValueError) as e:
-            _LOG.warning("Не удалось разобрать JSON от %s: %s", use_model, e)
+            response = self._create_completion(kwargs)
+
+            if not response.choices:
+                raise RuntimeError("OpenRouter: пустой choices в ответе")
+
+            message = response.choices[0].message
+            content = _message_content(message)
+            if not content:
+                raise RuntimeError("OpenRouter: пустой ответ модели")
+
+            usage_raw = response.usage
+            usage = LLMUsage(
+                prompt_tokens=int(getattr(usage_raw, "prompt_tokens", None) or 0),
+                completion_tokens=int(getattr(usage_raw, "completion_tokens", None) or 0),
+                model=use_model,
+            )
+            try:
+                extraction = _parse_extraction(content)
+            except (json.JSONDecodeError, ValueError) as e:
+                outcome = "parse_error"
+                _LOG.warning("Не удалось разобрать JSON от %s: %s", use_model, e)
+                raise
+            outcome = "success"
+            return extraction, usage
+        except LlmQuotaExhausted:
+            outcome = "rate_limited"
             raise
-        return extraction, usage
+        finally:
+            record_request(
+                model=use_model,
+                outcome=outcome,
+                duration_seconds=time.perf_counter() - start,
+            )
+            if usage is not None:
+                record_tokens(
+                    model=use_model,
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                )
 
     def extract_with_fallback(
         self,

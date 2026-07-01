@@ -15,6 +15,7 @@ from backend.db.session import init_db, session_scope
 from backend.settings import get_settings
 from prometheus_fastapi_instrumentator import Instrumentator
 from tg_jobs_parser.config.loader import load_config
+import tg_jobs_parser.observability.llm_metrics  # noqa: F401 — регистрация llm_* в /metrics
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
 from tg_jobs_parser.utils.logger import setup_logging
 

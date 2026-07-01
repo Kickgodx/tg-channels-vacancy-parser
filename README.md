@@ -298,11 +298,12 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
 | **`GET /metrics`** | Эндпоинт Prometheus (не путать с `/api/v1/vacancies/metrics`) |
 | **Prometheus** | Scrape backend каждые 15 с (`observability/prometheus.yml`) |
-| **Grafana** | Дашборд **tg-jobs-parser API** (папка `tg-jobs-parser`) |
+| **Grafana** | Дашборды **tg-jobs-parser API** и **tg-jobs-parser LLM** (папка `tg-jobs-parser`) |
+| **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
 
 Конфигурация: `observability/prometheus.yml`, provisioning Grafana — `observability/grafana/provisioning/`.
 
-Из health-check, OpenAPI и `/metrics` метрики не собираются (шум от probes и документации).
+Из health-check, OpenAPI и `/metrics` HTTP-метрики не собираются (шум от probes и документации). LLM-метрики пишутся при парсинге с `ai.enabled: true` в том же процессе backend.
 
 ---
 

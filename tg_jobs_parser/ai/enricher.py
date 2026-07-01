@@ -13,6 +13,7 @@ from tg_jobs_parser.ai.merger import merge_rules_and_ai
 from tg_jobs_parser.ai.search_context import SearchContext, build_search_context
 from tg_jobs_parser.ai.token_cost import TokenCostEstimate, estimate_run_cost
 from tg_jobs_parser.config.schema import AppConfig
+from tg_jobs_parser.observability.llm_metrics import record_enrich_event
 from tg_jobs_parser.parse_cancel import ParseCancellationToken, ParseCancelled
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.utils.logger import get_logger
@@ -163,11 +164,13 @@ class AIEnrichmentService:
         if vacancy.vacancy_score < self._ai.skip_if_vacancy_score_below:
             with self.stats._lock:
                 self.stats.skipped_score += 1
+            record_enrich_event("skipped_score")
             return None
 
         with self.stats._lock:
             if self._ai.max_posts_per_run > 0 and self.stats.calls >= self._ai.max_posts_per_run:
                 self.stats.skipped_limit += 1
+                record_enrich_event("skipped_limit")
                 return vacancy
 
         text = (vacancy.cleaned_text or vacancy.raw_text or "")[: self._ai.max_input_chars]
@@ -180,6 +183,7 @@ class AIEnrichmentService:
         if cached is not None:
             with self.stats._lock:
                 self.stats.cache_hits += 1
+            record_enrich_event("cache_hit")
             extraction = cached
             self._log_llm_progress(
                 vacancy,
@@ -190,6 +194,7 @@ class AIEnrichmentService:
                 self._daily_limit_hit = True
                 with self.stats._lock:
                     self.stats.rate_limit_skipped += 1
+                record_enrich_event("rate_limit_skipped")
                 return vacancy if self._ai.mode == "assist" else None
 
             if cancel and cancel.is_cancelled():
@@ -207,10 +212,12 @@ class AIEnrichmentService:
                 with self.stats._lock:
                     self.stats.rate_limit_skipped += 1
                     self.stats.llm_disabled_mid_run = True
+                record_enrich_event("rate_limit_skipped")
                 return vacancy if self._ai.mode == "assist" else None
             except Exception as e:
                 with self.stats._lock:
                     self.stats.errors += 1
+                record_enrich_event("error")
                 _LOG.warning("AI ошибка для %s: %s", vacancy.id, e)
                 if self._ai.mode == "primary":
                     return None
@@ -238,6 +245,7 @@ class AIEnrichmentService:
         if not extraction.is_job_post:
             with self.stats._lock:
                 self.stats.dropped_not_job += 1
+            record_enrich_event("dropped_not_job")
             _LOG.info(
                 "AI LLM: @%s — не вакансия%s",
                 vacancy.source_channel,
