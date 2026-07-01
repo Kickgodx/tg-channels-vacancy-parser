@@ -28,7 +28,11 @@ docker compose up --build
 |----------|-----|
 | **Web UI** | http://localhost:5173 |
 | **API** (OpenAPI) | http://localhost:8000/docs |
+| **Prometheus** | http://localhost:9090 |
+| **Grafana** | http://localhost:3000 (login: `admin` / `admin`) |
 | **PostgreSQL** | `localhost:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
+
+Prometheus и Grafana поднимаются вместе с основным стеком. Backend отдаёт метрики HTTP на `http://localhost:8000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
 
 ### Первая авторизация Telethon
 
@@ -282,6 +286,23 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 - **PostgreSQL** — постоянное хранение уникальных вакансий и журнал прогонов (`parse_runs`).
 - **Экспорт из UI** — `GET /runs/{id}/export.xlsx` и `.json` (листы и метрики как в `exporters/`).
 - **CLI** — при локальном `parse` пишет в `output/` (`vacancies.xlsx`, `vacancies.json`, `output/charts/`).
+
+---
+
+## Observability (Prometheus + Grafana)
+
+Стек метрик HTTP API включён в `docker compose up`:
+
+| Компонент | Назначение |
+|-----------|------------|
+| **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
+| **`GET /metrics`** | Эндпоинт Prometheus (не путать с `/api/v1/vacancies/metrics`) |
+| **Prometheus** | Scrape backend каждые 15 с (`observability/prometheus.yml`) |
+| **Grafana** | Дашборд **tg-jobs-parser API** (папка `tg-jobs-parser`) |
+
+Конфигурация: `observability/prometheus.yml`, provisioning Grafana — `observability/grafana/provisioning/`.
+
+Из health-check, OpenAPI и `/metrics` метрики не собираются (шум от probes и документации).
 
 ---
 

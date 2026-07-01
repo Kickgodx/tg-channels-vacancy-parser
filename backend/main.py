@@ -13,6 +13,7 @@ from backend.api.routes import ai_cache, channels, config, fx, health, runs, vac
 from backend.db import fx_repository as fx_repo
 from backend.db.session import init_db, session_scope
 from backend.settings import get_settings
+from prometheus_fastapi_instrumentator import Instrumentator
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
 from tg_jobs_parser.utils.logger import setup_logging
@@ -76,6 +77,18 @@ app.include_router(runs.router, prefix="/api/v1")
 app.include_router(vacancies.router, prefix="/api/v1")
 app.include_router(ai_cache.router, prefix="/api/v1")
 app.include_router(fx.router, prefix="/api/v1")
+
+Instrumentator(
+    should_group_status_codes=False,
+    should_ignore_untemplated=True,
+    excluded_handlers=[
+        "/metrics",
+        "/api/v1/health",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+    ],
+).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 
 def main() -> None:

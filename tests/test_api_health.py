@@ -60,6 +60,14 @@ def test_health(client: TestClient):
     assert "database" in data
 
 
+def test_prometheus_metrics(client: TestClient):
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    body = r.text
+    assert "http_requests_total" in body
+    assert "http_request_duration_seconds" in body
+
+
 def test_list_vacancies_empty(client: TestClient):
     r = client.get("/api/v1/vacancies")
     assert r.status_code == 200
