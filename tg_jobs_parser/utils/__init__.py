@@ -2,6 +2,7 @@ from tg_jobs_parser.utils.dates import (
     clamp_range_days,
     date_in_range,
     parse_date,
+    resolve_search_date_from,
     resolve_search_date_to,
     utc_now,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "short_id_from_hash",
     "vacancy_content_id",
     "parse_date",
+    "resolve_search_date_from",
     "resolve_search_date_to",
     "clamp_range_days",
     "date_in_range",

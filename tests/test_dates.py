@@ -1,10 +1,33 @@
 """Тесты разбора дат поиска."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
-from tg_jobs_parser.utils.dates import parse_date, resolve_search_date_to
+from tg_jobs_parser.utils.dates import parse_date, resolve_search_date_from, resolve_search_date_to
+
+
+def test_resolve_search_date_from_week_ago_aliases():
+    expected = date.today() - timedelta(days=7)
+    assert resolve_search_date_from("week_ago") == expected
+    assert resolve_search_date_from("week") == expected
+    assert resolve_search_date_from("today-7d") == expected
+    assert resolve_search_date_from("Неделя") == expected
+
+
+def test_resolve_search_date_from_empty():
+    assert resolve_search_date_from(None) is None
+    assert resolve_search_date_from("") is None
+    assert resolve_search_date_from("   ") is None
+
+
+def test_resolve_search_date_from_custom_iso():
+    assert resolve_search_date_from("2026-01-15") == date(2026, 1, 15)
+
+
+def test_resolve_search_date_from_invalid():
+    with pytest.raises(ValueError):
+        resolve_search_date_from("not-a-date")
 
 
 def test_resolve_search_date_to_today_aliases():

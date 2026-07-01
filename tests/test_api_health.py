@@ -24,7 +24,7 @@ telegram:
 sources:
   channels: [test_channel]
 search:
-  date_from: "2026-01-01"
+  date_from: week_ago
   date_to: today
 filters:
   specializations: [Python]

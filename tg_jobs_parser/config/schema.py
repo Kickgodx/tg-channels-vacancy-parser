@@ -272,8 +272,11 @@ class AiConfig(BaseModel):
 
 class SearchConfig(BaseModel):
     date_from: str | None = Field(
-        default=None,
-        description="Нижняя граница (ISO YYYY-MM-DD). Пусто — без явной нижней границы в конфиге.",
+        default="week_ago",
+        description=(
+            "Нижняя граница: ISO-дата, либо week_ago/week/today-7d/неделя "
+            "(сегодня минус 7 дней), либо пусто — без нижней границы."
+        ),
     )
     date_to: str | None = Field(
         default=None,

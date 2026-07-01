@@ -98,7 +98,8 @@ ai:
   use_few_shot: true
 
 search:
-  date_from: "2026-05-01"
+  # week_ago / week / today-7d / неделя — нижняя граница = сегодня минус 7 дней при каждом запуске; иначе ISO-дата
+  date_from: week_ago
   # today / сегодня / пусто — верхняя граница = сегодня при каждом запуске; иначе ISO-дата
   date_to: today
   max_days: 365

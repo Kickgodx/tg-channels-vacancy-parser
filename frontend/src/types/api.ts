@@ -32,6 +32,7 @@ export interface ConfigDefaults {
   channels: string[];
   search: {
     date_from: string | null;
+    date_from_resolved: string | null;
     date_to: string;
     date_to_resolved: string;
     max_days: number;

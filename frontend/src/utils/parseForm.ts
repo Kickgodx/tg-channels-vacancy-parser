@@ -1,6 +1,14 @@
 import type { ConfigDefaults, ParseFormState, RunCreateBody } from "../types/api";
 
 const TODAY_ALIASES = new Set(["today", "сегодня", "сейчас", "now"]);
+const WEEK_AGO_ALIASES = new Set([
+  "week_ago",
+  "week",
+  "today-7d",
+  "today_minus_week",
+  "неделя",
+  "weekago",
+]);
 
 /** Текущая дата в локальной таймзоне браузера (YYYY-MM-DD). */
 export function todayIso(): string {
@@ -19,6 +27,23 @@ export function resolveDateToForForm(dateTo: string | null | undefined): string 
   return todayIso();
 }
 
+function weekAgoIso(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Значение для input[type=date]: week_ago/пусто → сегодня−7 дней, иначе ISO-дата из конфига. */
+export function resolveDateFromForForm(dateFrom: string | null | undefined): string {
+  const raw = (dateFrom ?? "").trim().toLowerCase();
+  if (!raw || WEEK_AGO_ALIASES.has(raw)) return weekAgoIso();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  return weekAgoIso();
+}
+
 export function splitCsv(s: string): string[] {
   return s
     .split(/[,\n]+/)
@@ -29,7 +54,7 @@ export function splitCsv(s: string): string[] {
 export function formFromDefaults(d: ConfigDefaults): ParseFormState {
   return {
     channelsText: d.channels.join("\n"),
-    dateFrom: d.search.date_from ?? "",
+    dateFrom: resolveDateFromForForm(d.search.date_from),
     dateTo: resolveDateToForForm(d.search.date_to),
     anySpecialization: d.filters.any_specialization,
     specializations: d.filters.specializations.length
@@ -88,7 +113,7 @@ export function buildRunBody(form: ParseFormState, defaults: ConfigDefaults): Ru
   return {
     channels,
     search: {
-      date_from: form.dateFrom || defaults.search.date_from,
+      date_from: form.dateFrom || resolveDateFromForForm(defaults.search.date_from),
       date_to: form.dateTo || todayIso(),
     },
     filters,

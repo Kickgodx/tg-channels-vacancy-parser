@@ -7,7 +7,7 @@ from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 from tg_jobs_parser.ai.llm_models_registry import load_llm_models_registry, resolve_llm_models_path
 from tg_jobs_parser.ai.models_catalog import catalog_model_ids, label_for_model_id
-from tg_jobs_parser.utils.dates import parse_date, resolve_search_date_to
+from tg_jobs_parser.utils.dates import resolve_search_date_from, resolve_search_date_to
 from backend.settings import get_settings
 
 router = APIRouter(prefix="/config", tags=["config"])
@@ -36,12 +36,13 @@ def get_config_defaults() -> dict:
     except ConfigLoadError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-    df = parse_date(cfg.search.date_from)
+    df = resolve_search_date_from(cfg.search.date_from)
     dt = resolve_search_date_to(cfg.search.date_to)
     return {
         "channels": list(cfg.sources.channels),
         "search": {
-            "date_from": df.isoformat() if df else None,
+            "date_from": cfg.search.date_from if cfg.search.date_from else "week_ago",
+            "date_from_resolved": df.isoformat() if df else None,
             "date_to": cfg.search.date_to if cfg.search.date_to else "today",
             "date_to_resolved": dt.isoformat(),
             "max_days": cfg.search.max_days,

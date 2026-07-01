@@ -10,7 +10,7 @@ from pathlib import Path
 from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
-from tg_jobs_parser.utils.dates import parse_date, resolve_search_date_to
+from tg_jobs_parser.utils.dates import resolve_search_date_from, resolve_search_date_to
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
 from tg_jobs_parser.utils.logger import get_logger
 from tg_jobs_parser.utils.text import compact_whitespace
@@ -201,7 +201,7 @@ class TelegramTelethonParser(BaseChannelParser):
         """Вычитка одного канала на уже подключённом клиенте."""
         max_scan = self.config.parser.max_posts_per_channel
 
-        df_d = parse_date(self.config.search.date_from)
+        df_d = resolve_search_date_from(self.config.search.date_from)
         dt_d = resolve_search_date_to(self.config.search.date_to)
         dt_start = _combine_utc(df_d, end_of_day=False) if df_d else None
         dt_end = _combine_utc(dt_d, end_of_day=True) if dt_d else None
