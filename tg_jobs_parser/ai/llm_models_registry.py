@@ -17,7 +17,7 @@ class LlmModelsRegistry(BaseModel):
     """Содержимое ``llm_models.yaml``."""
 
     default_model: str = Field(
-        default="deepseek/deepseek-v4-flash",
+        default="deepseek/deepseek-v4-flash-0731",
         min_length=1,
     )
     default_fallbacks: list[str] = Field(default_factory=list)
