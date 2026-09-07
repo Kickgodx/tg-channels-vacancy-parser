@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, func, select
@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.db.base import Base
 from backend.db.models import VacancyRow
-from backend.db.repository import upsert_vacancies
+from backend.db.repository import VACANCY_TTL_DAYS, delete_expired_vacancies, upsert_vacancies
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.utils.hashing import vacancy_content_id
 
@@ -34,6 +34,8 @@ def _vac(
     cleaned: str,
     source_post_key: str,
     company: str | None = None,
+    parsed_at: datetime | None = None,
+    post_date: datetime | None = None,
 ) -> Vacancy:
     return Vacancy(
         id=vacancy_content_id(cleaned),
@@ -41,10 +43,11 @@ def _vac(
         source_channel=source_post_key.split("-", 1)[0],
         source_url="https://t.me/s/ch",
         post_url=f"https://t.me/{source_post_key.replace('-', '/', 1)}",
-        post_date=datetime.now(timezone.utc),
+        post_date=post_date or datetime.now(timezone.utc),
         raw_text=cleaned,
         cleaned_text=cleaned,
         company=company,
+        parsed_at=parsed_at or datetime.now(timezone.utc),
     )
 
 
@@ -104,3 +107,38 @@ def test_upsert_two_distinct_texts_two_rows(db_session):
     db_session.commit()
     count = db_session.scalar(select(func.count()).select_from(VacancyRow))
     assert count == 2
+
+
+def test_delete_expired_vacancies_keeps_only_records_within_ttl(db_session):
+    now = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    expired = _vac(
+        cleaned="expired vacancy",
+        source_post_key="old-1",
+        parsed_at=now,
+        post_date=now - timedelta(days=VACANCY_TTL_DAYS, seconds=1),
+    )
+    current = _vac(
+        cleaned="current vacancy",
+        source_post_key="new-1",
+        parsed_at=now,
+        post_date=now - timedelta(days=VACANCY_TTL_DAYS - 1),
+    )
+    missing_post_date = _vac(
+        cleaned="expired without post date",
+        source_post_key="unknown-1",
+        parsed_at=now - timedelta(days=VACANCY_TTL_DAYS, seconds=1),
+    ).model_copy(update={"post_date": None})
+    upsert_vacancies(
+        db_session,
+        [expired, current, missing_post_date],
+        parse_run_id=uuid.uuid4(),
+    )
+    db_session.commit()
+
+    deleted = delete_expired_vacancies(db_session, now=now)
+    db_session.commit()
+
+    assert deleted == 2
+    assert db_session.get(VacancyRow, expired.id) is None
+    assert db_session.get(VacancyRow, missing_post_date.id) is None
+    assert db_session.get(VacancyRow, current.id) is not None

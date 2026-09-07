@@ -95,6 +95,7 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
             )
             with session_scope() as session:
                 stats = repo.upsert_vacancies(session, result.vacancies_unique, parse_run_id=run_id)
+                repo.delete_expired_vacancies(session)
                 repo.patch_run_vacancy_upsert_stats(session, run_id, stats)
         except Exception as vac_err:
             _LOG.exception("Прогон %s: не удалось сохранить вакансии: %s", run_id, vac_err)
@@ -119,6 +120,7 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
             try:
                 with session_scope() as session:
                     stats = repo.upsert_vacancies(session, partial.vacancies_unique, parse_run_id=run_id)
+                    repo.delete_expired_vacancies(session)
                     repo.patch_run_vacancy_upsert_stats(session, run_id, stats)
             except Exception as vac_err:
                 _LOG.warning("Прогон %s отменён; вакансии не сохранены: %s", run_id, vac_err)

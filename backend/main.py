@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.routes import ai_cache, channels, config, fx, health, runs, vacancies
 from backend.db import fx_repository as fx_repo
+from backend.db import repository as repo
 from backend.db.session import init_db, session_scope
 from backend.settings import get_settings
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -41,18 +42,46 @@ def _sync_fx_on_startup() -> None:
         log.warning("Курсы ЦБ при старте не загружены: %s", e)
 
 
+def _cleanup_expired_vacancies() -> None:
+    """Применить TTL вакансий в отдельной транзакции."""
+    try:
+        with session_scope() as session:
+            repo.delete_expired_vacancies(session)
+    except Exception as e:
+        logging.getLogger(__name__).warning("TTL вакансий не применён: %s", e)
+
+
+def _vacancy_retention_worker(stop_event: threading.Event) -> None:
+    """Переходит к следующей проверке TTL каждый час, пока жив backend."""
+    while not stop_event.wait(timeout=60 * 60):
+        _cleanup_expired_vacancies()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     log = logging.getLogger(__name__)
     log.info("Инициализация БД…")
     init_db()
+    _cleanup_expired_vacancies()
     log.info("Backend готов.")
     threading.Thread(
         target=_sync_fx_on_startup,
         name="fx-startup-sync",
         daemon=True,
     ).start()
-    yield
+    retention_stop = threading.Event()
+    retention_thread = threading.Thread(
+        target=_vacancy_retention_worker,
+        args=(retention_stop,),
+        name="vacancy-retention",
+        daemon=True,
+    )
+    retention_thread.start()
+    try:
+        yield
+    finally:
+        retention_stop.set()
+        retention_thread.join(timeout=1)
 
 
 app = FastAPI(

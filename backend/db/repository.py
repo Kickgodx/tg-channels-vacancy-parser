@@ -6,9 +6,9 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -36,6 +36,8 @@ class VacancyUpsertStats:
 
 
 _LOG = logging.getLogger(__name__)
+
+VACANCY_TTL_DAYS = 40
 
 _SORT_COLUMNS: dict[VacancySortField, object] = {
     "post_date": VacancyRow.post_date,
@@ -111,6 +113,7 @@ def finalize_parse_run(session: Session, run_id: uuid.UUID, result: ParseResult,
 def save_parse_result(session: Session, run_id: uuid.UUID, result: ParseResult) -> None:
     finalize_parse_run(session, run_id, result, status="completed")
     upsert_vacancies(session, result.vacancies_unique, parse_run_id=run_id)
+    delete_expired_vacancies(session)
 
 
 def save_parse_cancelled(
@@ -123,6 +126,7 @@ def save_parse_cancelled(
     if result is not None:
         finalize_parse_run(session, run_id, result, status=status)
         upsert_vacancies(session, result.vacancies_unique, parse_run_id=run_id)
+        delete_expired_vacancies(session)
     else:
         set_run_status(session, run_id, status)
 
@@ -196,6 +200,27 @@ def upsert_vacancies(
         updated_existing,
     )
     return VacancyUpsertStats(inserted=inserted, updated_existing=updated_existing)
+
+
+def delete_expired_vacancies(
+    session: Session,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Удалить вакансии старше 40 суток по дате поста или сохранения."""
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=VACANCY_TTL_DAYS)
+    result = session.execute(
+        delete(VacancyRow).where(
+            or_(
+                VacancyRow.post_date <= cutoff,
+                and_(VacancyRow.post_date.is_(None), VacancyRow.parsed_at <= cutoff),
+            )
+        )
+    )
+    deleted = result.rowcount or 0
+    if deleted:
+        _LOG.info("TTL вакансий: удалено %s записей старше %s", deleted, cutoff.isoformat())
+    return deleted
 
 
 def patch_run_vacancy_upsert_stats(
