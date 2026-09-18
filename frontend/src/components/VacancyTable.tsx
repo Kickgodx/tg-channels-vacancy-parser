@@ -70,6 +70,7 @@ export default function VacancyTable({
     "salary_currency",
     "work_format",
     "detected_grade",
+    "detected_specializations",
     "vacancy_score",
     "cleaned_text",
   ]);
