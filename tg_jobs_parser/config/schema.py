@@ -330,6 +330,26 @@ class ParserConfig(BaseModel):
         le=500,
         description="Как часто отдавать снимок прогресса в UI (каждые N постов).",
     )
+    db_flush_every_posts: int = Field(
+        default=500,
+        ge=1,
+        le=100000,
+        description=(
+            "Промежуточная запись в БД: сливать накопленные уникальные вакансии каждые "
+            "N обработанных постов или при накоплении db_flush_pending_vacancies штук — "
+            "что наступит раньше (если прогон идёт через backend с vacancy_batch_sink). "
+            "При падении прогона уже записанные батчи не теряются."
+        ),
+    )
+    db_flush_pending_vacancies: int = Field(
+        default=100,
+        ge=1,
+        le=100000,
+        description=(
+            "Промежуточная запись в БД: сливать, когда накопилось N ещё не записанных "
+            "уникальных вакансий (или каждые db_flush_every_posts постов — что раньше)."
+        ),
+    )
     channel_concurrency: int = Field(
         default=4,
         ge=1,

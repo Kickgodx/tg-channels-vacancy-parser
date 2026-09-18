@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import TYPE_CHECKING
 from datetime import datetime, timezone
@@ -13,7 +14,7 @@ from pathlib import Path
 
 from tg_jobs_parser.analytics.metrics_builder import build_metrics
 from tg_jobs_parser.config.schema import AppConfig
-from tg_jobs_parser.deduplication.deduplicator import deduplicate_vacancies
+from tg_jobs_parser.deduplication.deduplicator import VacancyDeduplicator
 from tg_jobs_parser.extraction.company_extractor import extract_company
 from tg_jobs_parser.extraction.contact_extractor import extract_contact
 from tg_jobs_parser.extraction.grade_extractor import extract_grade
@@ -197,14 +198,14 @@ def _build_parse_result(
     all_warnings: list[str],
     posts_fetched: int,
     candidates: list[Vacancy],
+    unique: list[Vacancy],
+    dups: list[Vacancy],
+    dedup_elapsed_sec: float,
     ai_service: AIEnrichmentService | None,
     posts_processed: int = 0,
     fetch_elapsed_sec: float = 0.0,
     process_elapsed_sec: float = 0.0,
 ) -> ParseResult:
-    dedup_started = time.monotonic()
-    unique, dups = deduplicate_vacancies(candidates, config)
-    dedup_elapsed_sec = time.monotonic() - dedup_started
     _LOG.info(
         "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
         len(unique),
@@ -314,11 +315,17 @@ def run_parse(
     progress_callback: ParseProgressCallback | None = None,
     progress_every_n_posts: int | None = None,
     cancel: ParseCancellationToken | None = None,
+    vacancy_batch_sink: Callable[[list[Vacancy]], None] | None = None,
 ) -> ParseResult:
     """
     Основной сценарий MVP.
 
     ``cli_overrides`` — простой dict для сериализации в ``run_params`` (опционально).
+    ``vacancy_batch_sink`` — опциональный колбэк: вызывается с очередной порцией
+    уникальных вакансий каждые ``parser.db_flush_every_posts`` обработанных постов,
+    при накоплении ``parser.db_flush_pending_vacancies`` незаписанных уникальных
+    (что наступит раньше) и в конце прогона — чтобы сохранять вакансии в БД по ходу
+    обработки, а не только в конце.
     """
     try_load_dotenv()
 
@@ -403,6 +410,9 @@ def run_parse(
             all_warnings=all_warnings,
             posts_fetched=0,
             candidates=[],
+            unique=[],
+            dups=[],
+            dedup_elapsed_sec=0.0,
             ai_service=None,
             fetch_elapsed_sec=fetch_elapsed,
         )
@@ -454,7 +464,44 @@ def run_parse(
             _LOG.error("AI не инициализирован: %s", e)
 
     process_elapsed = 0.0
+    deduplicator = VacancyDeduplicator(config)
+    dedup_elapsed = 0.0
+    db_flush_step = max(1, config.parser.db_flush_every_posts)
+    db_flush_pending = max(1, config.parser.db_flush_pending_vacancies)
+    pending_uniques: list[Vacancy] = []  # уникальные вакансии, ещё не ушедшие в sink
     try:
+
+        def _register_candidate(v: Vacancy) -> None:
+            """Кандидат прошёл фильтры — сразу прогоняем через инкрементальный дедуп."""
+            nonlocal dedup_elapsed
+            candidates.append(v)
+            started = time.monotonic()
+            new_unique, _ = deduplicator.add((v,))
+            dedup_elapsed += time.monotonic() - started
+            pending_uniques.extend(new_unique)
+
+        def _flush_pending() -> None:
+            """
+            Отдать накопленные уникальные вакансии в ``vacancy_batch_sink``.
+
+            Ошибки записи глотаем: прогон не должен падать из-за БД — незаписанные
+            вакансии остаются в pending и будут предложены повторно на следующем
+            флаше / финальным UPSERT в конце прогона.
+            """
+            if vacancy_batch_sink is None or not pending_uniques:
+                return
+            try:
+                vacancy_batch_sink(list(pending_uniques))
+            except ParseCancelled:
+                raise
+            except Exception as e:
+                _LOG.warning(
+                    "Промежуточная запись %s вакансий в БД не удалась: %s — повторим позже.",
+                    len(pending_uniques),
+                    e,
+                )
+                return
+            pending_uniques.clear()
 
         def _process_one(post: RawPost) -> Vacancy | None:
             if cancel and cancel.is_cancelled():
@@ -510,9 +557,11 @@ def run_parse(
                     cancel.check()
                 v = _process_one(post)
                 if v is not None:
-                    candidates.append(v)
+                    _register_candidate(v)
                 if i % batch_step == 0 or i == len(all_posts):
                     _emit_progress(i)
+                if len(pending_uniques) >= db_flush_pending or i % db_flush_step == 0:
+                    _flush_pending()
                 if i % 500 == 0:
                     _LOG.info(
                         "Обработано постов: %s/%s; прошло вакансий: %s",
@@ -538,7 +587,9 @@ def run_parse(
                 emit_progress=_emit_progress,
             ):
                 if v is not None:
-                    candidates.append(v)
+                    _register_candidate(v)
+                if len(pending_uniques) >= db_flush_pending or i % db_flush_step == 0:
+                    _flush_pending()
                 if i % 500 == 0:
                     _LOG.info(
                         "Обработано постов: %s/%s; прошло вакансий: %s",
@@ -570,12 +621,16 @@ def run_parse(
             len(candidates),
         )
 
+        _flush_pending()
         return _build_parse_result(
             config=config,
             cli_overrides=cli_overrides,
             all_warnings=all_warnings,
             posts_fetched=posts_fetched,
             candidates=candidates,
+            unique=deduplicator.unique,
+            dups=deduplicator.duplicates,
+            dedup_elapsed_sec=dedup_elapsed,
             ai_service=ai_service,
             posts_processed=len(all_posts),
             fetch_elapsed_sec=fetch_elapsed,
@@ -584,12 +639,19 @@ def run_parse(
     except ParseCancelled:
         _LOG.warning("Прогон прерван (отмена).")
         all_warnings.append("Прогон прерван пользователем.")
+        try:
+            _flush_pending()
+        except Exception as flush_err:
+            _LOG.warning("Финальный сброс вакансий при отмене не удался: %s", flush_err)
         return _build_parse_result(
             config=config,
             cli_overrides=cli_overrides,
             all_warnings=all_warnings,
             posts_fetched=posts_fetched,
             candidates=candidates,
+            unique=deduplicator.unique,
+            dups=deduplicator.duplicates,
+            dedup_elapsed_sec=dedup_elapsed,
             ai_service=ai_service,
             posts_processed=len(all_posts),
             fetch_elapsed_sec=fetch_elapsed,

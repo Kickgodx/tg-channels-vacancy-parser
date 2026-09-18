@@ -141,6 +141,11 @@ fx:
 
 parser:
   progress_batch_posts: 25
+  # Промежуточная запись уникальных вакансий в БД (для backend-прогонов): каждые N обработанных
+  # постов ИЛИ при накоплении db_flush_pending_vacancies штук — что наступит раньше.
+  # Если прогон упадёт, уже записанные батчи не потеряются.
+  db_flush_every_posts: 500
+  db_flush_pending_vacancies: 100
   vacancy_score_threshold: 1
   # Минимум «содержательных» баллов (всё кроме признаков email/@). 1 — не брать только @упоминания.
   vacancy_min_substantive_score: 1

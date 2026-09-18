@@ -8,6 +8,7 @@ import uuid
 
 from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.models.parse_result import ParseResult
+from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_cancel import ParseCancelled
 from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 from tg_jobs_parser.parse_runner import run_parse
@@ -74,6 +75,43 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
         active.last_progress = snap
         progress_bus.publish(run_id, snap)
 
+    # Промежуточные батчи, уже записанные в БД по ходу прогона (через vacancy_batch_sink).
+    flushed_ids: set[str] = set()
+    upsert_totals = repo.VacancyUpsertStats()
+
+    def flush_vacancies(batch: list[Vacancy]) -> None:
+        """Промежуточная запись батча уникальных вакансий во время обработки."""
+        nonlocal upsert_totals
+        with session_scope() as session:
+            stats = repo.upsert_vacancies(session, batch, parse_run_id=run_id)
+        upsert_totals = repo.VacancyUpsertStats(
+            inserted=upsert_totals.inserted + stats.inserted,
+            updated_existing=upsert_totals.updated_existing + stats.updated_existing,
+        )
+        flushed_ids.update(v.id for v in batch)
+        _LOG.info(
+            "Прогон %s: промежуточная запись — %s вакансий (+%s новых), уже в БД: %s",
+            run_id,
+            len(batch),
+            stats.inserted,
+            len(flushed_ids),
+        )
+
+    def persist_remaining(unique: list[Vacancy]) -> repo.VacancyUpsertStats:
+        """Финальный UPSERT хвоста (в т.ч. батчей, не записавшихся по ходу) + итоговая статистика."""
+        nonlocal upsert_totals
+        remaining = [v for v in unique if v.id not in flushed_ids]
+        with session_scope() as session:
+            stats = repo.upsert_vacancies(session, remaining, parse_run_id=run_id)
+            repo.delete_expired_vacancies(session)
+            upsert_totals = repo.VacancyUpsertStats(
+                inserted=upsert_totals.inserted + stats.inserted,
+                updated_existing=upsert_totals.updated_existing + stats.updated_existing,
+            )
+            repo.patch_run_vacancy_upsert_stats(session, run_id, upsert_totals)
+        flushed_ids.update(v.id for v in remaining)
+        return upsert_totals
+
     result: ParseResult | None = None
     try:
         result = run_parse(
@@ -81,6 +119,7 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
             cli_overrides={"api": True, "run_id": str(run_id)},
             progress_callback=on_progress,
             cancel=cancel_token,
+            vacancy_batch_sink=flush_vacancies,
         )
         active.result = result
         final_status = "cancelled" if cancel_token.is_cancelled() else "completed"
@@ -88,15 +127,14 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
         with session_scope() as session:
             repo.finalize_parse_run(session, run_id, result, status=final_status)
         try:
+            remaining_count = len(result.vacancies_unique) - len(flushed_ids)
             _LOG.info(
-                "Прогон %s: сохранение %s вакансий в PostgreSQL…",
+                "Прогон %s: финальное сохранение в PostgreSQL (%s вакансий уже записано по ходу прогона, осталось %s)…",
                 run_id,
-                len(result.vacancies_unique),
+                len(flushed_ids),
+                remaining_count,
             )
-            with session_scope() as session:
-                stats = repo.upsert_vacancies(session, result.vacancies_unique, parse_run_id=run_id)
-                repo.delete_expired_vacancies(session)
-                repo.patch_run_vacancy_upsert_stats(session, run_id, stats)
+            totals = persist_remaining(result.vacancies_unique)
         except Exception as vac_err:
             _LOG.exception("Прогон %s: не удалось сохранить вакансии: %s", run_id, vac_err)
             with session_scope() as session:
@@ -108,8 +146,8 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
             "Прогон %s завершён: %s уникальных в прогоне, в БД +%s новых, %s уже были",
             run_id,
             len(result.vacancies_unique),
-            stats.inserted,
-            stats.updated_existing,
+            totals.inserted,
+            totals.updated_existing,
         )
     except ParseCancelled:
         active.status = "cancelled"
@@ -118,10 +156,7 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
             with session_scope() as session:
                 repo.finalize_parse_run(session, run_id, partial, status="cancelled")
             try:
-                with session_scope() as session:
-                    stats = repo.upsert_vacancies(session, partial.vacancies_unique, parse_run_id=run_id)
-                    repo.delete_expired_vacancies(session)
-                    repo.patch_run_vacancy_upsert_stats(session, run_id, stats)
+                persist_remaining(partial.vacancies_unique)
             except Exception as vac_err:
                 _LOG.warning("Прогон %s отменён; вакансии не сохранены: %s", run_id, vac_err)
         else:
