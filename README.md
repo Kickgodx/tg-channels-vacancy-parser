@@ -117,16 +117,9 @@ uvicorn backend.main:app --reload --port 8000
 
 ### Схема БД (MVP)
 
-Одна миграция: `alembic/versions/001_initial_schema.py`. При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…003`). При старте backend применяет `upgrade head`.
 
-**Если меняете колонки/таблицы** — правьте `001_initial_schema.py` и модели в `backend/db/models.py`, затем пересоздайте Postgres:
-
-```powershell
-docker compose down -v
-docker compose up --build
-```
-
-Флаг `-v` удаляет volume `pgdata` (все прогоны и вакансии). Для MVP так проще, чем цепочка миграций.
+**Если меняете колонки/таблицы** — добавьте новую миграцию (`alembic revision`) и обновите модели в `backend/db/models.py`; при следующем `docker compose up` она применится автоматически, данные сохранятся.
 
 Ядро парсинга (`tg_jobs_parser.parse_runner`) вызывается из `backend/services/run_service.py`; результаты пишутся в PostgreSQL (UPSERT по `id` вакансии).
 
@@ -341,3 +334,7 @@ pytest
 - [ ] Alembic-миграции, восстановление прогресса после рестарта backend
 - [ ] Расширение Telethon: joinchat, rate-limit
 - [ ] JWT / multi-user (сейчас — один локальный оператор, опциональный `API_KEY`)
+
+Активный план фичей — см. [ROADMAP.md](ROADMAP.md): дашборд аналитики,
+трекер откликов, полнотекстовый поиск, матчинг резюме, экспорт в
+Google Sheets / Notion.
