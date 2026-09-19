@@ -17,7 +17,13 @@ from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
 
 from backend.fx.apply import apply_salary_rub_for_vacancy, preload_fx_rates_for_vacancies
-from backend.db.models import ParseRunRow, SavedFilterRow, VacancyRow
+from backend.db.models import (
+    ParseRunRow,
+    ResumeRow,
+    SavedFilterRow,
+    VacancyMatchRow,
+    VacancyRow,
+)
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import FxConfig
@@ -51,7 +57,10 @@ _SORT_COLUMNS: dict[VacancySortField, object] = {
 
 
 def _vacancy_order_by(query: VacancyQuery, *, dialect: str = "postgresql") -> list:
-    col = _SORT_COLUMNS.get(query.sort_by, VacancyRow.post_date)
+    if query.sort_by == "match_score" and query.resume_id is not None:
+        col = VacancyMatchRow.score
+    else:
+        col = _SORT_COLUMNS.get(query.sort_by, VacancyRow.post_date)
     order = col.asc().nulls_last() if query.sort_order == "asc" else col.desc().nulls_last()
     if query.q and dialect == "postgresql":
         rank = func.ts_rank(
@@ -249,13 +258,33 @@ def patch_run_vacancy_upsert_stats(
 
 def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[Vacancy], int]:
     dialect = session.get_bind().dialect.name
-    stmt = apply_vacancy_filters(select(VacancyRow), query, dialect=dialect)
     total = int(session.scalar(vacancy_count_stmt(query, dialect=dialect)) or 0)
     offset = (query.page - 1) * query.page_size
+    order = [*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc()]
+    if query.resume_id is not None:
+        stmt = apply_vacancy_filters(
+            select(VacancyRow, VacancyMatchRow), query, dialect=dialect
+        ).outerjoin(
+            VacancyMatchRow,
+            and_(
+                VacancyMatchRow.vacancy_id == VacancyRow.id,
+                VacancyMatchRow.resume_id == query.resume_id,
+            ),
+        )
+        pairs = session.execute(
+            stmt.order_by(*order).offset(offset).limit(query.page_size)
+        ).all()
+        items: list[Vacancy] = []
+        for vrow, mrow in pairs:
+            v = row_to_vacancy(vrow)
+            if mrow is not None:
+                v.match_score = mrow.score
+                v.match_explanation = mrow.explanation
+            items.append(v)
+        return items, total
+    stmt = apply_vacancy_filters(select(VacancyRow), query, dialect=dialect)
     rows = session.scalars(
-        stmt.order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
-        .offset(offset)
-        .limit(query.page_size)
+        stmt.order_by(*order).offset(offset).limit(query.page_size)
     ).all()
     return [row_to_vacancy(r) for r in rows], total
 
@@ -343,3 +372,101 @@ def delete_saved_filter(session: Session, filter_id: int) -> bool:
     session.delete(row)
     session.flush()
     return True
+
+
+def list_resumes(session: Session) -> list[ResumeRow]:
+    stmt = select(ResumeRow).order_by(ResumeRow.created_at.desc(), ResumeRow.id.desc())
+    return list(session.scalars(stmt))
+
+
+def get_resume(session: Session, resume_id: int) -> ResumeRow | None:
+    return session.get(ResumeRow, resume_id)
+
+
+def create_resume(
+    session: Session, *, name: str, text: str, skills: list | None = None
+) -> ResumeRow:
+    row = ResumeRow(name=name, text=text, skills_json=skills)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def delete_resume(session: Session, resume_id: int) -> bool:
+    row = session.get(ResumeRow, resume_id)
+    if row is None:
+        return False
+    session.query(VacancyMatchRow).filter(VacancyMatchRow.resume_id == resume_id).delete()
+    session.delete(row)
+    session.flush()
+    return True
+
+
+def upsert_vacancy_match(
+    session: Session,
+    *,
+    resume_id: int,
+    vacancy_id: str,
+    score: float,
+    explanation: str | None,
+    matching_skills: list | None,
+    missing_skills: list | None,
+    model: str,
+) -> VacancyMatchRow:
+    """Записать/обновить оценку пары (resume, vacancy) — кэш матчинга по PK."""
+    row = session.get(VacancyMatchRow, (resume_id, vacancy_id))
+    if row is None:
+        row = VacancyMatchRow(
+            resume_id=resume_id,
+            vacancy_id=vacancy_id,
+            score=score,
+            explanation=explanation,
+            matching_skills=matching_skills,
+            missing_skills=missing_skills,
+            model=model,
+        )
+        session.add(row)
+    else:
+        row.score = score
+        row.explanation = explanation
+        row.matching_skills = matching_skills
+        row.missing_skills = missing_skills
+        row.model = model
+        row.created_at = datetime.now(timezone.utc)
+    session.flush()
+    return row
+
+
+def list_vacancies_for_matching(
+    session: Session,
+    query: VacancyQuery,
+    *,
+    resume_id: int,
+    limit: int,
+) -> tuple[list[VacancyRow], int]:
+    """
+    Вакансии по фильтрам, ещё не оценённые для резюме; топ по vacancy_score.
+
+    Возвращает (строки, число уже оценённых в отфильтрованном наборе).
+    """
+    dialect = session.get_bind().dialect.name
+    unmatched_join = and_(
+        VacancyMatchRow.vacancy_id == VacancyRow.id,
+        VacancyMatchRow.resume_id == resume_id,
+    )
+    matched_stmt = apply_vacancy_filters(
+        select(func.count(VacancyRow.id)), query, dialect=dialect
+    ).join(VacancyMatchRow, unmatched_join)
+    already_matched = int(session.scalar(matched_stmt) or 0)
+
+    stmt = (
+        apply_vacancy_filters(select(VacancyRow), query, dialect=dialect)
+        .outerjoin(VacancyMatchRow, unmatched_join)
+        .where(VacancyMatchRow.vacancy_id.is_(None))
+        .order_by(
+            VacancyRow.vacancy_score.desc().nulls_last(),
+            VacancyRow.post_date.desc().nulls_last(),
+        )
+        .limit(limit)
+    )
+    return list(session.scalars(stmt).all()), already_matched

@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { api, type VacancyQueryParams } from "../api/client";
 import AnalyticsPanel from "../components/AnalyticsPanel";
 import MetricsCharts from "../components/MetricsCharts";
+import ResumePanel from "../components/ResumePanel";
 import VacancyTable from "../components/VacancyTable";
 import type { SavedFilter, SavedFilterParams } from "../types/api";
 import { SORTABLE_COLUMNS, type VacancySortField, type VacancySortOrder } from "../types/sort";
@@ -72,6 +73,7 @@ export default function VacanciesPage() {
   const [tab, setTab] = useState<VacanciesTab>("list");
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presetName, setPresetName] = useState("");
+  const [resumeId, setResumeId] = useState<number | null>(null);
 
   const filterParams = useMemo(
     () =>
@@ -97,13 +99,14 @@ export default function VacanciesPage() {
   });
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["vacancies", page, filterParams, sortBy, sortOrder],
+    queryKey: ["vacancies", page, filterParams, sortBy, sortOrder, resumeId],
     queryFn: () =>
       api.listVacancies({
         page,
         page_size: 50,
         sort_by: sortBy,
         sort_order: sortOrder,
+        ...(resumeId != null ? { resume_id: resumeId } : {}),
         ...filterParams,
       }),
   });
@@ -225,6 +228,16 @@ export default function VacanciesPage() {
           <span className="error">{(deletePresetM.error as Error).message}</span>
         )}
       </div>
+
+      <ResumePanel
+        selectedId={resumeId}
+        onSelect={(id) => {
+          setResumeId(id);
+          setSortBy(id != null ? "match_score" : "post_date");
+          setPage(1);
+        }}
+        filterParams={filterParams}
+      />
 
       <div className="filters-panel">
         <input

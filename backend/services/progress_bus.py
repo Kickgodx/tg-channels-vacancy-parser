@@ -1,21 +1,23 @@
-"""Pub/sub прогресса парсинга для SSE (in-process, один backend-инстанс)."""
+"""Pub/sub прогресса парсинга и матчинга для SSE (in-process, один backend-инстанс)."""
 
 from __future__ import annotations
 
 import asyncio
 import threading
 import uuid
-from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import Any
 
-from tg_jobs_parser.parse_progress import ParseProgressSnapshot
+# Любой сериализуемый снимок прогресса: ParseProgressSnapshot (парсинг)
+# или MatchProgress (матчинг резюме).
+Snapshot = Any
 
 
 @dataclass
 class _RunChannel:
     lock: threading.Lock = field(default_factory=threading.Lock)
-    last: ParseProgressSnapshot | None = None
-    subscribers: list[asyncio.Queue[ParseProgressSnapshot | None]] = field(default_factory=list)
+    last: Snapshot | None = None
+    subscribers: list[asyncio.Queue[Snapshot | None]] = field(default_factory=list)
 
 
 class ProgressBus:
@@ -29,7 +31,7 @@ class ProgressBus:
                 self._channels[run_id] = _RunChannel()
             return self._channels[run_id]
 
-    def publish(self, run_id: uuid.UUID, snapshot: ParseProgressSnapshot) -> None:
+    def publish(self, run_id: uuid.UUID, snapshot: Snapshot) -> None:
         ch = self._channel(run_id)
         with ch.lock:
             ch.last = snapshot
@@ -51,14 +53,13 @@ class ProgressBus:
                 except asyncio.QueueFull:
                     pass
 
-    def get_last(self, run_id: uuid.UUID) -> ParseProgressSnapshot | None:
+    def get_last(self, run_id: uuid.UUID) -> Snapshot | None:
         ch = self._channel(run_id)
         with ch.lock:
             return ch.last
 
-    async def subscribe(self, run_id: uuid.UUID) -> asyncio.Queue[ParseProgressSnapshot | None]:
-        loop = asyncio.get_running_loop()
-        q: asyncio.Queue[ParseProgressSnapshot | None] = asyncio.Queue(maxsize=32)
+    async def subscribe(self, run_id: uuid.UUID) -> asyncio.Queue[Snapshot | None]:
+        q: asyncio.Queue[Snapshot | None] = asyncio.Queue(maxsize=32)
         ch = self._channel(run_id)
         with ch.lock:
             if ch.last is not None:

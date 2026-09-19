@@ -129,3 +129,28 @@ class VacancyAIExtraction(BaseModel):
         from tg_jobs_parser.fx.convert import normalize_currency
 
         return normalize_currency(str(v).strip().upper()[:8], default_if_missing="RUB")
+
+
+class VacancyMatchExtraction(BaseModel):
+    """Оценка соответствия резюме вакансии (ответ LLM матчинга)."""
+
+    score: float = Field(
+        ge=0, le=100,
+        description="0-100: насколько резюме подходит вакансии (навыки, грейд, домен).",
+    )
+    explanation: str | None = Field(
+        default=None,
+        description="1-3 предложения на русском: почему такой скор, ключевые пробелы.",
+    )
+    matching_skills: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+
+    @field_validator("explanation", mode="before")
+    @classmethod
+    def norm_optional_str_fields(cls, v: object) -> str | None:
+        return _coerce_optional_str(v)
+
+    @field_validator("matching_skills", "missing_skills", mode="before")
+    @classmethod
+    def norm_str_list_fields(cls, v: object) -> list[str]:
+        return _coerce_str_list(v)

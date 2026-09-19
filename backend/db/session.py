@@ -30,6 +30,9 @@ def get_engine():
         connect_args = {}
         if url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
+            # busy-timeout: параллельные писатели (worker-потоки, тесты) ждут,
+            # а не падают мгновенно с "database is locked".
+            connect_args["timeout"] = 30
         pool_kw: dict = {"pool_pre_ping": True}
         if url.startswith("postgresql"):
             pool_kw["pool_size"] = 10

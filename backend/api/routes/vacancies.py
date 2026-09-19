@@ -103,6 +103,7 @@ def list_vacancies(
     include_archived: bool = False,
     sort_by: VacancySortField = "post_date",
     sort_order: VacancySortOrder = "desc",
+    resume_id: int | None = None,
     db: Session = Depends(get_db),
 ) -> VacancyListResponse:
     query = vacancy_query_from_params(
@@ -119,6 +120,7 @@ def list_vacancies(
         include_archived=include_archived,
         sort_by=sort_by,
         sort_order=sort_order,
+        resume_id=resume_id,
     )
     items, total = repo.list_vacancies(db, query)
     return VacancyListResponse(items=items, total=total, page=page, page_size=page_size)

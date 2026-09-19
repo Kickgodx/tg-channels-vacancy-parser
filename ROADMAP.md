@@ -117,10 +117,21 @@ backend без `down -v`.
 
 ---
 
-## 4. `feature/resume-matching` — матчинг резюме к вакансиям
+## 4. `feature/resume-matching` — матчинг резюме к вакансиям ✅
 
 Самая тяжёлая фича, но инфраструктура готова: OpenRouter-клиент, кэш,
 `ai_stats`, каталог моделей в `llm_models.yaml`.
+
+> **Реализовано.** `resumes` + `vacancy_matches` (PK-пара — кэш матчинга,
+> повторный прогон оценивает только новые пары). Отдельный промпт
+> `build_match_messages` + `VacancyMatchExtraction` (score/explanation/
+> skills), `OpenRouterClient.match_with_fallback`. Фоновый воркер
+> (`match_service`) с `ai.concurrency`, прогресс по SSE через общий
+> `progress_bus` (обобщён до любого снапшота). Эндпоинты:
+> `GET/POST/DELETE /api/v1/resumes`, `POST /resumes/{id}/match`,
+> `GET /matches/{id}` + `/events` + `/cancel`. `GET /vacancies` принимает
+> `resume_id` и `sort_by=match_score`. UI — `ResumePanel` на
+> `VacanciesPage`, колонка Match с tooltip-пояснением.
 
 **БД (миграция 006)**
 

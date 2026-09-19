@@ -68,6 +68,7 @@ VacancySortField = Literal[
     "detected_grade",
     "salary_currency",
     "vacancy_score",
+    "match_score",
 ]
 VacancySortOrder = Literal["asc", "desc"]
 
@@ -95,6 +96,10 @@ class VacancyQuery(BaseModel):
     )
     sort_by: VacancySortField = "post_date"
     sort_order: VacancySortOrder = "desc"
+    resume_id: int | None = Field(
+        default=None,
+        description="Подмешать LLM-оценку соответствия этому резюме (join vacancy_matches).",
+    )
 
 
 class HealthResponse(BaseModel):
@@ -178,3 +183,51 @@ class SavedFilterOut(BaseModel):
 
 class SavedFilterListResponse(BaseModel):
     items: list[SavedFilterOut] = Field(default_factory=list)
+
+
+class ResumeCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1)
+
+
+class ResumeOut(BaseModel):
+    id: int
+    name: str
+    text: str
+    created_at: datetime
+
+
+class ResumeListResponse(BaseModel):
+    items: list[ResumeOut] = Field(default_factory=list)
+
+
+class MatchStartRequest(BaseModel):
+    limit: int = Field(
+        default=100, ge=1, le=500,
+        description="Сколько вакансий оценить (топ по vacancy_score среди отфильтрованных).",
+    )
+    filters: VacancyQuery = Field(default_factory=VacancyQuery)
+
+
+class MatchCreateResponse(BaseModel):
+    match_id: uuid.UUID
+    status: Literal["running"] = "running"
+
+
+MatchStatus = Literal["running", "completed", "failed", "cancelled"]
+
+
+class MatchProgress(BaseModel):
+    """Состояние матчинга — и ответ GET /matches/{id}, и payload SSE progress."""
+
+    match_id: uuid.UUID
+    resume_id: int
+    status: MatchStatus
+    total: int = 0
+    processed: int = 0
+    matched: int = 0
+    skipped_cached: int = 0
+    errors: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+    error: str | None = None

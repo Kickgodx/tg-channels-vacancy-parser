@@ -22,6 +22,7 @@ def vacancy_query_from_params(
     include_archived: bool = False,
     sort_by: VacancySortField = "post_date",
     sort_order: VacancySortOrder = "desc",
+    resume_id: int | None = None,
 ) -> VacancyQuery:
     df = date_type.fromisoformat(date_from) if date_from else None
     dt = date_type.fromisoformat(date_to) if date_to else None
@@ -39,4 +40,5 @@ def vacancy_query_from_params(
         include_archived=include_archived,
         sort_by=sort_by,
         sort_order=sort_order,
+        resume_id=resume_id,
     )

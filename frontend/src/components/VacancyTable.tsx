@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Vacancy } from "../types/api";
 import type { VacancySortField, VacancySortOrder } from "../types/sort";
 import { SORTABLE_COLUMNS } from "../types/sort";
@@ -15,6 +15,7 @@ const ALL_COLUMNS = [
   { key: "detected_grade", label: "Грейд", sortable: true },
   { key: "detected_specializations", label: "Специализации", sortable: false },
   { key: "vacancy_score", label: "Score", sortable: true },
+  { key: "match_score", label: "Match", sortable: true },
   { key: "cleaned_text", label: "Текст", sortable: false },
 ] as const;
 
@@ -76,6 +77,12 @@ export default function VacancyTable({
   ]);
   const [selected, setSelected] = useState<{ v: Vacancy; idx: number } | null>(null);
 
+  useEffect(() => {
+    if (items.some((v) => v.match_score != null)) {
+      setCols((prev) => (prev.includes("match_score") ? prev : [...prev, "match_score"]));
+    }
+  }, [items]);
+
   const sortedItems = useMemo(
     () => (onSortChange ? items : sortVacancies(items, sortBy, sortOrder)),
     [items, sortBy, sortOrder, onSortChange],
@@ -123,6 +130,12 @@ export default function VacancyTable({
         return v.detected_salary_avg_rub != null
           ? `${Math.round(v.detected_salary_avg_rub).toLocaleString()} ₽`
           : "—";
+      case "match_score":
+        return v.match_score != null ? (
+          <span title={v.match_explanation ?? undefined}>{Math.round(v.match_score)}</span>
+        ) : (
+          "—"
+        );
       case "detected_specializations":
         return (v.detected_specializations || []).join(", ") || "—";
       case "cleaned_text":

@@ -5,7 +5,8 @@ export type VacancySortField =
   | "work_format"
   | "detected_grade"
   | "salary_currency"
-  | "vacancy_score";
+  | "vacancy_score"
+  | "match_score";
 
 export type VacancySortOrder = "asc" | "desc";
 
@@ -17,4 +18,5 @@ export const SORTABLE_COLUMNS: VacancySortField[] = [
   "work_format",
   "detected_grade",
   "vacancy_score",
+  "match_score",
 ];

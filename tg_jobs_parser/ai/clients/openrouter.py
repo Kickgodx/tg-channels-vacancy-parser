@@ -9,13 +9,13 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from tg_jobs_parser.ai.prompts import build_messages
+from tg_jobs_parser.ai.prompts import build_match_messages, build_messages
 from tg_jobs_parser.ai.rate_limit import (
     LlmQuotaExhausted,
     OpenRouterRateLimiter,
     extract_rate_limit_headers,
 )
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
+from tg_jobs_parser.ai.schema import VacancyAIExtraction, VacancyMatchExtraction
 from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.config.schema import AiConfig
 from tg_jobs_parser.observability.llm_metrics import record_request, record_tokens
@@ -49,6 +49,12 @@ def _parse_extraction(raw: str) -> VacancyAIExtraction:
     text = _extract_json_text(raw)
     data = json.loads(text)
     return VacancyAIExtraction.model_validate(data)
+
+
+def _parse_match(raw: str) -> VacancyMatchExtraction:
+    text = _extract_json_text(raw)
+    data = json.loads(text)
+    return VacancyMatchExtraction.model_validate(data)
 
 
 def _message_content(message: Any) -> str:
@@ -177,20 +183,15 @@ class OpenRouterClient:
                 raise RuntimeError(f"OpenRouter API: {e}") from e
         raise RuntimeError(f"OpenRouter API: {last_err}")
 
-    def extract(
+    def _call_llm(
         self,
         *,
-        text: str,
-        search_context: SearchContext,
+        messages: list[dict[str, str]],
+        parse,
         model: str | None = None,
-    ) -> tuple[VacancyAIExtraction, LLMUsage]:
+    ) -> tuple[Any, LLMUsage]:
+        """Общий вызов chat.completions: kwargs, usage, метрики, разбор через ``parse``."""
         use_model = model or self._ai.model
-        messages = build_messages(
-            text=text,
-            search_context=search_context,
-            use_few_shot=self._ai.use_few_shot,
-        )
-
         kwargs: dict[str, Any] = {
             "model": use_model,
             "messages": messages,
@@ -227,13 +228,13 @@ class OpenRouterClient:
                 model=use_model,
             )
             try:
-                extraction = _parse_extraction(content)
+                result = parse(content)
             except (json.JSONDecodeError, ValueError) as e:
                 outcome = "parse_error"
                 _LOG.warning("Не удалось разобрать JSON от %s: %s", use_model, e)
                 raise
             outcome = "success"
-            return extraction, usage
+            return result, usage
         except LlmQuotaExhausted:
             outcome = "rate_limited"
             raise
@@ -249,6 +250,30 @@ class OpenRouterClient:
                     prompt_tokens=usage.prompt_tokens,
                     completion_tokens=usage.completion_tokens,
                 )
+
+    def extract(
+        self,
+        *,
+        text: str,
+        search_context: SearchContext,
+        model: str | None = None,
+    ) -> tuple[VacancyAIExtraction, LLMUsage]:
+        messages = build_messages(
+            text=text,
+            search_context=search_context,
+            use_few_shot=self._ai.use_few_shot,
+        )
+        return self._call_llm(messages=messages, parse=_parse_extraction, model=model)
+
+    def match(
+        self,
+        *,
+        resume_text: str,
+        vacancy_text: str,
+        model: str | None = None,
+    ) -> tuple[VacancyMatchExtraction, LLMUsage]:
+        messages = build_match_messages(resume_text=resume_text, vacancy_text=vacancy_text)
+        return self._call_llm(messages=messages, parse=_parse_match, model=model)
 
     def extract_with_fallback(
         self,
@@ -285,6 +310,47 @@ class OpenRouterClient:
                 except Exception as e:
                     last_err = e
                     _LOG.warning("Fallback %s не удался: %s", fb, e)
+            raise RuntimeError(
+                f"OpenRouter: все модели недоступны (основная + {len(fallbacks)} fallback): {last_err}"
+            ) from last_err
+
+    def match_with_fallback(
+        self,
+        *,
+        resume_text: str,
+        vacancy_text: str,
+    ) -> tuple[VacancyMatchExtraction, LLMUsage]:
+        if self._rate_limiter.llm_disabled:
+            raise LlmQuotaExhausted(
+                self._rate_limiter.llm_disabled_reason or "LLM отключён"
+            )
+        try:
+            return self.match(resume_text=resume_text, vacancy_text=vacancy_text)
+        except LlmQuotaExhausted:
+            raise
+        except Exception as first_err:
+            if _is_rate_limit_error(first_err):
+                raise
+            fallbacks = self._ai.resolved_fallback_models()
+            if not fallbacks:
+                raise
+            last_err: Exception = first_err
+            for fb in fallbacks:
+                try:
+                    _LOG.warning(
+                        "Основная модель %s недоступна (%s), пробуем fallback: %s",
+                        self._ai.model,
+                        first_err,
+                        fb,
+                    )
+                    return self.match(
+                        resume_text=resume_text, vacancy_text=vacancy_text, model=fb
+                    )
+                except LlmQuotaExhausted:
+                    raise
+                except Exception as e:
+                    last_err = e
+                    _LOG.warning("Fallback %s не удался (match): %s", fb, e)
             raise RuntimeError(
                 f"OpenRouter: все модели недоступны (основная + {len(fallbacks)} fallback): {last_err}"
             ) from last_err
