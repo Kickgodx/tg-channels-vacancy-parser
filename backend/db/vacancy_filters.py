@@ -30,10 +30,13 @@ def vacancy_filter_conditions(
     *,
     table: Table | None = None,
     dialect: str = "postgresql",
+    include_duplicates: bool = False,
 ) -> list[ColumnElement[bool]]:
     """Условия WHERE для вакансий. table — Core-алиас (vacancies AS t), иначе ORM VacancyRow."""
     c = table.c if table is not None else VacancyRow
-    conditions: list[ColumnElement[bool]] = [c.is_duplicate.is_(False)]
+    conditions: list[ColumnElement[bool]] = []
+    if not include_duplicates:
+        conditions.append(c.is_duplicate.is_(False))
     if not query.include_archived:
         conditions.append(c.archived_at.is_(None))
     if query.source_channel:
@@ -69,9 +72,15 @@ def apply_vacancy_filters(
     *,
     table: Table | None = None,
     dialect: str = "postgresql",
+    include_duplicates: bool = False,
 ) -> Select:
     """Ограничить выборку уникальными вакансиями и параметрами запроса."""
-    return stmt.where(and_(*vacancy_filter_conditions(query, table=table, dialect=dialect)))
+    conditions = vacancy_filter_conditions(
+        query, table=table, dialect=dialect, include_duplicates=include_duplicates
+    )
+    if not conditions:
+        return stmt
+    return stmt.where(and_(*conditions))
 
 
 def vacancy_count_stmt(query: VacancyQuery, *, dialect: str = "postgresql") -> Select:

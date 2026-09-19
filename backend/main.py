@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routes import ai_cache, channels, config, fx, health, runs, vacancies
+from backend.api.routes import ai_cache, analytics, channels, config, fx, health, runs, vacancies
 from backend.db import fx_repository as fx_repo
 from backend.db import repository as repo
 from backend.db.session import init_db, session_scope
@@ -107,6 +107,7 @@ app.include_router(runs.router, prefix="/api/v1")
 app.include_router(vacancies.router, prefix="/api/v1")
 app.include_router(ai_cache.router, prefix="/api/v1")
 app.include_router(fx.router, prefix="/api/v1")
+app.include_router(analytics.router, prefix="/api/v1")
 
 Instrumentator(
     should_group_status_codes=False,

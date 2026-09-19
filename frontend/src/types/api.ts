@@ -93,6 +93,55 @@ export interface MetricsSummary {
   warnings: string[];
 }
 
+export interface SalaryGroupStats {
+  group: string;
+  count: number;
+  mean?: number | null;
+  min?: number | null;
+  q1?: number | null;
+  median?: number | null;
+  q3?: number | null;
+  max?: number | null;
+}
+
+export interface SalaryMonthlyBucket {
+  period: string;
+  count: number;
+  mean?: number | null;
+  median?: number | null;
+}
+
+export interface SalaryDistributionBucket {
+  range: string;
+  count: number;
+}
+
+export interface SalaryAnalytics {
+  by_grade: SalaryGroupStats[];
+  by_work_format: SalaryGroupStats[];
+  by_specialization: SalaryGroupStats[];
+  monthly: SalaryMonthlyBucket[];
+  distribution: SalaryDistributionBucket[];
+  salary_display?: { display_currency: string; rates_as_of?: string | null; rates_source: string } | null;
+}
+
+export interface SourceStats {
+  channel: string;
+  vacancies: number;
+  duplicates: number;
+  unique_share: number;
+  avg_score?: number | null;
+  with_salary_share: number;
+}
+
+export interface CompanyStats {
+  company: string;
+  vacancies: number;
+  avg_score?: number | null;
+  with_salary: number;
+  avg_salary_rub?: number | null;
+}
+
 export interface RunDetail {
   id: string;
   status: RunStatus;

@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from tg_jobs_parser.models.metrics import MetricsSummary
+from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 
@@ -101,3 +101,64 @@ class HealthResponse(BaseModel):
     status: str
     database: bool
     config_loaded: bool
+
+
+class SalaryGroupStats(BaseModel):
+    """Квантили зарплаты (RUB/мес) внутри группы (грейд, формат, специализация)."""
+
+    group: str
+    count: int
+    mean: float | None = None
+    min: float | None = None
+    q1: float | None = None
+    median: float | None = None
+    q3: float | None = None
+    max: float | None = None
+
+
+class SalaryMonthlyBucket(BaseModel):
+    period: str
+    count: int
+    mean: float | None = None
+    median: float | None = None
+
+
+class SalaryDistributionBucket(BaseModel):
+    range: str
+    count: int
+
+
+class SalaryAnalytics(BaseModel):
+    by_grade: list[SalaryGroupStats] = Field(default_factory=list)
+    by_work_format: list[SalaryGroupStats] = Field(default_factory=list)
+    by_specialization: list[SalaryGroupStats] = Field(default_factory=list)
+    monthly: list[SalaryMonthlyBucket] = Field(default_factory=list)
+    distribution: list[SalaryDistributionBucket] = Field(default_factory=list)
+    salary_display: SalaryDisplayMeta | None = None
+
+
+class SourceStats(BaseModel):
+    """Качество канала: доля уникальных вакансий, средний score, покрытие зарплатой."""
+
+    channel: str
+    vacancies: int
+    duplicates: int
+    unique_share: float
+    avg_score: float | None = None
+    with_salary_share: float
+
+
+class SourceAnalytics(BaseModel):
+    items: list[SourceStats] = Field(default_factory=list)
+
+
+class CompanyStats(BaseModel):
+    company: str
+    vacancies: int
+    avg_score: float | None = None
+    with_salary: int
+    avg_salary_rub: float | None = None
+
+
+class CompanyAnalytics(BaseModel):
+    items: list[CompanyStats] = Field(default_factory=list)

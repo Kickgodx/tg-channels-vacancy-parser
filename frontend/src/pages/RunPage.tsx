@@ -121,7 +121,7 @@ export default function RunPage() {
   const [liveVacancies, setLiveVacancies] = useState<Vacancy[]>([]);
   const [sortBy, setSortBy] = useState<VacancySortField>("post_date");
   const [sortOrder, setSortOrder] = useState<VacancySortOrder>("desc");
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
 
   const run = useQuery({
     queryKey: ["run", runId],
