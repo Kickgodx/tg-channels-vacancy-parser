@@ -1,4 +1,5 @@
 import type {
+  CompanyStats,
   ConfigDefaults,
   LlmModelsCatalog,
   MetricsSummary,
@@ -6,6 +7,8 @@ import type {
   RunCreateBody,
   RunDetail,
   RunStatus,
+  SalaryAnalytics,
+  SourceStats,
   Vacancy,
 } from "../types/api";
 
@@ -134,6 +137,27 @@ export const api = {
     appendSearchParams(q, params);
     const qs = q.toString();
     return request<MetricsSummary>(`/vacancies/metrics${qs ? `?${qs}` : ""}`);
+  },
+
+  getSalaryAnalytics: (params?: VacancyQueryParams) => {
+    const q = new URLSearchParams();
+    appendSearchParams(q, params);
+    const qs = q.toString();
+    return request<SalaryAnalytics>(`/analytics/salaries${qs ? `?${qs}` : ""}`);
+  },
+
+  getSourceStats: (params?: VacancyQueryParams) => {
+    const q = new URLSearchParams();
+    appendSearchParams(q, params);
+    const qs = q.toString();
+    return request<{ items: SourceStats[] }>(`/analytics/sources${qs ? `?${qs}` : ""}`);
+  },
+
+  getCompanyStats: (params?: VacancyQueryParams) => {
+    const q = new URLSearchParams();
+    appendSearchParams(q, params);
+    const qs = q.toString();
+    return request<{ items: CompanyStats[] }>(`/analytics/companies${qs ? `?${qs}` : ""}`);
   },
 
   exportVacanciesUrl: (params?: VacancyQueryParams) => {
