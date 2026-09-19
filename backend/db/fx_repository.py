@@ -186,4 +186,7 @@ def sync_recent_days(session: Session, config: FxConfig, *, days: int | None = N
         after = len(get_rates(session, d))
         if after > before:
             total += after - before
+        # Коммит после каждого дня: иначе write-lock держится на все HTTP-запросы
+        # к ЦБ и на SQLite параллельные писатели падают с "database is locked".
+        session.commit()
     return total

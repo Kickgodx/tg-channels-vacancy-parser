@@ -26,6 +26,8 @@ export interface Vacancy {
   extraction_source?: string;
   ai_confidence?: number | null;
   ai_notes?: string | null;
+  match_score?: number | null;
+  match_explanation?: string | null;
 }
 
 export interface ConfigDefaults {
@@ -161,6 +163,29 @@ export interface SavedFilter {
   name: string;
   params: SavedFilterParams;
   created_at: string;
+}
+
+export interface Resume {
+  id: number;
+  name: string;
+  text: string;
+  created_at: string;
+}
+
+export type MatchStatus = "running" | "completed" | "failed" | "cancelled";
+
+export interface MatchProgress {
+  match_id: string;
+  resume_id: number;
+  status: MatchStatus;
+  total: number;
+  processed: number;
+  matched: number;
+  skipped_cached: number;
+  errors: number;
+  tokens_in: number;
+  tokens_out: number;
+  error?: string | null;
 }
 
 export interface RunDetail {

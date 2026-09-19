@@ -104,3 +104,39 @@ def build_messages(
         {"role": "system", "content": SYSTEM_PROMPT_V1},
         {"role": "user", "content": "\n".join(user_parts)},
     ]
+
+
+MATCH_PROMPT_VERSION = "match-v1"
+
+MATCH_SYSTEM_PROMPT = """You evaluate how well a candidate resume fits an IT job vacancy (Russian and/or English).
+Return ONE JSON object only. No markdown, no commentary outside JSON.
+Rules:
+- score: integer 0-100. Calibrate: 80-100 strong fit (role + stack + grade match),
+  60-79 partial fit (role matches, notable stack/grade gaps), 40-59 weak fit,
+  below 40 poor fit (different role/domain).
+- Judge on role, technologies, grade/seniority, work format and domain — not on salary.
+- matching_skills: resume skills/experience that the vacancy requires (max 8).
+- missing_skills: key vacancy requirements absent from the resume (max 8).
+- explanation: 1-3 sentences in Russian — why this score, main gaps or strengths."""
+
+
+def build_match_messages(*, resume_text: str, vacancy_text: str) -> list[dict[str, str]]:
+    from tg_jobs_parser.ai.schema import VacancyMatchExtraction
+
+    schema_hint = json.dumps(VacancyMatchExtraction.model_json_schema(), ensure_ascii=False)
+    user = "\n".join(
+        [
+            "OUTPUT_JSON_SCHEMA (follow field names):",
+            schema_hint,
+            "",
+            "RESUME:",
+            resume_text,
+            "",
+            "VACANCY:",
+            vacancy_text,
+        ]
+    )
+    return [
+        {"role": "system", "content": MATCH_SYSTEM_PROMPT},
+        {"role": "user", "content": user},
+    ]

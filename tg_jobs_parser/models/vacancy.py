@@ -76,6 +76,15 @@ class Vacancy(BaseModel):
     duplicate_group_id: str | None = None
     duplicate_reason: str | None = None
 
+    match_score: float | None = Field(
+        default=None,
+        description="0-100: LLM-оценка соответствия выбранному резюме (join vacancy_matches).",
+    )
+    match_explanation: str | None = Field(
+        default=None,
+        description="Пояснение LLM к match_score.",
+    )
+
     parsed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     archived_at: datetime | None = Field(
         default=None,

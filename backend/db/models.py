@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from datetime import date
 
-from sqlalchemy import Date, DateTime, Float, Integer, JSON, String, Text, func
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -111,6 +111,41 @@ class SavedFilterRow(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     params: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, server_default=func.now()
+    )
+
+
+class ResumeRow(Base):
+    """Резюме кандидата для матчинга с вакансиями."""
+
+    __tablename__ = "resumes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    skills_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, server_default=func.now()
+    )
+
+
+class VacancyMatchRow(Base):
+    """Оценка соответствия резюме вакансии. PK — и кэш матчинга (resume+vacancy+model)."""
+
+    __tablename__ = "vacancy_matches"
+
+    resume_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("resumes.id", ondelete="CASCADE"), primary_key=True
+    )
+    vacancy_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), primary_key=True
+    )
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    matching_skills: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    missing_skills: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now()
     )

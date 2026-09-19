@@ -2,8 +2,10 @@ import type {
   CompanyStats,
   ConfigDefaults,
   LlmModelsCatalog,
+  MatchProgress,
   MetricsSummary,
   ProgressEvent,
+  Resume,
   RunCreateBody,
   RunDetail,
   RunStatus,
@@ -199,6 +201,55 @@ export const api = {
 
   exportRunUrl: (runId: string, kind: "xlsx" | "json") =>
     `${API_BASE}/runs/${runId}/export.${kind}`,
+
+  listResumes: () => request<{ items: Resume[] }>("/resumes"),
+
+  createResume: (name: string, text: string) =>
+    request<Resume>("/resumes", {
+      method: "POST",
+      body: JSON.stringify({ name, text }),
+    }),
+
+  deleteResume: async (id: number) => {
+    const res = await fetch(`${API_BASE}/resumes/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Удаление резюме: ${res.status} ${res.statusText}`);
+  },
+
+  startMatch: (resumeId: number, limit: number, filters: Record<string, unknown>) =>
+    request<{ match_id: string; status: string }>(`/resumes/${resumeId}/match`, {
+      method: "POST",
+      body: JSON.stringify({ limit, filters }),
+    }),
+
+  getMatch: (matchId: string) => request<MatchProgress>(`/matches/${matchId}`),
+
+  cancelMatch: (matchId: string) =>
+    request<{ ok: boolean }>(`/matches/${matchId}/cancel`, { method: "POST" }),
+
+  subscribeMatchEvents(
+    matchId: string,
+    onProgress: (data: MatchProgress) => void,
+    onDone: () => void,
+    onError: (err: Error) => void,
+  ): () => void {
+    const es = new EventSource(`${API_BASE}/matches/${matchId}/events`);
+    es.addEventListener("progress", (ev) => {
+      try {
+        onProgress(JSON.parse((ev as MessageEvent).data) as MatchProgress);
+      } catch (e) {
+        onError(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
+    es.addEventListener("done", () => {
+      es.close();
+      onDone();
+    });
+    es.onerror = () => {
+      es.close();
+      onError(new Error("SSE connection failed"));
+    };
+    return () => es.close();
+  },
 
   subscribeRunEvents(
     runId: string,
