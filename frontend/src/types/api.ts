@@ -142,6 +142,27 @@ export interface CompanyStats {
   avg_salary_rub?: number | null;
 }
 
+export interface SavedFilterParams {
+  q?: string | null;
+  source_channel?: string | null;
+  grade?: string | null;
+  specializations?: string[];
+  work_format?: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
+  has_salary?: boolean | null;
+  include_archived?: boolean;
+  sort_by?: string;
+  sort_order?: string;
+}
+
+export interface SavedFilter {
+  id: number;
+  name: string;
+  params: SavedFilterParams;
+  created_at: string;
+}
+
 export interface RunDetail {
   id: string;
   status: RunStatus;

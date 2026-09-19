@@ -9,8 +9,8 @@
 | # | Ветка | Фича | Изменение схемы БД |
 |---|-------|------|--------------------|
 | 1 | `feature/analytics-dashboard` | Дашборд зарплат + аналитика каналов/компаний | нет |
-| 2 | `feature/application-tracker` | Трекер откликов | да (миграция 004) |
-| 3 | `feature/fts-saved-filters` | Полнотекстовый поиск + сохранённые фильтры | да (миграция 005) |
+| 2 | `feature/application-tracker` | Трекер откликов | да (миграция 005) |
+| 3 | `feature/fts-saved-filters` | Полнотекстовый поиск + сохранённые фильтры | да (миграция 004) |
 | 4 | `feature/resume-matching` | Оценка соответствия резюме | да (миграция 006) |
 | 5 | `feature/external-export` | Экспорт в Google Sheets / Notion | нет |
 
@@ -60,7 +60,7 @@
 Мини-ATS поверх вакансий: статус (new → applied → interview → offer /
 rejected / skipped) + заметки.
 
-**БД (миграция 004)**
+**БД (миграция 005)**
 
 - Таблица `vacancy_applications`: `vacancy_id` (FK → vacancies),
   `status`, `applied_at`, `notes`, `updated_at`. Отдельная таблица, а не
@@ -84,14 +84,19 @@ backend без `down -v`.
 
 ---
 
-## 3. `feature/fts-saved-filters` — полнотекстовый поиск и пресеты
+## 3. `feature/fts-saved-filters` — полнотекстовый поиск и пресеты ✅
 
 Заменить `ILIKE '%q%'` на Postgres FTS и дать именовать наборы фильтров.
 
-**БД (миграция 005)**
+> **Реализовано.** Вместо generated-колонки — функциональный GIN-индекс
+> на `to_tsvector('russian', cleaned_text)` (совместимо с SQLite-тестами,
+> ORM-модель не меняется). Поиск — `websearch_to_tsquery`, сортировка по
+> `ts_rank` при заданном `q`. CRUD: `GET/POST/DELETE /api/v1/filters`,
+> панель пресетов на `VacanciesPage`.
 
-- `vacancies`: generated column `tsvector` над `cleaned_text` (конфигурация
-  `russian`) + GIN-индекс.
+**БД (миграция 004)**
+
+- `vacancies`: функциональный GIN-индекс `to_tsvector('russian', cleaned_text)`.
 - Таблица `saved_filters`: `id`, `name`, `params` (JSON — поля
   `VacancyQuery`), `created_at`.
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timezone
 
-from sqlalchemy import ColumnElement, Table, and_, cast, exists, func, literal, or_, select
+from sqlalchemy import ColumnElement, Table, and_, cast, exists, func, literal, literal_column, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import Select
 
@@ -54,7 +54,14 @@ def vacancy_filter_conditions(
         dt_to = datetime.combine(query.date_to, time.max, tzinfo=timezone.utc)
         conditions.append(c.post_date <= dt_to)
     if query.q:
-        conditions.append(c.cleaned_text.ilike(f"%{query.q}%"))
+        if dialect == "postgresql":
+            conditions.append(
+                func.to_tsvector(literal_column("'russian'"), c.cleaned_text).op("@@")(
+                    func.websearch_to_tsquery(literal_column("'russian'"), query.q)
+                )
+            )
+        else:
+            conditions.append(c.cleaned_text.ilike(f"%{query.q}%"))
     if query.has_salary:
         conditions.append(
             or_(
