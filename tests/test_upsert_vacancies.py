@@ -11,7 +11,13 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.db.base import Base
 from backend.db.models import VacancyRow
-from backend.db.repository import VACANCY_TTL_DAYS, delete_expired_vacancies, upsert_vacancies
+from backend.db.repository import (
+    VACANCY_TTL_DAYS,
+    archive_expired_vacancies,
+    list_vacancies,
+    upsert_vacancies,
+)
+from backend.schemas import VacancyQuery
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.utils.hashing import vacancy_content_id
 
@@ -109,7 +115,7 @@ def test_upsert_two_distinct_texts_two_rows(db_session):
     assert count == 2
 
 
-def test_delete_expired_vacancies_keeps_only_records_within_ttl(db_session):
+def test_archive_expired_vacancies_archives_records_beyond_ttl(db_session):
     now = datetime(2026, 9, 7, tzinfo=timezone.utc)
     expired = _vac(
         cleaned="expired vacancy",
@@ -135,10 +141,34 @@ def test_delete_expired_vacancies_keeps_only_records_within_ttl(db_session):
     )
     db_session.commit()
 
-    deleted = delete_expired_vacancies(db_session, now=now)
+    archived = archive_expired_vacancies(db_session, now=now)
     db_session.commit()
 
-    assert deleted == 2
-    assert db_session.get(VacancyRow, expired.id) is None
-    assert db_session.get(VacancyRow, missing_post_date.id) is None
-    assert db_session.get(VacancyRow, current.id) is not None
+    assert archived == 2
+    assert db_session.get(VacancyRow, expired.id).archived_at is not None
+    assert db_session.get(VacancyRow, missing_post_date.id).archived_at is not None
+    current_row = db_session.get(VacancyRow, current.id)
+    assert current_row is not None
+    assert current_row.archived_at is None
+
+    assert archive_expired_vacancies(db_session, now=now) == 0
+
+
+def test_list_vacancies_hides_archived_unless_included(db_session):
+    now = datetime.now(timezone.utc)
+    old = _vac(
+        cleaned="old vacancy",
+        source_post_key="old-1",
+        post_date=now - timedelta(days=VACANCY_TTL_DAYS + 1),
+    )
+    fresh = _vac(cleaned="fresh vacancy", source_post_key="new-1", post_date=now)
+    upsert_vacancies(db_session, [old, fresh], parse_run_id=uuid.uuid4())
+    archive_expired_vacancies(db_session, now=now)
+    db_session.commit()
+
+    items, total = list_vacancies(db_session, VacancyQuery())
+    assert total == 1
+    assert [v.id for v in items] == [fresh.id]
+
+    items, total = list_vacancies(db_session, VacancyQuery(include_archived=True))
+    assert total == 2

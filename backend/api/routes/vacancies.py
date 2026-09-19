@@ -26,6 +26,7 @@ def _vacancy_query_from_params(
     date_to: str | None,
     has_salary: bool | None,
     q: str | None,
+    include_archived: bool,
     sort_by: VacancySortField,
     sort_order: VacancySortOrder,
 ) -> VacancyQuery:
@@ -44,6 +45,7 @@ def _vacancy_query_from_params(
         date_to=dt,
         has_salary=has_salary,
         q=q,
+        include_archived=include_archived,
         sort_by=sort_by,
         sort_order=sort_order,
     )
@@ -59,6 +61,7 @@ def export_vacancies_xlsx(
     date_to: str | None = None,
     has_salary: bool | None = None,
     q: str | None = None,
+    include_archived: bool = False,
     sort_by: VacancySortField = "post_date",
     sort_order: VacancySortOrder = "desc",
     db: Session = Depends(get_db),
@@ -75,6 +78,7 @@ def export_vacancies_xlsx(
         date_to=date_to,
         has_salary=has_salary,
         q=q,
+        include_archived=include_archived,
         sort_by=sort_by,
         sort_order=sort_order,
     )
@@ -98,6 +102,7 @@ def vacancy_metrics(
     date_to: str | None = None,
     has_salary: bool | None = None,
     q: str | None = None,
+    include_archived: bool = False,
     db: Session = Depends(get_db),
 ) -> MetricsSummary:
     """Агрегаты для графиков (SQL GROUP BY, без загрузки всех вакансий)."""
@@ -112,6 +117,7 @@ def vacancy_metrics(
         date_to=date_to,
         has_salary=has_salary,
         q=q,
+        include_archived=include_archived,
         sort_by="post_date",
         sort_order="desc",
     )
@@ -130,6 +136,7 @@ def list_vacancies(
     date_to: str | None = None,
     has_salary: bool | None = None,
     q: str | None = None,
+    include_archived: bool = False,
     sort_by: VacancySortField = "post_date",
     sort_order: VacancySortOrder = "desc",
     db: Session = Depends(get_db),
@@ -145,6 +152,7 @@ def list_vacancies(
         date_to=date_to,
         has_salary=has_salary,
         q=q,
+        include_archived=include_archived,
         sort_by=sort_by,
         sort_order=sort_order,
     )

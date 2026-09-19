@@ -60,6 +60,7 @@ def backfill_vacancies_salary_rub(
     stmt = select(VacancyRow).where(
         _has_salary_condition(),
         VacancyRow.is_duplicate.is_(False),
+        VacancyRow.archived_at.is_(None),
     )
     processed = 0
     updated = 0

@@ -56,6 +56,7 @@ def vacancy_to_row(v: Vacancy, *, parse_run_id: uuid.UUID | None = None) -> Vaca
         duplicate_reason=v.duplicate_reason,
         parsed_at=v.parsed_at,
         last_parse_run_id=parse_run_id,
+        archived_at=v.archived_at,
     )
 
 
@@ -94,4 +95,5 @@ def row_to_vacancy(row: VacancyRow) -> Vacancy:
         duplicate_group_id=row.duplicate_group_id,
         duplicate_reason=row.duplicate_reason,
         parsed_at=row.parsed_at,
+        archived_at=row.archived_at,
     )

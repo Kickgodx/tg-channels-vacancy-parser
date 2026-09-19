@@ -34,6 +34,8 @@ def vacancy_filter_conditions(
     """Условия WHERE для вакансий. table — Core-алиас (vacancies AS t), иначе ORM VacancyRow."""
     c = table.c if table is not None else VacancyRow
     conditions: list[ColumnElement[bool]] = [c.is_duplicate.is_(False)]
+    if not query.include_archived:
+        conditions.append(c.archived_at.is_(None))
     if query.source_channel:
         conditions.append(c.source_channel == query.source_channel.lstrip("@"))
     if query.grade:

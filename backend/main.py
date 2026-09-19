@@ -43,10 +43,10 @@ def _sync_fx_on_startup() -> None:
 
 
 def _cleanup_expired_vacancies() -> None:
-    """Применить TTL вакансий в отдельной транзакции."""
+    """Применить TTL вакансий (архивацию) в отдельной транзакции."""
     try:
         with session_scope() as session:
-            repo.delete_expired_vacancies(session)
+            repo.archive_expired_vacancies(session)
     except Exception as e:
         logging.getLogger(__name__).warning("TTL вакансий не применён: %s", e)
 

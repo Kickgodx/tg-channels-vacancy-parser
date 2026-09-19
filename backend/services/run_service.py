@@ -103,7 +103,7 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
         remaining = [v for v in unique if v.id not in flushed_ids]
         with session_scope() as session:
             stats = repo.upsert_vacancies(session, remaining, parse_run_id=run_id)
-            repo.delete_expired_vacancies(session)
+            repo.archive_expired_vacancies(session)
             upsert_totals = repo.VacancyUpsertStats(
                 inserted=upsert_totals.inserted + stats.inserted,
                 updated_existing=upsert_totals.updated_existing + stats.updated_existing,

@@ -77,6 +77,10 @@ class Vacancy(BaseModel):
     duplicate_reason: str | None = None
 
     parsed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    archived_at: datetime | None = Field(
+        default=None,
+        description="Soft delete: вакансия старше TTL скрыта из выдачи, но не удалена.",
+    )
 
     model_config = {"frozen": False}
 

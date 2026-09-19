@@ -89,6 +89,10 @@ class VacancyQuery(BaseModel):
         description="True — только вакансии с указанной зарплатой (min/max/avg).",
     )
     q: str | None = Field(default=None, description="Поиск по cleaned_text (ILIKE)")
+    include_archived: bool = Field(
+        default=False,
+        description="True — включить архивные вакансии (старше TTL) в выдачу.",
+    )
     sort_by: VacancySortField = "post_date"
     sort_order: VacancySortOrder = "desc"
 
