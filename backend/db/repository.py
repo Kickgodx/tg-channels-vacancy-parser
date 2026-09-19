@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, literal_column, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,7 @@ from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
 
 from backend.fx.apply import apply_salary_rub_for_vacancy, preload_fx_rates_for_vacancies
-from backend.db.models import ParseRunRow, VacancyRow
+from backend.db.models import ParseRunRow, SavedFilterRow, VacancyRow
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import FxConfig
@@ -50,11 +50,16 @@ _SORT_COLUMNS: dict[VacancySortField, object] = {
 }
 
 
-def _vacancy_order_by(query: VacancyQuery):
+def _vacancy_order_by(query: VacancyQuery, *, dialect: str = "postgresql") -> list:
     col = _SORT_COLUMNS.get(query.sort_by, VacancyRow.post_date)
-    if query.sort_order == "asc":
-        return col.asc().nulls_last()
-    return col.desc().nulls_last()
+    order = col.asc().nulls_last() if query.sort_order == "asc" else col.desc().nulls_last()
+    if query.q and dialect == "postgresql":
+        rank = func.ts_rank(
+            func.to_tsvector(literal_column("'russian'"), VacancyRow.cleaned_text),
+            func.websearch_to_tsquery(literal_column("'russian'"), query.q),
+        )
+        return [rank.desc(), order]
+    return [order]
 
 
 def create_parse_run(session: Session, *, config_snapshot: dict) -> ParseRunRow:
@@ -248,7 +253,7 @@ def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[Vacancy]
     total = int(session.scalar(vacancy_count_stmt(query, dialect=dialect)) or 0)
     offset = (query.page - 1) * query.page_size
     rows = session.scalars(
-        stmt.order_by(_vacancy_order_by(query), VacancyRow.id.asc())
+        stmt.order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
         .offset(offset)
         .limit(query.page_size)
     ).all()
@@ -269,9 +274,10 @@ def list_run_vacancies(
     total = int(
         session.scalar(select(func.count(VacancyRow.id)).where(*conditions)) or 0
     )
+    dialect = session.get_bind().dialect.name
     offset = (query.page - 1) * query.page_size
     rows = session.scalars(
-        stmt.order_by(_vacancy_order_by(query), VacancyRow.id.asc())
+        stmt.order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
         .offset(offset)
         .limit(query.page_size)
     ).all()
@@ -316,3 +322,24 @@ def metrics_from_run(row: ParseRunRow) -> MetricsSummary | None:
     if not row.metrics:
         return None
     return MetricsSummary.model_validate(row.metrics)
+
+
+def list_saved_filters(session: Session) -> list[SavedFilterRow]:
+    stmt = select(SavedFilterRow).order_by(SavedFilterRow.name.asc())
+    return list(session.scalars(stmt))
+
+
+def create_saved_filter(session: Session, *, name: str, params: dict) -> SavedFilterRow:
+    row = SavedFilterRow(name=name, params=params)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def delete_saved_filter(session: Session, filter_id: int) -> bool:
+    row = session.get(SavedFilterRow, filter_id)
+    if row is None:
+        return False
+    session.delete(row)
+    session.flush()
+    return True

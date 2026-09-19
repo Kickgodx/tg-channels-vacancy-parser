@@ -103,6 +103,19 @@ class VacancyRow(Base):
     )
 
 
+class SavedFilterRow(Base):
+    """Именованный набор фильтров списка вакансий (JSON — поля VacancyQuery)."""
+
+    __tablename__ = "saved_filters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    params: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, server_default=func.now()
+    )
+
+
 class AIExtractionCacheRow(Base):
     """Кэш ответов LLM (ключ = sha256 текста + model + prompt_version + mode)."""
 

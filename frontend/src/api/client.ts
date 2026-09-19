@@ -8,6 +8,8 @@ import type {
   RunDetail,
   RunStatus,
   SalaryAnalytics,
+  SavedFilter,
+  SavedFilterParams,
   SourceStats,
   Vacancy,
 } from "../types/api";
@@ -158,6 +160,19 @@ export const api = {
     appendSearchParams(q, params);
     const qs = q.toString();
     return request<{ items: CompanyStats[] }>(`/analytics/companies${qs ? `?${qs}` : ""}`);
+  },
+
+  listFilters: () => request<{ items: SavedFilter[] }>("/filters"),
+
+  createFilter: (name: string, params: SavedFilterParams) =>
+    request<SavedFilter>("/filters", {
+      method: "POST",
+      body: JSON.stringify({ name, params }),
+    }),
+
+  deleteFilter: async (id: number) => {
+    const res = await fetch(`${API_BASE}/filters/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Удаление пресета: ${res.status} ${res.statusText}`);
   },
 
   exportVacanciesUrl: (params?: VacancyQueryParams) => {

@@ -4,7 +4,8 @@ import { api, type VacancyQueryParams } from "../api/client";
 import AnalyticsPanel from "../components/AnalyticsPanel";
 import MetricsCharts from "../components/MetricsCharts";
 import VacancyTable from "../components/VacancyTable";
-import type { VacancySortField, VacancySortOrder } from "../types/sort";
+import type { SavedFilter, SavedFilterParams } from "../types/api";
+import { SORTABLE_COLUMNS, type VacancySortField, type VacancySortOrder } from "../types/sort";
 
 type VacanciesTab = "list" | "analytics";
 
@@ -69,6 +70,8 @@ export default function VacanciesPage() {
   const [sortBy, setSortBy] = useState<VacancySortField>("post_date");
   const [sortOrder, setSortOrder] = useState<VacancySortOrder>("desc");
   const [tab, setTab] = useState<VacanciesTab>("list");
+  const [selectedPreset, setSelectedPreset] = useState("");
+  const [presetName, setPresetName] = useState("");
 
   const filterParams = useMemo(
     () =>
@@ -105,6 +108,60 @@ export default function VacanciesPage() {
       }),
   });
 
+  const presetsQ = useQuery({
+    queryKey: ["saved-filters"],
+    queryFn: () => api.listFilters(),
+    staleTime: 60_000,
+  });
+
+  const savePresetM = useMutation({
+    mutationFn: (body: { name: string; params: SavedFilterParams }) =>
+      api.createFilter(body.name, body.params),
+    onSuccess: () => {
+      setPresetName("");
+      void queryClient.invalidateQueries({ queryKey: ["saved-filters"] });
+    },
+  });
+
+  const deletePresetM = useMutation({
+    mutationFn: (id: number) => api.deleteFilter(id),
+    onSuccess: () => {
+      setSelectedPreset("");
+      void queryClient.invalidateQueries({ queryKey: ["saved-filters"] });
+    },
+  });
+
+  const buildPresetParams = (): SavedFilterParams => ({
+    q: q || null,
+    source_channel: sourceChannel ? sourceChannel.replace(/^@/, "") : null,
+    grade: grade || null,
+    specializations,
+    work_format: workFormat || null,
+    date_from: dateFrom || null,
+    date_to: dateTo || null,
+    has_salary: hasSalaryOnly || null,
+    sort_by: sortBy,
+    sort_order: sortOrder,
+  });
+
+  const applyPreset = (f: SavedFilter) => {
+    const p = f.params;
+    setQ(p.q ?? "");
+    setSourceChannel(p.source_channel ?? "");
+    setGrade(p.grade ?? "");
+    setSpecializations(p.specializations ?? []);
+    setWorkFormat(p.work_format ?? "");
+    setDateFrom(p.date_from ?? "");
+    setDateTo(p.date_to ?? "");
+    setHasSalaryOnly(!!p.has_salary);
+    if (SORTABLE_COLUMNS.includes(p.sort_by as VacancySortField)) {
+      setSortBy(p.sort_by as VacancySortField);
+    }
+    if (p.sort_order === "asc" || p.sort_order === "desc") setSortOrder(p.sort_order);
+    setPage(1);
+  };
+
+  const presets = presetsQ.data?.items ?? [];
   const totalPages = data ? Math.ceil(data.total / data.page_size) : 1;
   const gradeOptions = defaultsQ.data?.grade_options ?? [];
   const specOptions = defaultsQ.data?.specialization_options ?? [];
@@ -113,6 +170,61 @@ export default function VacanciesPage() {
     <div className="card">
       <h2>Все уникальные вакансии</h2>
       <p className="caption">Данные из единой базы PostgreSQL (после успешных прогонов).</p>
+
+      <div className="filters-panel saved-filters-bar">
+        <select
+          value={selectedPreset}
+          onChange={(e) => setSelectedPreset(e.target.value)}
+          title="Сохранённые наборы фильтров"
+        >
+          <option value="">Пресет фильтров…</option>
+          {presets.map((f) => (
+            <option key={f.id} value={String(f.id)}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={!selectedPreset}
+          onClick={() => {
+            const f = presets.find((x) => String(x.id) === selectedPreset);
+            if (f) applyPreset(f);
+          }}
+        >
+          Применить
+        </button>
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={!selectedPreset || deletePresetM.isPending}
+          onClick={() => deletePresetM.mutate(Number(selectedPreset))}
+        >
+          Удалить
+        </button>
+        <input
+          placeholder="Имя нового пресета"
+          value={presetName}
+          onChange={(e) => setPresetName(e.target.value)}
+        />
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={!presetName.trim() || savePresetM.isPending}
+          onClick={() =>
+            savePresetM.mutate({ name: presetName.trim(), params: buildPresetParams() })
+          }
+        >
+          {savePresetM.isPending ? "Сохранение…" : "Сохранить текущие"}
+        </button>
+        {savePresetM.isError && (
+          <span className="error">{(savePresetM.error as Error).message}</span>
+        )}
+        {deletePresetM.isError && (
+          <span className="error">{(deletePresetM.error as Error).message}</span>
+        )}
+      </div>
 
       <div className="filters-panel">
         <input

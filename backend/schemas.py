@@ -162,3 +162,19 @@ class CompanyStats(BaseModel):
 
 class CompanyAnalytics(BaseModel):
     items: list[CompanyStats] = Field(default_factory=list)
+
+
+class SavedFilterCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    params: VacancyQuery = Field(default_factory=VacancyQuery)
+
+
+class SavedFilterOut(BaseModel):
+    id: int
+    name: str
+    params: VacancyQuery
+    created_at: datetime
+
+
+class SavedFilterListResponse(BaseModel):
+    items: list[SavedFilterOut] = Field(default_factory=list)
