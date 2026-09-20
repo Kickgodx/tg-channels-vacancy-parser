@@ -62,11 +62,8 @@ OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
 # AUTH_REGISTRATION_OPEN=true     # false — регистрация закрыта после первого пользователя
 ```
 
-Первый вход в UI — через регистрацию (страница `/login`): первый аккаунт
-становится админом и наследует резюме/пресеты, созданные до появления
-пользователей. Резюме, пресеты фильтров и LLM-матчи — per-user; вакансии,
-прогоны и аналитика — общие. `API_KEY` продолжает защищать общие эндпоинты,
-приватные — JWT (`Authorization: Bearer …`).
+Первый вход в UI — через регистрацию на странице `/login`; подробнее — в
+разделе [Аутентификация и per-user данные](#аутентификация-и-per-user-данные).
 
 ---
 
@@ -76,11 +73,70 @@ OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
 
 | Страница | Описание |
 |----------|----------|
+| **Вход** | `/login` — вход и регистрация; без токена остальные страницы недоступны |
 | **Запуск** | Форма парсинга (каналы, даты, специализации, формат работы, AI, пороги score), поиск каналов (DuckDuckGo) |
 | **Прогон** | Прогресс (SSE), метрики, графики, блок AI (токены и стоимость input/output/total), таблица вакансий, экспорт Excel/JSON |
-| **Вакансии** | Все уникальные вакансии из PostgreSQL: фильтры, пагинация, сортировка по клику на заголовок |
+| **Вакансии** | Все уникальные вакансии из PostgreSQL: поиск, фильтры, пресеты, пагинация, сортировка по клику на заголовок; вкладка **Аналитика** |
 
-Возможности таблицы: сортировка asc/desc по дате, зарплате, валюте, формату, грейду, score; выбор видимых колонок; модальное окно с полным текстом.
+Возможности таблицы: сортировка asc/desc по дате, зарплате, валюте, формату, грейду, score, match; выбор видимых колонок; модальное окно с полным текстом, оценкой соответствия резюме и ссылками на пост/канал.
+
+---
+
+## Возможности
+
+### Поиск и пресеты фильтров
+
+Поиск по тексту — полнотекстовый (Postgres FTS): функциональный GIN-индекс
+`to_tsvector('russian', cleaned_text)`, запрос через `websearch_to_tsquery`,
+сортировка по `ts_rank`. Со стеммингом: «python разработчик» находит
+«python-разработку». На SQLite (тесты) откатывается на `ILIKE`.
+
+Набор фильтров сохраняется как именованный пресет (`saved_filters`, JSON с
+полями `VacancyQuery`) и применяется одной кнопкой. Пресеты приватные —
+привязаны к пользователю.
+
+### Аналитика
+
+Вкладка **Аналитика** на странице вакансий: агрегация в SQL, без выгрузки
+строк, с теми же фильтрами, что и список.
+
+- `GET /analytics/salaries` — медиана/квартили/распределение
+  `detected_salary_avg_rub` по грейдам, специализациям и формату работы +
+  помесячная динамика.
+- `GET /analytics/sources` — качество канала: число вакансий, доля с
+  зарплатой, средний `vacancy_score`, доля уникальных.
+- `GET /analytics/companies` — топ компаний.
+
+Зарплаты приводятся к рублям по курсам ЦБ (`exchange_rates`), метка
+`salary_display` показывает дату курса.
+
+### Матчинг резюме к вакансиям
+
+Резюме загружается текстом (панель «Резюме» над таблицей) и оценивается LLM
+против вакансий. Оценки кэшируются парой `(resume_id, vacancy_id)` — повтор
+не тратит токены.
+
+| Режим | Как | Результат |
+|-------|-----|-----------|
+| **Пакетный** | Кнопка «Оценить совпадение»: top-N вакансий по текущим фильтрам, фоновый воркер с `ai.concurrency`, прогресс по SSE | Скоры в колонке **Match**, сортировка `sort_by=match_score` |
+| **Соло** | Кнопка «Оценить резюме» в карточке вакансии (рядом с «Открыть пост» / «Канал») — синхронный вызов | Score, пояснение и списки совпадающих / недостающих навыков прямо в карточке |
+
+Повторный клик в карточке — «Переоценить резюме» (`force=true`), новый вызов
+LLM. Модель матчинга задаётся отдельно от модели парсинга: `ai.match_model`
+(+ `ai.match_reasoning_enabled` для reasoning-моделей) — качество здесь важнее
+скорости, вызовов на порядок меньше.
+
+### Аутентификация и per-user данные
+
+Своя лёгкая JWT-аутентификация: argon2-хэш пароля (`pwdlib`) + HS256
+(`pyjwt`). Первый зарегистрированный аккаунт становится админом и наследует
+резюме/пресеты, созданные до появления пользователей.
+
+- Приватное (по `user_id`): резюме, пресеты фильтров, матчи.
+- Общее: вакансии, прогоны, аналитика, курсы ЦБ — единый корпус.
+- Токен хранится в `localStorage`, уходит в `Authorization: Bearer …`;
+  401 → редирект на `/login`. Для SSE (EventSource не умеет заголовки)
+  токен передаётся параметром `access_token`.
 
 Локальная разработка frontend без Docker:
 
@@ -108,6 +164,8 @@ uvicorn backend.main:app --reload --port 8000
 | Метод | Путь | Назначение |
 |-------|------|------------|
 | `GET` | `/health` | Статус API и подключения к БД |
+| `POST` | `/auth/register` / `/auth/login` | Регистрация / вход → JWT access-токен |
+| `GET` | `/auth/me` | Текущий пользователь |
 | `GET` | `/config/defaults` | Значения по умолчанию для формы |
 | `GET` | `/config/llm-models` | Каталог моделей из `llm_models.yaml` |
 | `POST` | `/channels/search` | Поиск кандидатов каналов |
@@ -117,16 +175,38 @@ uvicorn backend.main:app --reload --port 8000
 | `POST` | `/runs/{id}/cancel` | Отмена |
 | `GET` | `/runs/{id}/vacancies` | Вакансии прогона (`sort_by`, `sort_order`) |
 | `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта |
-| `GET` | `/vacancies` | Глобальный список вакансий (фильтры, сортировка, пагинация) |
+| `GET` | `/vacancies` | Глобальный список вакансий (фильтры, сортировка, пагинация, `resume_id`) |
+| `GET` | `/vacancies/metrics` | Агрегаты для графиков по текущим фильтрам |
 | `GET` | `/vacancies/export.xlsx` | Excel всех вакансий в БД (те же фильтры, что у списка) |
+| `GET` | `/analytics/salaries` \| `/sources` \| `/companies` | Зарплатные квантили, качество каналов, топ компаний |
+| `GET` `POST` `DELETE` | `/filters` | Пресеты фильтров (приватные) |
+| `GET` `POST` `DELETE` | `/resumes` | Резюме пользователя |
+| `POST` | `/resumes/{id}/match` | Пакетный матчинг по фильтрам (фоновый) |
+| `GET` | `/matches/{id}` + `/events` + `/cancel` | Статус пакетного матчинга, SSE, отмена |
+| `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Соло-матчинг одной вакансии (`force=true` — пересчёт) |
+| `GET` | `/fx/rates`, `POST` `/fx/refresh` \| `/fx/recalculate-rub` | Курсы ЦБ и пересчёт зарплат в ₽ |
 | `GET` | `/ai-cache/stats` | Число записей в кэше LLM |
 | `POST` | `/ai-cache/clear` | Полная очистка кэша LLM |
 
+Приватные разделы (`/filters`, `/resumes`, `/matches`) требуют JWT; остальные
+— `X-API-Key`, если `API_KEY` задан.
+
 Кэш ответов LLM хранится в PostgreSQL (`ai_extraction_cache`). Параметры в `config.yaml`: `ai.cache_backend: postgres`, `ai.cache_ttl_days` (0 — без срока, иначе дни). Очистка — кнопка на странице **Запуск** или `POST /ai-cache/clear`.
 
-### Схема БД (MVP)
+### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…003`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…007`). При старте backend применяет `upgrade head`.
+
+| Таблица | Назначение |
+|---------|------------|
+| `parse_runs` | Журнал прогонов: статус, метрики, снимок конфигурации |
+| `vacancies` | Уникальные вакансии (`id` = sha256 текста), `archived_at` — TTL |
+| `exchange_rates` | Курсы ЦБ по датам |
+| `ai_extraction_cache` | Кэш ответов LLM при парсинге |
+| `saved_filters` | Пресеты фильтров (`user_id`) |
+| `resumes` | Резюме пользователя (`user_id`) |
+| `vacancy_matches` | Оценки соответствия, PK `(resume_id, vacancy_id)` — он же кэш матчинга |
+| `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 
 **Если меняете колонки/таблицы** — добавьте новую миграцию (`alembic revision`) и обновите модели в `backend/db/models.py`; при следующем `docker compose up` она применится автоматически, данные сохранятся.
 
@@ -146,14 +226,16 @@ tg_jobs_parser/
   Dockerfile.backend
 
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
-    api/routes/            — health, config, channels, runs, vacancies, ai-cache
+    api/routes/            — health, auth, config, channels, runs, vacancies,
+                             analytics, filters, resumes/matches, fx, ai-cache
     db/                    — модели, Alembic, репозиторий, кэш LLM, UPSERT
   alembic/                 — миграции SQL
-    services/              — run_service, progress_bus, registry
+    services/              — run_service, match_service, auth_service, progress_bus
 
   frontend/                — React UI (Vite)
-    src/pages/             — Dashboard, Run, Vacancies
-    src/components/        — ParseForm, VacancyTable, MetricsCharts
+    src/pages/             — Login, Dashboard, Run, Vacancies
+    src/components/        — ParseForm, VacancyTable, VacancyModal, ResumePanel,
+                             MetricsCharts, AnalyticsPanel
 
   tg_jobs_parser/          — ядро парсинга (общее для API и CLI)
     parse_runner.py
@@ -211,10 +293,20 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 
 Основной файл: `config.yaml` (схема: `tg_jobs_parser/config/schema.py`).
 
+Полное описание секций — в [config.md](config.md).
+
 ### Отбор постов (`parser`)
 
 - **`vacancy_score_threshold`** — минимальный общий score правил.
 - **`vacancy_min_substantive_score`** — минимум без бонуса за email/@ (отсекает «пустые» контакты).
+
+### Хранение вакансий (`retention`)
+
+- **`vacancy_ttl_days`** (по умолчанию 40) — через сколько дней вакансия
+  архивируется (soft delete, `archived_at`): по `post_date`, а без неё — по
+  `parsed_at`. `0` — не архивировать. Проверка идёт при старте backend, раз в
+  час фоном и после каждого прогона. Архивные строки не попадают в списки и
+  агрегаты, пока не передать `include_archived=true`.
 
 ### Секция `ai` (опционально)
 
@@ -315,9 +407,15 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 
 ```powershell
 pytest
+pytest -n 8     # параллельно (pytest-xdist)
 ```
 
-В том числе: `tests/test_api_health.py`, `tests/test_upsert_vacancies.py`, `tests/test_db_transfer.py`, тесты ядра extraction/AI.
+В том числе: `tests/test_api_health.py`, `tests/test_auth.py`,
+`tests/test_solo_match.py`, `tests/test_upsert_vacancies.py`,
+`tests/test_db_transfer.py`, тесты ядра extraction/AI.
+
+Тесты офлайновые: `tests/conftest.py` подставляет `CONFIG_PATH` на конфиг с
+выключенным `fx` — иначе агрегаты ходят за курсами в ЦБ на каждый запрос.
 
 ---
 
@@ -341,11 +439,10 @@ pytest
 
 ## Roadmap
 
-- [x] FastAPI + PostgreSQL + React UI + Docker Compose
-- [ ] Alembic-миграции, восстановление прогресса после рестарта backend
-- [ ] Расширение Telethon: joinchat, rate-limit
-- [x] JWT / multi-user (per-user резюме, пресеты, матчи; общие вакансии)
+Реализованное описано выше (аналитика, FTS и пресеты, матчинг резюме,
+JWT / multi-user). Планы — в [ROADMAP.md](ROADMAP.md): трекер откликов,
+экспорт в Google Sheets / Notion, CMS-админка вакансий, генерация
+сопроводительных писем.
 
-Активный план фичей — см. [ROADMAP.md](ROADMAP.md): дашборд аналитики,
-трекер откликов, полнотекстовый поиск, матчинг резюме, экспорт в
-Google Sheets / Notion.
+Вне списка фичей: восстановление прогресса прогона после рестарта backend,
+расширение Telethon (joinchat, rate-limit).
