@@ -9,7 +9,11 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from tg_jobs_parser.ai.prompts import build_match_messages, build_messages
+from tg_jobs_parser.ai.prompts import (
+    build_cover_letter_messages,
+    build_match_messages,
+    build_messages,
+)
 from tg_jobs_parser.ai.rate_limit import (
     LlmQuotaExhausted,
     OpenRouterRateLimiter,
@@ -82,6 +86,17 @@ def _parse_match(raw: str) -> VacancyMatchExtraction:
     text = _extract_json_text(raw)
     data = json.loads(text)
     return VacancyMatchExtraction.model_validate(data)
+
+
+def _parse_cover_letter(raw: str) -> str:
+    """Письмо — обычный текст; снимаем markdown-ограждение, если модель его добавила."""
+    text = raw.strip()
+    m = _JSON_FENCE_RE.search(text)
+    if m:
+        text = m.group(1).strip()
+    if not text:
+        raise ValueError("OpenRouter: пустое письмо")
+    return text
 
 
 def _message_content(message: Any) -> str:
@@ -218,6 +233,7 @@ class OpenRouterClient:
         model: str | None = None,
         reasoning: bool | None = None,
         json_schema: dict[str, Any] | None = None,
+        plain_text: bool = False,
     ) -> tuple[Any, LLMUsage]:
         """Общий вызов chat.completions: kwargs, usage, метрики, разбор через ``parse``."""
         use_model = model or self._ai.model
@@ -240,7 +256,7 @@ class OpenRouterClient:
                     "schema": json_schema,
                 },
             }
-        else:
+        elif not plain_text:
             kwargs["response_format"] = {"type": "json_object"}
 
         if extra_body:
@@ -331,6 +347,43 @@ class OpenRouterClient:
             _LOG.warning("Матчинг: невалидный JSON от LLM (%s), повторный запрос", e)
             return call()
 
+    def cover_letter(
+        self,
+        *,
+        resume_text: str,
+        vacancy_text: str,
+        tone: str = "neutral",
+        extra_notes: str | None = None,
+        match_summary: dict | None = None,
+        model: str | None = None,
+    ) -> tuple[str, LLMUsage]:
+        """Сопроводительное письмо — обычный текст, не JSON.
+
+        Модель — ``ai.cover_letter_model`` (пусто → ``match_model`` → ``model``),
+        reasoning-флаг общий с матчингом. Пустой ответ — один controlled retry.
+        """
+        messages = build_cover_letter_messages(
+            resume_text=resume_text,
+            vacancy_text=vacancy_text,
+            tone=tone,
+            extra_notes=extra_notes,
+            match_summary=match_summary,
+        )
+        call = lambda: self._call_llm(  # noqa: E731
+            messages=messages,
+            parse=_parse_cover_letter,
+            model=model or self._ai.resolved_cover_letter_model(),
+            reasoning=self._ai.match_reasoning_enabled,
+            plain_text=True,
+        )
+        try:
+            return call()
+        except LlmQuotaExhausted:
+            raise
+        except (json.JSONDecodeError, ValueError) as e:
+            _LOG.warning("Письмо: пустой/битый ответ LLM (%s), повторный запрос", e)
+            return call()
+
     def extract_with_fallback(
         self,
         *,
@@ -366,6 +419,61 @@ class OpenRouterClient:
                 except Exception as e:
                     last_err = e
                     _LOG.warning("Fallback %s не удался: %s", fb, e)
+            raise RuntimeError(
+                f"OpenRouter: все модели недоступны (основная + {len(fallbacks)} fallback): {last_err}"
+            ) from last_err
+
+    def cover_letter_with_fallback(
+        self,
+        *,
+        resume_text: str,
+        vacancy_text: str,
+        tone: str = "neutral",
+        extra_notes: str | None = None,
+        match_summary: dict | None = None,
+    ) -> tuple[str, LLMUsage]:
+        if self._rate_limiter.llm_disabled:
+            raise LlmQuotaExhausted(
+                self._rate_limiter.llm_disabled_reason or "LLM отключён"
+            )
+        try:
+            return self.cover_letter(
+                resume_text=resume_text,
+                vacancy_text=vacancy_text,
+                tone=tone,
+                extra_notes=extra_notes,
+                match_summary=match_summary,
+            )
+        except LlmQuotaExhausted:
+            raise
+        except Exception as first_err:
+            if _is_rate_limit_error(first_err):
+                raise
+            fallbacks = self._ai.resolved_fallback_models()
+            if not fallbacks:
+                raise
+            last_err: Exception = first_err
+            for fb in fallbacks:
+                try:
+                    _LOG.warning(
+                        "Модель писем %s недоступна (%s), пробуем fallback: %s",
+                        self._ai.resolved_cover_letter_model(),
+                        first_err,
+                        fb,
+                    )
+                    return self.cover_letter(
+                        resume_text=resume_text,
+                        vacancy_text=vacancy_text,
+                        tone=tone,
+                        extra_notes=extra_notes,
+                        match_summary=match_summary,
+                        model=fb,
+                    )
+                except LlmQuotaExhausted:
+                    raise
+                except Exception as e:
+                    last_err = e
+                    _LOG.warning("Fallback %s не удался (cover letter): %s", fb, e)
             raise RuntimeError(
                 f"OpenRouter: все модели недоступны (основная + {len(fallbacks)} fallback): {last_err}"
             ) from last_err

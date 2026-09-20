@@ -7,16 +7,18 @@ from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db
 from backend.db import repository as repo
-from backend.db.models import ResumeRow, UserRow, VacancyMatchRow
-from backend.observability import record_match
+from backend.db.models import CoverLetterRow, ResumeRow, UserRow, VacancyMatchRow
+from backend.observability import record_cover_letter, record_match
 from backend.schemas import (
+    CoverLetterOut,
+    CoverLetterRequest,
     ResumeCreate,
     ResumeListResponse,
     ResumeOut,
     ResumeUpdate,
     VacancyMatchOut,
 )
-from backend.services import match_service
+from backend.services import cover_letter_service, match_service
 from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
 
 _LOG = logging.getLogger(__name__)
@@ -156,3 +158,86 @@ def match_single_vacancy(
         )
         raise HTTPException(status_code=502, detail=f"LLM: {e}") from e
     return _match_to_out(row, cached=False)
+
+
+def _letter_to_out(row: CoverLetterRow, *, cached: bool) -> CoverLetterOut:
+    return CoverLetterOut(
+        resume_id=row.resume_id,
+        vacancy_id=row.vacancy_id,
+        text=row.text,
+        tone=row.tone,
+        model=row.model,
+        created_at=row.created_at,
+        cached=cached,
+    )
+
+
+@resumes_router.get(
+    "/{resume_id}/cover-letter/{vacancy_id}", response_model=CoverLetterOut
+)
+def get_cover_letter(
+    resume_id: int,
+    vacancy_id: str,
+    db: Session = Depends(get_db),
+    user: UserRow = Depends(get_current_user),
+) -> CoverLetterOut:
+    """Сохранённое письмо пары; 404 — если генерация ещё не запускалась."""
+    _get_own_resume(db, resume_id, user)
+    row = repo.get_cover_letter(db, resume_id=resume_id, vacancy_id=vacancy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Cover letter not found")
+    return _letter_to_out(row, cached=True)
+
+
+@resumes_router.post(
+    "/{resume_id}/cover-letter/{vacancy_id}", response_model=CoverLetterOut
+)
+def generate_cover_letter(
+    resume_id: int,
+    vacancy_id: str,
+    body: CoverLetterRequest | None = None,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    user: UserRow = Depends(get_current_user),
+) -> CoverLetterOut:
+    """Сгенерировать письмо синхронно. Без ``force`` возвращает сохранённый текст."""
+    resume = _get_own_resume(db, resume_id, user)
+    vacancy = repo.get_vacancy_row(db, vacancy_id)
+    if vacancy is None:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+    if not force:
+        existing = repo.get_cover_letter(db, resume_id=resume_id, vacancy_id=vacancy_id)
+        if existing is not None:
+            record_cover_letter(outcome="cached")
+            return _letter_to_out(existing, cached=True)
+    tone = body.tone if body else "neutral"
+    extra_notes = body.extra_notes if body else None
+    try:
+        row = cover_letter_service.generate_single(
+            db,
+            resume_id=resume_id,
+            resume_text=resume.text,
+            vacancy_id=vacancy_id,
+            vacancy_text=vacancy.cleaned_text or vacancy.raw_text or "",
+            tone=tone,
+            extra_notes=extra_notes,
+        )
+    except Exception as e:
+        _LOG.warning(
+            "Письмо резюме %s ↔ вакансия %s не удалось: %s", resume_id, vacancy_id, e
+        )
+        raise HTTPException(status_code=502, detail=f"LLM: {e}") from e
+    return _letter_to_out(row, cached=False)
+
+
+@resumes_router.delete("/{resume_id}/cover-letter/{vacancy_id}", status_code=204)
+def delete_cover_letter(
+    resume_id: int,
+    vacancy_id: str,
+    db: Session = Depends(get_db),
+    user: UserRow = Depends(get_current_user),
+) -> None:
+    """Сбросить сохранённое письмо пары."""
+    _get_own_resume(db, resume_id, user)
+    if not repo.delete_cover_letter(db, resume_id=resume_id, vacancy_id=vacancy_id):
+        raise HTTPException(status_code=404, detail="Cover letter not found")

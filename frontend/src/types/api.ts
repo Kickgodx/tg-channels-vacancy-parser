@@ -218,6 +218,18 @@ export interface VacancyMatch {
   cached: boolean;
 }
 
+export type CoverLetterTone = "neutral" | "friendly" | "formal";
+
+export interface CoverLetter {
+  resume_id: number;
+  vacancy_id: string;
+  text: string;
+  tone: string;
+  model: string;
+  created_at: string;
+  cached: boolean;
+}
+
 export type VacancyImportStatus = "created" | "exists" | "not_vacancy" | "error";
 
 export interface VacancyImportItem {

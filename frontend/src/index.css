@@ -389,6 +389,13 @@ tr.clickable:hover {
   margin: 0.75rem 0;
 }
 
+.modal-actions select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font: inherit;
+}
+
 .meta-line {
   display: flex;
   flex-wrap: wrap;
@@ -473,6 +480,33 @@ tr.clickable:hover {
 .vacancy-match p {
   margin: 0.3rem 0 0;
   line-height: 1.5;
+}
+
+.cover-letter {
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  background: #eef4ff;
+  border-left: 3px solid #748ffc;
+  font-size: 0.9rem;
+}
+
+.cover-letter p {
+  margin: 0.3rem 0 0;
+  line-height: 1.5;
+}
+
+.cover-letter-text {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  resize: vertical;
 }
 
 .match-skills {

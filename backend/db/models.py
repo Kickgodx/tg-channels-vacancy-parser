@@ -187,6 +187,25 @@ class VacancyMatchRow(Base):
     )
 
 
+class CoverLetterRow(Base):
+    """Сгенерированное сопроводительное письмо. PK — и кэш генерации (resume+vacancy)."""
+
+    __tablename__ = "cover_letters"
+
+    resume_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("resumes.id", ondelete="CASCADE"), primary_key=True
+    )
+    vacancy_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), primary_key=True
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    tone: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, server_default=func.now()
+    )
+
+
 class AIExtractionCacheRow(Base):
     """Кэш ответов LLM (ключ = sha256 текста + model + prompt_version + mode)."""
 

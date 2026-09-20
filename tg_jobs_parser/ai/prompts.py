@@ -317,3 +317,101 @@ def build_match_messages(*, resume_text: str, vacancy_text: str) -> list[dict[st
             ),
         },
     ]
+
+
+COVER_LETTER_PROMPT_VERSION = "cover-letter-v1"
+
+COVER_LETTER_TONES: dict[str, str] = {
+    "neutral": "neutral and professional",
+    "friendly": "friendly and conversational",
+    "formal": "formal and reserved",
+}
+
+COVER_LETTER_SYSTEM_PROMPT = """
+You are an expert career assistant writing a cover letter (сопроводительное
+письмо) for a candidate applying to an IT job vacancy.
+
+Rules:
+- Write in the SAME language as the vacancy text (usually Russian; English
+  vacancy → English letter).
+- Length: 120-200 words. Plain text, ready to paste into a message or form.
+- No subject line, no markdown, no placeholders like [Имя] — write a finished
+  text that can be sent as is. If the resume contains the candidate's name or
+  contacts, you may use them; otherwise end without a signature block.
+- Ground every claim in the resume: do NOT invent experience, skills,
+  employers, achievements or metrics that are not in the resume.
+- Reference 2-4 concrete requirements from the vacancy and map them to real
+  resume facts. Explain the fit for THIS role — no generic praise.
+- Do not bring up salary expectations, relocation/visa issues or weaknesses
+  unless the vacancy explicitly asks for them.
+- Output ONLY the letter text. No commentary, no surrounding quotes.
+""".strip()
+
+COVER_LETTER_USER_PROMPT = """Write a {tone} cover letter for this vacancy.
+
+<CANDIDATE_RESUME>
+{resume}
+</CANDIDATE_RESUME>
+
+<VACANCY>
+{vacancy}
+</VACANCY>
+{match_block}{notes_block}"""
+
+_COVER_LETTER_MATCH_BLOCK = """
+<MATCH_CONTEXT>
+A previous evaluation of this resume against this vacancy scored {score}/100.
+Strongest points: {strengths}
+Matching skills: {matching_skills}
+{explanation}
+Use this context to emphasise proven strengths; do not mention the score
+or any gaps in the letter itself.
+</MATCH_CONTEXT>
+"""
+
+_COVER_LETTER_NOTES_BLOCK = """
+<EXTRA_NOTES>
+Additional instructions from the candidate — honour them:
+{notes}
+</EXTRA_NOTES>
+"""
+
+
+def build_cover_letter_messages(
+    *,
+    resume_text: str,
+    vacancy_text: str,
+    tone: str = "neutral",
+    extra_notes: str | None = None,
+    match_summary: dict | None = None,
+) -> list[dict[str, str]]:
+    """Сообщения для генерации сопроводительного письма (ответ — обычный текст).
+
+    ``match_summary`` — опциональный контекст из сохранённой оценки матчинга:
+    ключи ``score``, ``strengths``, ``matching_skills``, ``explanation``.
+    """
+    match_block = ""
+    if match_summary:
+        skills = match_summary.get("matching_skills") or []
+        explanation = (match_summary.get("explanation") or "").strip()
+        match_block = _COVER_LETTER_MATCH_BLOCK.format(
+            score=match_summary.get("score") or 0,
+            strengths="; ".join(match_summary.get("strengths") or []) or "—",
+            matching_skills=", ".join(str(s) for s in skills) or "—",
+            explanation=explanation,
+        )
+    notes = (extra_notes or "").strip()
+    notes_block = _COVER_LETTER_NOTES_BLOCK.format(notes=notes) if notes else ""
+    return [
+        {"role": "system", "content": COVER_LETTER_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": COVER_LETTER_USER_PROMPT.format(
+                tone=COVER_LETTER_TONES.get(tone, COVER_LETTER_TONES["neutral"]),
+                resume=resume_text,
+                vacancy=vacancy_text,
+                match_block=match_block,
+                notes_block=notes_block,
+            ),
+        },
+    ]
