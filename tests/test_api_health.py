@@ -32,6 +32,8 @@ filters:
   work_formats: [any]
 ai:
   enabled: false
+fx:
+  enabled: false
 """,
         encoding="utf-8",
     )
