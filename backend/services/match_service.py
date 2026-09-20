@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from backend.db import repository as repo
+from backend.observability import record_match
 from backend.settings import get_settings
 from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
 from tg_jobs_parser.ai.schema import calculate_overall_score
@@ -23,16 +25,26 @@ def match_single(
     """
     cfg = load_config(get_settings().config_path)
     max_chars = cfg.ai.max_input_chars
-    client = OpenRouterClient(cfg.ai)
+    started = time.perf_counter()
     try:
-        extraction, usage = client.match_with_fallback(
-            resume_text=resume_text[:max_chars],
-            vacancy_text=vacancy_text[:max_chars],
-        )
-    finally:
-        client.close()
+        client = OpenRouterClient(cfg.ai)
+        try:
+            extraction, usage = client.match_with_fallback(
+                resume_text=resume_text[:max_chars],
+                vacancy_text=vacancy_text[:max_chars],
+            )
+        finally:
+            client.close()
+    except Exception:
+        record_match(outcome="error", duration_seconds=time.perf_counter() - started)
+        raise
     overall_score = calculate_overall_score(
         extraction.breakdown, extraction.missing_skills
+    )
+    record_match(
+        outcome="success",
+        duration_seconds=time.perf_counter() - started,
+        score=overall_score,
     )
     _LOG.info(
         "Матчинг резюме %s ↔ вакансия %s: score=%s (confidence=%s), модель %s",

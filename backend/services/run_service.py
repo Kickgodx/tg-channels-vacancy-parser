@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
 
 from tg_jobs_parser.config.schema import AppConfig
@@ -15,6 +16,7 @@ from tg_jobs_parser.parse_runner import run_parse
 
 from backend.config_builder import config_snapshot_dict
 from backend.db import repository as repo
+from backend.observability import PARSE_RUNS_ACTIVE, record_parse_run_finished
 from backend.db.session import session_scope
 from backend.schemas import RunCreateRequest
 from backend.services.progress_bus import progress_bus
@@ -33,6 +35,7 @@ def start_parse_run(config: AppConfig, body: RunCreateRequest) -> uuid.UUID:
         run_id = row.id
 
     active = run_registry.register(run_id)
+    PARSE_RUNS_ACTIVE.inc()
     with session_scope() as session:
         repo.set_run_status(session, run_id, "running")
 
@@ -62,6 +65,7 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
     active = run_registry.get(run_id)
     if active is None:
         return
+    started = time.monotonic()
 
     _LOG.info(
         "Прогон %s: старт worker, AI=%s, кэш=%s (%s).",
@@ -176,5 +180,12 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
             else:
                 repo.set_run_status(session, run_id, "failed", error_message=str(e))
     finally:
+        res = result or active.result
+        record_parse_run_finished(
+            status=active.status,
+            posts_fetched=res.posts_fetched if res else 0,
+            duration_seconds=time.monotonic() - started,
+        )
+        PARSE_RUNS_ACTIVE.dec()
         progress_bus.publish_done(run_id)
         run_registry.finish(run_id)

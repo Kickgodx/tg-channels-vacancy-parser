@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from backend.api.deps import get_current_user, get_db
 from backend.db import repository as repo
 from backend.db.models import ResumeRow, UserRow, VacancyMatchRow
+from backend.observability import record_match
 from backend.schemas import (
     ResumeCreate,
     ResumeListResponse,
@@ -135,6 +136,7 @@ def match_single_vacancy(
     if not force:
         existing = repo.get_vacancy_match(db, resume_id=resume_id, vacancy_id=vacancy_id)
         if existing is not None:
+            record_match(outcome="cached")
             return _match_to_out(existing, cached=True)
     try:
         row = match_service.match_single(

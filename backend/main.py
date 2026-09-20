@@ -24,6 +24,7 @@ from backend.api.routes import (
 )
 from backend.db import fx_repository as fx_repo
 from backend.db import repository as repo
+import backend.observability  # noqa: F401 — регистрация доменных метрик и db_* gauges в /metrics
 from backend.db.session import init_db, session_scope
 from backend.settings import get_settings
 from prometheus_fastapi_instrumentator import Instrumentator

@@ -11,6 +11,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from backend.db.models import ExchangeRateRow
+from backend.observability import record_fx_fetch
 from tg_jobs_parser.config.schema import FxConfig
 from tg_jobs_parser.fx.cbr import fetch_cbr_rates
 from tg_jobs_parser.fx.convert import currency_for_rate_lookup, is_ruble_currency
@@ -120,8 +121,10 @@ def ensure_rates(
         if actual_date != rate_date:
             upsert_rates(session, rate_date, fetched, source=config.provider)
             session.flush()
+        record_fx_fetch("fetched")
         return fetched
     except Exception as e:
+        record_fx_fetch("failed")
         _LOG.warning("ЦБ: курс на %s не загружен: %s", rate_date, e)
         return {}
 
@@ -164,7 +167,12 @@ def refresh_rates_from_api(session: Session, config: FxConfig) -> tuple[date, di
     if not config.enabled:
         upsert_rates(session, today, {"RUB": 1.0}, source=config.provider)
         return today, {"RUB": 1.0}, 1
-    actual_date, fetched = fetch_cbr_rates(today, timeout=config.request_timeout_seconds)
+    try:
+        actual_date, fetched = fetch_cbr_rates(today, timeout=config.request_timeout_seconds)
+    except Exception:
+        record_fx_fetch("failed")
+        raise
+    record_fx_fetch("fetched")
     n = upsert_rates(session, actual_date, fetched, source=config.provider)
     session.flush()
     return actual_date, fetched, n

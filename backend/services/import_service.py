@@ -25,6 +25,7 @@ from tg_jobs_parser.parsers.base import RawPost
 
 from backend.db import repository as repo
 from backend.db.models import VacancyRow
+from backend.observability import record_import_item
 from backend.db.vacancy_mapper import row_to_vacancy
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
@@ -179,4 +180,6 @@ def import_vacancy_texts(
             ai_service.log_batch_finished()
             ai_service.close()
 
+    for it in result.items:
+        record_import_item(it.status)
     return result

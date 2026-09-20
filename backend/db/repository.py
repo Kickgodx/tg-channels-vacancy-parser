@@ -17,6 +17,7 @@ from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
 
 from backend.fx.apply import apply_salary_rub_for_vacancy, preload_fx_rates_for_vacancies
+from backend.observability import record_vacancies_archived, record_vacancy_upsert
 from backend.db.models import (
     ParseRunRow,
     ResumeRow,
@@ -225,6 +226,7 @@ def upsert_vacancies(
         inserted,
         updated_existing,
     )
+    record_vacancy_upsert(inserted=inserted, updated_existing=updated_existing)
     return VacancyUpsertStats(inserted=inserted, updated_existing=updated_existing)
 
 
@@ -255,6 +257,7 @@ def archive_expired_vacancies(
     archived = result.rowcount or 0
     if archived:
         _LOG.info("TTL вакансий: архивировано %s записей старше %s", archived, cutoff.isoformat())
+        record_vacancies_archived(archived)
     return archived
 
 

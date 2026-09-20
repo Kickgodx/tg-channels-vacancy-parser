@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from backend.api.deps import get_current_user, get_db
 from backend.db import repository as repo
 from backend.db.models import UserRow
+from backend.observability import record_auth_event
 from backend.schemas import AuthCredentials, TokenResponse, UserOut
 from backend.services import auth_service
 from backend.settings import get_settings
@@ -34,9 +35,11 @@ def _token_response(user: UserRow) -> TokenResponse:
 def register(body: AuthCredentials, db: Session = Depends(get_db)) -> TokenResponse:
     """Регистрация. Первый пользователь → admin и наследует legacy-строки (user_id IS NULL)."""
     if not get_settings().auth_registration_open and repo.count_users(db) > 0:
+        record_auth_event("register", "closed")
         raise HTTPException(status_code=403, detail="Registration is closed")
     email = body.email.strip().lower()
     if repo.get_user_by_email(db, email) is not None:
+        record_auth_event("register", "conflict")
         raise HTTPException(status_code=409, detail="Email already registered")
     is_first = repo.count_users(db) == 0
     user = repo.create_user(
@@ -47,6 +50,7 @@ def register(body: AuthCredentials, db: Session = Depends(get_db)) -> TokenRespo
     )
     if is_first:
         repo.claim_legacy_rows(db, user.id)
+    record_auth_event("register", "success")
     return _token_response(user)
 
 
@@ -56,9 +60,12 @@ def login(body: AuthCredentials, db: Session = Depends(get_db)) -> TokenResponse
     if user is None or not auth_service.verify_password(
         body.password, user.password_hash
     ):
+        record_auth_event("login", "invalid")
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user.is_active:
+        record_auth_event("login", "disabled")
         raise HTTPException(status_code=403, detail="User is disabled")
+    record_auth_event("login", "success")
     return _token_response(user)
 
 
