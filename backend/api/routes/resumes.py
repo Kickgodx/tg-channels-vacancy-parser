@@ -14,6 +14,7 @@ from backend.schemas import (
     VacancyMatchOut,
 )
 from backend.services import match_service
+from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
 
 resumes_router = APIRouter(prefix="/resumes", tags=["resumes"])
 
@@ -85,10 +86,18 @@ def _match_to_out(row: VacancyMatchRow, *, cached: bool) -> VacancyMatchOut:
     return VacancyMatchOut(
         resume_id=row.resume_id,
         vacancy_id=row.vacancy_id,
-        score=row.score,
+        overall_score=row.overall_score,
+        confidence=row.confidence,
+        breakdown=MatchBreakdown.model_validate(row.breakdown or {}),
         explanation=row.explanation,
-        matching_skills=row.matching_skills or [],
-        missing_skills=row.missing_skills or [],
+        matching_skills=[
+            SkillMatch.model_validate(s) for s in row.matching_skills or []
+        ],
+        missing_skills=[
+            SkillMatch.model_validate(s) for s in row.missing_skills or []
+        ],
+        strengths=row.strengths or [],
+        risks=row.risks or [],
         model=row.model,
         created_at=row.created_at,
         cached=cached,

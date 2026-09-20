@@ -66,7 +66,7 @@ _SORT_COLUMNS: dict[VacancySortField, object] = {
 
 def _vacancy_order_by(query: VacancyQuery, *, dialect: str = "postgresql") -> list:
     if query.sort_by == "match_score" and query.resume_id is not None:
-        col = VacancyMatchRow.score
+        col = VacancyMatchRow.overall_score
     else:
         col = _SORT_COLUMNS.get(query.sort_by, VacancyRow.post_date)
     order = col.asc().nulls_last() if query.sort_order == "asc" else col.desc().nulls_last()
@@ -290,7 +290,7 @@ def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[Vacancy]
         for vrow, mrow in pairs:
             v = row_to_vacancy(vrow)
             if mrow is not None:
-                v.match_score = mrow.score
+                v.match_score = mrow.overall_score
                 v.match_explanation = mrow.explanation
             items.append(v)
         return items, total
@@ -497,10 +497,14 @@ def upsert_vacancy_match(
     *,
     resume_id: int,
     vacancy_id: str,
-    score: float,
+    overall_score: int,
+    confidence: int,
+    breakdown: dict | None,
     explanation: str | None,
     matching_skills: list | None,
     missing_skills: list | None,
+    strengths: list | None,
+    risks: list | None,
     model: str,
 ) -> VacancyMatchRow:
     """Записать/обновить оценку пары (resume, vacancy) — кэш матчинга по PK."""
@@ -509,18 +513,26 @@ def upsert_vacancy_match(
         row = VacancyMatchRow(
             resume_id=resume_id,
             vacancy_id=vacancy_id,
-            score=score,
+            overall_score=overall_score,
+            confidence=confidence,
+            breakdown=breakdown,
             explanation=explanation,
             matching_skills=matching_skills,
             missing_skills=missing_skills,
+            strengths=strengths,
+            risks=risks,
             model=model,
         )
         session.add(row)
     else:
-        row.score = score
+        row.overall_score = overall_score
+        row.confidence = confidence
+        row.breakdown = breakdown
         row.explanation = explanation
         row.matching_skills = matching_skills
         row.missing_skills = missing_skills
+        row.strengths = strengths
+        row.risks = risks
         row.model = model
         row.created_at = datetime.now(timezone.utc)
     session.flush()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS, normalize_grade
@@ -131,26 +133,137 @@ class VacancyAIExtraction(BaseModel):
         return normalize_currency(str(v).strip().upper()[:8], default_if_missing="RUB")
 
 
-class VacancyMatchExtraction(BaseModel):
-    """Оценка соответствия резюме вакансии (ответ LLM матчинга)."""
+Importance = Literal["critical", "important", "secondary"]
 
-    score: float = Field(
-        ge=0, le=100,
-        description="0-100: насколько резюме подходит вакансии (навыки, грейд, домен).",
+_IMPORTANCE_ALIASES = {
+    "critical": "critical",
+    "required": "critical",
+    "must": "critical",
+    "must_have": "critical",
+    "mandatory": "critical",
+    "important": "important",
+    "nice": "secondary",
+    "nice_to_have": "secondary",
+    "optional": "secondary",
+    "secondary": "secondary",
+}
+
+
+def _clamp_score(v: object) -> int:
+    """Модели иногда отдают float/str — приводим к int 0..100."""
+    try:
+        n = int(round(float(str(v).strip())))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(100, n))
+
+
+def _coerce_skill_match(v: object) -> object:
+    """Терпим формат ``["python"]`` — строка превращается в SkillMatch."""
+    if isinstance(v, str):
+        return {"skill": v.strip(), "importance": "important", "evidence": ""}
+    return v
+
+
+class SkillMatch(BaseModel):
+    """Один навык в matching/missing: название, приоритет требования, обоснование."""
+
+    skill: str
+    importance: Importance = "important"
+    evidence: str = ""
+
+    @field_validator("importance", mode="before")
+    @classmethod
+    def norm_importance(cls, v: object) -> str:
+        key = str(v or "").strip().lower().replace("-", "_").replace(" ", "_")
+        return _IMPORTANCE_ALIASES.get(key, "important")
+
+    @field_validator("skill", "evidence", mode="before")
+    @classmethod
+    def norm_str(cls, v: object) -> str:
+        return str(v).strip() if v is not None else ""
+
+
+class MatchBreakdown(BaseModel):
+    """Оценки LLM по измерениям; итоговый score считает backend."""
+
+    role_match: int = Field(default=0, ge=0, le=100)
+    skills_match: int = Field(default=0, ge=0, le=100)
+    seniority_match: int = Field(default=0, ge=0, le=100)
+    domain_match: int = Field(default=0, ge=0, le=100)
+    work_format_match: int = Field(default=0, ge=0, le=100)
+
+    @field_validator(
+        "role_match",
+        "skills_match",
+        "seniority_match",
+        "domain_match",
+        "work_format_match",
+        mode="before",
     )
-    explanation: str | None = Field(
-        default=None,
-        description="1-3 предложения на русском: почему такой скор, ключевые пробелы.",
+    @classmethod
+    def norm_score(cls, v: object) -> int:
+        return _clamp_score(v)
+
+
+class VacancyMatchExtraction(BaseModel):
+    """Оценка соответствия резюме вакансии (ответ LLM матчинга).
+
+    Модель оценивает только измерения и объясняет; ``overall_score``
+    вычисляется детерминированно через :func:`calculate_overall_score`.
+    """
+
+    confidence: int = Field(
+        default=50, ge=0, le=100,
+        description="0-100: уверенность в качестве оценки (полнота резюме/вакансии), не сам score.",
     )
-    matching_skills: list[str] = Field(default_factory=list)
-    missing_skills: list[str] = Field(default_factory=list)
+    breakdown: MatchBreakdown = Field(default_factory=MatchBreakdown)
+    matching_skills: list[SkillMatch] = Field(default_factory=list, max_length=8)
+    missing_skills: list[SkillMatch] = Field(default_factory=list, max_length=8)
+    strengths: list[str] = Field(default_factory=list, max_length=5)
+    risks: list[str] = Field(default_factory=list, max_length=5)
+    explanation: str = ""
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def norm_confidence(cls, v: object) -> int:
+        return _clamp_score(v)
 
     @field_validator("explanation", mode="before")
     @classmethod
-    def norm_optional_str_fields(cls, v: object) -> str | None:
-        return _coerce_optional_str(v)
+    def norm_explanation(cls, v: object) -> str:
+        return _coerce_optional_str(v) or ""
 
     @field_validator("matching_skills", "missing_skills", mode="before")
     @classmethod
+    def norm_skill_list_fields(cls, v: object) -> list:
+        if not isinstance(v, list):
+            return []
+        return [_coerce_skill_match(x) for x in v][:8]
+
+    @field_validator("strengths", "risks", mode="before")
+    @classmethod
     def norm_str_list_fields(cls, v: object) -> list[str]:
-        return _coerce_str_list(v)
+        return _coerce_str_list(v)[:5]
+
+
+def calculate_overall_score(
+    breakdown: MatchBreakdown,
+    missing_skills: list[SkillMatch],
+) -> int:
+    """Детерминированный итоговый score: взвешенная сумма + penalty за critical-пробелы."""
+    score = round(
+        breakdown.role_match * 0.30
+        + breakdown.skills_match * 0.35
+        + breakdown.seniority_match * 0.20
+        + breakdown.domain_match * 0.10
+        + breakdown.work_format_match * 0.05
+    )
+
+    critical_missing = sum(1 for s in missing_skills if s.importance == "critical")
+    if critical_missing >= 2:
+        score = min(score, 59)
+    elif critical_missing == 1:
+        score = min(score, 69)
+
+    return max(0, min(100, score))

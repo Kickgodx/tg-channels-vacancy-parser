@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
-import type { Vacancy, VacancyMatch } from "../types/api";
+import type { MatchImportance, SkillMatch, Vacancy, VacancyMatch } from "../types/api";
 
 interface Props {
   vacancy: Vacancy;
@@ -17,6 +17,34 @@ function scoreClass(score: number): string {
   return "match-score weak";
 }
 
+const IMPORTANCE_LABEL: Record<MatchImportance, string> = {
+  critical: "Критично",
+  important: "Важно",
+  secondary: "Желательно",
+};
+
+function SkillRow({ item, matched }: { item: SkillMatch; matched: boolean }) {
+  return (
+    <li className="match-skill" title={item.evidence || undefined}>
+      <span className={matched ? "match-skill-mark ok" : "match-skill-mark miss"}>
+        {matched ? "✓" : "!"}
+      </span>
+      <span className="match-skill-name">{item.skill}</span>
+      <span className={`match-skill-importance ${item.importance}`}>
+        {IMPORTANCE_LABEL[item.importance] ?? item.importance}
+      </span>
+    </li>
+  );
+}
+
+const BREAKDOWN_ROWS: [keyof NonNullable<VacancyMatch["breakdown"]>, string][] = [
+  ["role_match", "Роль"],
+  ["skills_match", "Навыки"],
+  ["seniority_match", "Грейд"],
+  ["domain_match", "Домен"],
+  ["work_format_match", "Формат работы"],
+];
+
 export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: Props) {
   const queryClient = useQueryClient();
   // Оценка из списка (join vacancy_matches) — стартовое состояние до пересчёта.
@@ -25,7 +53,7 @@ export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: P
       ? {
           resume_id: resumeId ?? 0,
           vacancy_id: v.id,
-          score: v.match_score,
+          overall_score: v.match_score,
           explanation: v.match_explanation,
           matching_skills: [],
           missing_skills: [],
@@ -88,21 +116,75 @@ export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: P
           <aside className="vacancy-match">
             <div className="vacancy-match-header">
               <strong>Соответствие резюме</strong>
-              <span className={scoreClass(match.score)}>{Math.round(match.score)} / 100</span>
+              <span className={scoreClass(match.overall_score)}>
+                {Math.round(match.overall_score)} / 100
+              </span>
+              {match.confidence != null && (
+                <span
+                  className="caption"
+                  title="Уверенность модели в качестве оценки (полнота данных), а не сам score"
+                >
+                  уверенность {match.confidence}%
+                </span>
+              )}
               {match.model && <span className="caption">{match.model}</span>}
             </div>
-            {match.explanation && <p>{match.explanation}</p>}
-            {match.matching_skills.length > 0 && (
-              <p className="match-skills">
-                <strong className="success">Совпадает:</strong>{" "}
-                {match.matching_skills.join(", ")}
+            {match.breakdown && (
+              <div className="match-breakdown">
+                {BREAKDOWN_ROWS.map(([key, label]) => (
+                  <div key={key} className="match-breakdown-row">
+                    <span className="match-breakdown-label">{label}</span>
+                    <span className="match-breakdown-value">
+                      {match.breakdown![key]}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {match.explanation && (
+              <p>
+                <strong>Почему такая оценка:</strong> {match.explanation}
               </p>
             )}
+            {match.matching_skills.length > 0 && (
+              <div className="match-skills">
+                <strong className="success">Совпадает:</strong>
+                <ul className="match-skill-list">
+                  {match.matching_skills.map((s) => (
+                    <SkillRow key={s.skill} item={s} matched />
+                  ))}
+                </ul>
+              </div>
+            )}
             {match.missing_skills.length > 0 && (
-              <p className="match-skills">
-                <strong className="warning">Не хватает:</strong>{" "}
-                {match.missing_skills.join(", ")}
-              </p>
+              <div className="match-skills">
+                <strong className="warning">Не хватает:</strong>
+                <ul className="match-skill-list">
+                  {match.missing_skills.map((s) => (
+                    <SkillRow key={s.skill} item={s} matched={false} />
+                  ))}
+                </ul>
+              </div>
+            )}
+            {match.strengths && match.strengths.length > 0 && (
+              <div className="match-skills">
+                <strong className="success">Сильные стороны:</strong>
+                <ul className="match-skill-list">
+                  {match.strengths.map((s, i) => (
+                    <li key={i} className="match-note">{s}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {match.risks && match.risks.length > 0 && (
+              <div className="match-skills">
+                <strong className="warning">Риски:</strong>
+                <ul className="match-skill-list">
+                  {match.risks.map((s, i) => (
+                    <li key={i} className="match-note">{s}</li>
+                  ))}
+                </ul>
+              </div>
             )}
             {match.cached && !matchM.isSuccess && (
               <p className="caption">

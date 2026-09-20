@@ -51,6 +51,33 @@ def _parse_extraction(raw: str) -> VacancyAIExtraction:
     return VacancyAIExtraction.model_validate(data)
 
 
+def _strict_json_schema(model: type) -> dict[str, Any]:
+    """Pydantic-схема → OpenAI-совместимый strict JSON Schema.
+
+    Strict-режим требует ``additionalProperties: false`` и все свойства
+    в ``required`` — проставляем рекурсивно, включая ``$defs``.
+    """
+
+    def _fix(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "object" or "properties" in node:
+            node["additionalProperties"] = False
+            props = node.get("properties")
+            if isinstance(props, dict):
+                node["required"] = list(props.keys())
+                for sub in props.values():
+                    _fix(sub)
+        for sub in node.values():
+            if isinstance(sub, dict):
+                _fix(sub)
+
+    schema = model.model_json_schema()
+    schema.pop("title", None)
+    _fix(schema)
+    return schema
+
+
 def _parse_match(raw: str) -> VacancyMatchExtraction:
     text = _extract_json_text(raw)
     data = json.loads(text)
@@ -190,6 +217,7 @@ class OpenRouterClient:
         parse,
         model: str | None = None,
         reasoning: bool | None = None,
+        json_schema: dict[str, Any] | None = None,
     ) -> tuple[Any, LLMUsage]:
         """Общий вызов chat.completions: kwargs, usage, метрики, разбор через ``parse``."""
         use_model = model or self._ai.model
@@ -203,6 +231,15 @@ class OpenRouterClient:
         extra_body: dict[str, Any] | None = None
         if use_reasoning:
             extra_body = {"reasoning": {"enabled": True}}
+        elif json_schema is not None:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": json_schema.get("title", "response"),
+                    "strict": True,
+                    "schema": json_schema,
+                },
+            }
         else:
             kwargs["response_format"] = {"type": "json_object"}
 
@@ -274,14 +311,25 @@ class OpenRouterClient:
         vacancy_text: str,
         model: str | None = None,
     ) -> tuple[VacancyMatchExtraction, LLMUsage]:
-        """Матчинг идёт своей моделью (``ai.match_model``) — обычно reasoning."""
+        """Матчинг идёт своей моделью (``ai.match_model``) — обычно reasoning.
+
+        При невалидном/неразбираемом JSON — один controlled retry той же модели.
+        """
         messages = build_match_messages(resume_text=resume_text, vacancy_text=vacancy_text)
-        return self._call_llm(
+        call = lambda: self._call_llm(  # noqa: E731
             messages=messages,
             parse=_parse_match,
             model=model or self._ai.resolved_match_model(),
             reasoning=self._ai.match_reasoning_enabled,
+            json_schema=_strict_json_schema(VacancyMatchExtraction),
         )
+        try:
+            return call()
+        except LlmQuotaExhausted:
+            raise
+        except (json.JSONDecodeError, ValueError) as e:
+            _LOG.warning("Матчинг: невалидный JSON от LLM (%s), повторный запрос", e)
+            return call()
 
     def extract_with_fallback(
         self,

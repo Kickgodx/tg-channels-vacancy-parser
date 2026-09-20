@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
 from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_progress import ParseProgressSnapshot
@@ -211,10 +212,16 @@ class VacancyMatchOut(BaseModel):
 
     resume_id: int
     vacancy_id: str
-    score: float
+    overall_score: int = Field(description="0-100: итоговый score, считает backend.")
+    confidence: int = Field(
+        description="0-100: уверенность LLM в качестве оценки, не сам score."
+    )
+    breakdown: MatchBreakdown
     explanation: str | None = None
-    matching_skills: list[str] = Field(default_factory=list)
-    missing_skills: list[str] = Field(default_factory=list)
+    matching_skills: list[SkillMatch] = Field(default_factory=list)
+    missing_skills: list[SkillMatch] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
     model: str
     created_at: datetime
     cached: bool = Field(
