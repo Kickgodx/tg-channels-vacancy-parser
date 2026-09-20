@@ -3,8 +3,10 @@
 Тот же пайплайн, что у прогона по каналам (`raw_post_to_vacancy_rules` +
 `AIEnrichmentService.enrich` + `upsert_vacancies`), но источник — вставленный
 пользователем текст (например, скопированная вакансия с hh.ru), а не посты
-Telegram. Пост-фильтры прогона (exclude_keywords, форматы, локации) здесь не
-применяются: вакансия добавляется по явному действию пользователя.
+Telegram. Пост-фильтры прогона (exclude_keywords, форматы, локации) и порог
+vacancy_score здесь не применяются: вакансия добавляется по явному действию
+пользователя. При включённом AI решение «вакансия или нет» принимает LLM
+(is_job_post) — ``skip_if_vacancy_score_below`` принудительно обнуляется.
 """
 
 from __future__ import annotations
@@ -115,15 +117,21 @@ def import_vacancy_texts(
     if config.ai.enabled:
         from tg_jobs_parser.ai.enricher import AIEnrichmentService
 
+        # Ручной импорт: score-гейт перед LLM отключён — реальные вакансии
+        # с низким rules-score не должны отсекаться до модели.
+        ai_config = config.model_copy(
+            update={
+                "ai": config.ai.model_copy(update={"skip_if_vacancy_score_below": 0})
+            }
+        )
         try:
-            ai_service = AIEnrichmentService(config)
+            ai_service = AIEnrichmentService(ai_config)
             ai_service.begin_batch(len(texts))
             result.ai_enabled = True
         except Exception as e:
             result.warning = f"AI не запущен ({e}); вакансии разобраны без LLM."
             _LOG.warning("Импорт: AI не инициализирован: %s", e)
 
-    threshold = config.parser.vacancy_score_threshold
     try:
         for i, raw in enumerate(texts):
             text = raw.strip()
@@ -160,15 +168,6 @@ def import_vacancy_texts(
                     continue
                 if enriched is not None:
                     v = enriched
-            elif v.vacancy_score < threshold:
-                result.items.append(
-                    ImportItemResult(
-                        index=i,
-                        status="not_vacancy",
-                        message=f"Не похоже на вакансию (score {v.vacancy_score} < {threshold})",
-                    )
-                )
-                continue
 
             repo.upsert_vacancies(session, [v], parse_run_id=None)
             result.items.append(

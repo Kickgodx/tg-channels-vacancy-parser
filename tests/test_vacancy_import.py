@@ -68,21 +68,21 @@ def test_import_creates_vacancy_and_dedups(api_client):
     assert lst2.json()["total"] == 1
 
 
-def test_import_rejects_non_vacancy_text(api_client):
+def test_import_rules_mode_saves_any_text(api_client):
+    """Без LLM score-гейт отключён: вставленный текст сохраняется как есть."""
     token = _register(api_client, "imp@example.com")
     r = _import(api_client, token, [NOT_VACANCY_TEXT])
     assert r.status_code == 200, r.text
     item = r.json()["items"][0]
-    assert item["status"] == "not_vacancy"
-    assert item["vacancy"] is None
-    assert r.json()["rejected"] == 1
+    assert item["status"] == "created"
+    assert item["vacancy"]["source_channel"] == "manual"
 
 
 def test_import_batch_and_empty(api_client):
     token = _register(api_client, "imp@example.com")
     r = _import(api_client, token, [VACANCY_TEXT, "   ", NOT_VACANCY_TEXT])
     body = r.json()
-    assert [it["status"] for it in body["items"]] == ["created", "error", "not_vacancy"]
+    assert [it["status"] for it in body["items"]] == ["created", "error", "created"]
 
     empty = _import(api_client, token, ["", "   "])
     assert empty.status_code == 400
@@ -105,6 +105,8 @@ def test_import_with_ai_enrichment(api_client, monkeypatch, default_test_config)
     )
     monkeypatch.setattr(import_service, "load_config", lambda *a, **k: ai_cfg)
 
+    llm_calls: list[str] = []
+
     class _FakeAI:
         def __init__(self, config):
             self.stats = RunAIStats()
@@ -114,6 +116,7 @@ def test_import_with_ai_enrichment(api_client, monkeypatch, default_test_config)
 
         def enrich(self, vacancy, *, cancel=None):
             self.stats.calls += 1
+            llm_calls.append(vacancy.id)
             if "пикник" in vacancy.cleaned_text:
                 self.stats.dropped_not_job += 1
                 return None
@@ -141,3 +144,5 @@ def test_import_with_ai_enrichment(api_client, monkeypatch, default_test_config)
     assert created["vacancy"]["extraction_source"] == "hybrid"
     assert rejected["status"] == "not_vacancy"
     assert "не похож" in rejected["message"]
+    # score-гейт перед LLM отключён: оба текста дошли до модели
+    assert len(llm_calls) == 2
