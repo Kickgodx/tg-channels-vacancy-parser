@@ -1,0 +1,64 @@
+// Grafana Alloy: сбор stdout/stderr контейнеров этого compose-проекта в Loki.
+// Пайплайн: discovery.docker → relabel (labels service/container/stream)
+// → loki.source.docker → loki.process (level/logger из формата utils/logger.py)
+// → loki.write.
+
+logging {
+	level  = "info"
+	format = "logfmt"
+}
+
+discovery.docker "containers" {
+	host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "compose" {
+	targets = discovery.docker.containers.targets
+
+	// Только контейнеры этого compose-проекта (имя — от каталога репозитория).
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+		regex         = "tg.?jobs.?parser"
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "container"
+	}
+}
+
+loki.source.docker "containers" {
+	host       = "unix:///var/run/docker.sock"
+	targets    = discovery.relabel.compose.output
+	forward_to = [loki.process.app.receiver]
+}
+
+loki.process "app" {
+	// Формат backend (tg_jobs_parser/utils/logger.py):
+	// "2026-09-20 10:00:00 | INFO | backend.main | сообщение"
+	stage.regex {
+		expression = `^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| (?P<level>[A-Z]+) \| (?P<logger>[^|]+?) \|`
+	}
+
+	stage.labels {
+		values = {
+			level  = "",
+			logger = "",
+		}
+	}
+
+	forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}

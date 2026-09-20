@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -16,6 +18,8 @@ from backend.schemas import (
 )
 from backend.services import match_service
 from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
+
+_LOG = logging.getLogger(__name__)
 
 resumes_router = APIRouter(prefix="/resumes", tags=["resumes"])
 
@@ -147,5 +151,8 @@ def match_single_vacancy(
             vacancy_text=vacancy.cleaned_text or vacancy.raw_text or "",
         )
     except Exception as e:
+        _LOG.warning(
+            "Матчинг резюме %s ↔ вакансия %s не удался: %s", resume_id, vacancy_id, e
+        )
         raise HTTPException(status_code=502, detail=f"LLM: {e}") from e
     return _match_to_out(row, cached=False)

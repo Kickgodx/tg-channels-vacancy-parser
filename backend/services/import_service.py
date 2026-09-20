@@ -180,6 +180,14 @@ def import_vacancy_texts(
             ai_service.log_batch_finished()
             ai_service.close()
 
+    counts: dict[str, int] = {}
     for it in result.items:
+        counts[it.status] = counts.get(it.status, 0) + 1
         record_import_item(it.status)
+    _LOG.info(
+        "Импорт завершён: %s позиций (%s), AI=%s",
+        len(result.items),
+        ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "нет",
+        result.ai_enabled,
+    )
     return result

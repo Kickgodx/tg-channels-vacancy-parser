@@ -54,6 +54,7 @@ def cancel_run(run_id: uuid.UUID) -> bool:
     if active is None or active.status != "running":
         return False
     active.cancel_token.request_cancel()
+    _LOG.info("Прогон %s: запрошена отмена", run_id)
     return True
 
 

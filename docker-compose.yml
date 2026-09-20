@@ -72,8 +72,37 @@ services:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
+      - loki
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.4.2
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.7.5
+    # root нужен для чтения docker.sock; Docker Desktop на Windows тоже
+    # отдаёт unix-сокет внутрь WSL2-VM, поэтому путь кроссплатформенный.
+    user: root
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    ports:
+      - "12345:12345"
+    volumes:
+      - ./observability/alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - alloy_data:/var/lib/alloy/data
+    depends_on:
+      - loki
     restart: unless-stopped
 
 volumes:
   pgdata:
   grafana_data:
+  loki_data:
+  alloy_data:

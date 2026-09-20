@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from typing import AsyncIterator
 
@@ -33,6 +34,8 @@ from backend.services.run_registry import run_registry
 from backend.services import run_service
 from backend.settings import get_settings
 
+_LOG = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/runs", tags=["runs"], dependencies=[Depends(verify_api_key)])
 
 
@@ -62,6 +65,12 @@ def create_run(body: RunCreateRequest, db: Session = Depends(get_db)) -> RunCrea
         run_id = run_service.start_parse_run(config, body)
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    _LOG.info(
+        "Создан прогон %s: каналов=%s, AI=%s",
+        run_id,
+        len(body.channels) if body.channels else len(config.sources.channels),
+        config.ai.enabled,
+    )
     return RunCreateResponse(run_id=run_id, status="running")
 
 
@@ -94,6 +103,7 @@ def get_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> RunDetail:
 def cancel_run(run_id: uuid.UUID) -> dict:
     if not run_service.cancel_run(run_id):
         raise HTTPException(status_code=404, detail="Run not running or not found")
+    _LOG.info("Прогон %s: отмена запрошена через API", run_id)
     return {"ok": True, "run_id": str(run_id)}
 
 

@@ -30,9 +30,11 @@ docker compose up --build
 | **API** (OpenAPI) | http://localhost:8000/docs |
 | **Prometheus** | http://localhost:9090 |
 | **Grafana** | http://localhost:3000 (login: `admin` / `admin`) |
+| **Loki** | http://localhost:3100 (API; логи смотрятся в Grafana → Explore) |
+| **Alloy** | http://localhost:12345 (UI пайплайна сбора логов) |
 | **PostgreSQL** | `localhost:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
 
-Prometheus и Grafana поднимаются вместе с основным стеком. Backend отдаёт метрики HTTP на `http://localhost:8000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
+Prometheus, Grafana и стек логов (Loki + Alloy) поднимаются вместе с основным стеком. Backend отдаёт метрики HTTP на `http://localhost:8000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
 
 ### Первая авторизация Telethon
 
@@ -390,7 +392,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 По умолчанию `--mode merge` — UPSERT по первичному ключу (существующие строки обновляются).  
 `replace` — сначала очищает все четыре таблицы, затем загружает дамп.
 
-Логи: консоль + `logs/app.log`. Графики CLI: `output/charts/` (matplotlib).
+Логи: консоль + `logs/app.log` (в Docker — только stdout, их собирает Alloy в Loki). Графики CLI: `output/charts/` (matplotlib).
 
 ---
 
@@ -402,7 +404,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 
 ---
 
-## Observability (Prometheus + Grafana)
+## Observability (Prometheus + Grafana + Loki)
 
 Стек метрик HTTP API включён в `docker compose up`:
 
@@ -415,8 +417,10 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
 | **Доменные метрики** | `backend/observability.py`: прогоны (`parse_runs_*`), UPSERT и TTL-архивация вакансий, ручной импорт, матчинг резюме↔вакансия (`vacancy_match_*`), auth-события, запросы к ЦБ |
 | **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, прогоны, LLM-кэш, свежесть курсов ЦБ) |
+| **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
+| **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` из формата логов и шлёт в Loki (`observability/alloy-config.alloy`) |
 
-Конфигурация: `observability/prometheus.yml`, provisioning Grafana — `observability/grafana/provisioning/`.
+Конфигурация: `observability/prometheus.yml`, `observability/loki-config.yml`, `observability/alloy-config.alloy`, provisioning Grafana — `observability/grafana/provisioning/` (datasource Loki добавлен, логи — в Explore рядом с метриками).
 
 Из health-check, OpenAPI и `/metrics` HTTP-метрики не собираются (шум от probes и документации). LLM-метрики пишутся при парсинге с `ai.enabled: true` в том же процессе backend. При недоступной БД `db_*` gauges отдают пустой набор — scrape не падает.
 

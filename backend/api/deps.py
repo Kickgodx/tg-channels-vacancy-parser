@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -10,12 +12,15 @@ from backend.settings import get_settings
 
 __all__ = ["get_db", "verify_api_key", "get_current_user", "get_optional_user"]
 
+_LOG = logging.getLogger(__name__)
+
 
 def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
     settings = get_settings()
     if not settings.api_key:
         return
     if x_api_key != settings.api_key:
+        _LOG.warning("Запрос отклонён: неверный или отсутствующий X-API-Key")
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
