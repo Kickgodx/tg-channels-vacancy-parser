@@ -173,10 +173,14 @@ class VacancyMatchRow(Base):
     vacancy_id: Mapped[str] = mapped_column(
         String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), primary_key=True
     )
-    score: Mapped[float] = mapped_column(Float, nullable=False)
+    overall_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False)
+    breakdown: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     matching_skills: Mapped[list | None] = mapped_column(JSON, nullable=True)
     missing_skills: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    strengths: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    risks: Mapped[list | None] = mapped_column(JSON, nullable=True)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, server_default=func.now()

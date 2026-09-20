@@ -186,13 +186,33 @@ export interface TokenResponse {
   user: AuthUser;
 }
 
+export type MatchImportance = "critical" | "important" | "secondary";
+
+export interface SkillMatch {
+  skill: string;
+  importance: MatchImportance;
+  evidence: string;
+}
+
+export interface MatchBreakdown {
+  role_match: number;
+  skills_match: number;
+  seniority_match: number;
+  domain_match: number;
+  work_format_match: number;
+}
+
 export interface VacancyMatch {
   resume_id: number;
   vacancy_id: string;
-  score: number;
+  overall_score: number;
+  confidence?: number;
+  breakdown?: MatchBreakdown;
   explanation?: string | null;
-  matching_skills: string[];
-  missing_skills: string[];
+  matching_skills: SkillMatch[];
+  missing_skills: SkillMatch[];
+  strengths?: string[];
+  risks?: string[];
   model: string;
   created_at: string;
   cached: boolean;

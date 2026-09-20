@@ -56,10 +56,24 @@ def stub_llm(monkeypatch):
             session,
             resume_id=resume_id,
             vacancy_id=vacancy_id,
-            score=77.0 + len(calls),
+            overall_score=77 + len(calls),
+            confidence=90,
+            breakdown={
+                "role_match": 90,
+                "skills_match": 75,
+                "seniority_match": 85,
+                "domain_match": 100,
+                "work_format_match": 100,
+            },
             explanation="Подходит по стеку, не хватает k8s",
-            matching_skills=["python"],
-            missing_skills=["k8s"],
+            matching_skills=[
+                {"skill": "python", "importance": "critical", "evidence": "В резюме есть Python."}
+            ],
+            missing_skills=[
+                {"skill": "k8s", "importance": "important", "evidence": "В резюме не указан."}
+            ],
+            strengths=["Совпадает основной стек."],
+            risks=["Опыт с Kubernetes в резюме не указан."],
             model="reasoning/model",
         )
 
@@ -77,31 +91,35 @@ def test_solo_match_runs_llm_then_serves_cache(api_client, stub_llm):
     r = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["score"] == 78.0
+    assert body["overall_score"] == 78
+    assert body["confidence"] == 90
+    assert body["breakdown"]["role_match"] == 90
     assert body["cached"] is False
-    assert body["matching_skills"] == ["python"]
-    assert body["missing_skills"] == ["k8s"]
+    assert body["matching_skills"][0]["skill"] == "python"
+    assert body["matching_skills"][0]["importance"] == "critical"
+    assert body["missing_skills"][0]["skill"] == "k8s"
+    assert body["strengths"] == ["Совпадает основной стек."]
     assert body["model"] == "reasoning/model"
     assert len(stub_llm) == 1
 
     # повторный POST без force — из БД, без вызова LLM
     again = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
     assert again.json()["cached"] is True
-    assert again.json()["score"] == 78.0
+    assert again.json()["overall_score"] == 78
     assert len(stub_llm) == 1
 
     # force=true — новый вызов и новая оценка
     forced = api_client.post(
         f"/api/v1/resumes/{rid}/match/{vid}?force=true", headers=_auth(token)
     )
-    assert forced.json()["score"] == 79.0
+    assert forced.json()["overall_score"] == 79
     assert forced.json()["cached"] is False
     assert len(stub_llm) == 2
 
     # GET отдаёт сохранённую оценку
     got = api_client.get(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
     assert got.status_code == 200
-    assert got.json()["score"] == 79.0
+    assert got.json()["overall_score"] == 79
     assert got.json()["cached"] is True
 
 
@@ -170,7 +188,7 @@ def test_match_uses_match_model_and_reasoning(monkeypatch):
     client = OpenRouterClient(ai)
     seen: dict = {}
 
-    def _fake_call(*, messages, parse, model=None, reasoning=None):
+    def _fake_call(*, messages, parse, model=None, reasoning=None, json_schema=None):
         seen["model"] = model
         seen["reasoning"] = reasoning
         return object(), LLMUsage(model=model or "")
@@ -180,3 +198,34 @@ def test_match_uses_match_model_and_reasoning(monkeypatch):
 
     assert seen["model"] == "reasoning/model"
     assert seen["reasoning"] is True
+
+
+def test_match_retries_once_on_invalid_json(monkeypatch):
+    """Невалидный JSON → один controlled retry той же модели, затем успех."""
+    import json as _json
+
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
+    from tg_jobs_parser.ai.schema import VacancyMatchExtraction
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = OpenRouterClient(AiConfig(model="m"))
+    attempts: list[int] = []
+
+    def _flaky(*, messages, parse, model=None, reasoning=None, json_schema=None):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise _json.JSONDecodeError("bad", "doc", 0)
+        return VacancyMatchExtraction(confidence=80), LLMUsage(model=model or "")
+
+    monkeypatch.setattr(client, "_call_llm", _flaky)
+    extraction, _ = client.match(resume_text="python", vacancy_text="нужен python")
+    assert extraction.confidence == 80
+    assert len(attempts) == 2
+
+    # обе попытки провалились — ошибка пробрасывается (дальше fallback-цепочка)
+    def _always_bad(*, messages, parse, model=None, reasoning=None, json_schema=None):
+        raise ValueError("broken")
+
+    monkeypatch.setattr(client, "_call_llm", _always_bad)
+    with pytest.raises(ValueError):
+        client.match(resume_text="python", vacancy_text="нужен python")
