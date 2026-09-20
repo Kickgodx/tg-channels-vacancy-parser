@@ -25,5 +25,6 @@ constraint: SQLite (тесты) не умеет `ALTER TABLE ADD COLUMN` с FK.
 
 ## Прочее
 
-- Активный план фичей — `ROADMAP.md`, описание настроек — `config.md`.
+- Реализованные фичи описываются в `README.md`; из `ROADMAP.md` выполненный
+  пункт удаляется (план — только про нереализованное). Настройки — `config.md`.
 - Ветки: `feature/<name>` от `master`, мерж через `--no-ff`.

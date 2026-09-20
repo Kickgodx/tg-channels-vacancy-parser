@@ -150,7 +150,7 @@ export default function ResumePanel({ selectedId, onSelect, filterParams }: Prop
           {progress.status === "running" &&
             `Оценено ${progress.processed}/${progress.total} (токены: ${progress.tokens_in}+${progress.tokens_out})`}
           {progress.status === "completed" &&
-            `Готово: ${progress.matched} оценено, ${progress.skipped_cached} уже было, ошибок ${progress.errors}`}
+            `Готово: ${progress.matched} оценено, ${progress.skipped_cached} уже было, ошибок ${progress.errors}. Скоры — в колонке «Match», пояснение — в карточке вакансии.`}
           {progress.status === "cancelled" &&
             `Отменено: ${progress.matched} оценено${progress.error ? ` (${progress.error})` : ""}`}
           {progress.status === "failed" && (

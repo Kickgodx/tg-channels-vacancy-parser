@@ -112,6 +112,32 @@ def cancel_match(match_id: uuid.UUID) -> bool:
     return True
 
 
+def match_single(
+    session, *, resume_text: str, vacancy_id: str, vacancy_text: str, resume_id: int
+):
+    """Синхронная оценка одной пары: вызов LLM + запись в ``vacancy_matches``."""
+    cfg = load_config(get_settings().config_path)
+    max_chars = cfg.ai.max_input_chars
+    client = OpenRouterClient(cfg.ai)
+    try:
+        extraction, usage = client.match_with_fallback(
+            resume_text=resume_text[:max_chars],
+            vacancy_text=vacancy_text[:max_chars],
+        )
+    finally:
+        client.close()
+    return repo.upsert_vacancy_match(
+        session,
+        resume_id=resume_id,
+        vacancy_id=vacancy_id,
+        score=extraction.score,
+        explanation=extraction.explanation,
+        matching_skills=extraction.matching_skills,
+        missing_skills=extraction.missing_skills,
+        model=usage.model,
+    )
+
+
 def _worker(m: ActiveMatch, query: VacancyQuery, limit: int) -> None:
     client: OpenRouterClient | None = None
     try:

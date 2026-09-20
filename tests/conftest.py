@@ -39,3 +39,28 @@ def default_test_config(tmp_path_factory):
     yield cfg
     mp.undo()
     get_settings.cache_clear()
+
+
+@pytest.fixture
+def api_client(monkeypatch, tmp_path, default_test_config):
+    """TestClient на своей SQLite-базе; схема — через alembic (`init_db`)."""
+    from fastapi.testclient import TestClient
+
+    db_file = tmp_path / "api.db"
+    monkeypatch.setenv("CONFIG_PATH", str(default_test_config))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
+    monkeypatch.setenv("JWT_SECRET", "test-secret-value-for-tests")
+
+    from backend.settings import get_settings
+    from backend.db.session import init_db, reset_engine
+
+    get_settings.cache_clear()
+    reset_engine()
+
+    from backend.main import app
+
+    init_db()
+    with TestClient(app) as c:
+        yield c
+    reset_engine()
+    get_settings.cache_clear()

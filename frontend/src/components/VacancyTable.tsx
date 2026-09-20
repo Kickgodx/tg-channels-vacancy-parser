@@ -47,6 +47,8 @@ interface Props {
   sortBy?: VacancySortField;
   sortOrder?: VacancySortOrder;
   onSortChange?: (sortBy: VacancySortField, sortOrder: VacancySortOrder) => void;
+  /** Выбранное резюме — включает матчинг в карточке вакансии. */
+  resumeId?: number | null;
 }
 
 export default function VacancyTable({
@@ -55,6 +57,7 @@ export default function VacancyTable({
   sortBy: sortByProp = "post_date",
   sortOrder: sortOrderProp = "desc",
   onSortChange,
+  resumeId,
 }: Props) {
   const [localSortBy, setLocalSortBy] = useState<VacancySortField>(sortByProp);
   const [localSortOrder, setLocalSortOrder] = useState<VacancySortOrder>(sortOrderProp);
@@ -207,7 +210,12 @@ export default function VacancyTable({
         </table>
       </div>
       {selected && (
-        <VacancyModal vacancy={selected.v} index={selected.idx} onClose={() => setSelected(null)} />
+        <VacancyModal
+          vacancy={selected.v}
+          index={selected.idx}
+          resumeId={resumeId}
+          onClose={() => setSelected(null)}
+        />
       )}
     </>
   );

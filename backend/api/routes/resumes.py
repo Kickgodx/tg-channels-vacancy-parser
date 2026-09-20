@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from backend.api.deps import get_current_user, get_db
 from backend.db import repository as repo
 from backend.db.models import ResumeRow, UserRow
+from backend.db.models import VacancyMatchRow
 from backend.schemas import (
     MatchCreateResponse,
     MatchProgress,
@@ -17,6 +18,7 @@ from backend.schemas import (
     ResumeCreate,
     ResumeListResponse,
     ResumeOut,
+    VacancyMatchOut,
 )
 from backend.services import match_service
 from backend.services.progress_bus import progress_bus
@@ -80,6 +82,65 @@ def delete_resume(
 ) -> None:
     if not repo.delete_resume(db, resume_id, user_id=user.id):
         raise HTTPException(status_code=404, detail="Resume not found")
+
+
+def _match_to_out(row: VacancyMatchRow, *, cached: bool) -> VacancyMatchOut:
+    return VacancyMatchOut(
+        resume_id=row.resume_id,
+        vacancy_id=row.vacancy_id,
+        score=row.score,
+        explanation=row.explanation,
+        matching_skills=row.matching_skills or [],
+        missing_skills=row.missing_skills or [],
+        model=row.model,
+        created_at=row.created_at,
+        cached=cached,
+    )
+
+
+@resumes_router.get("/{resume_id}/match/{vacancy_id}", response_model=VacancyMatchOut)
+def get_vacancy_match(
+    resume_id: int,
+    vacancy_id: str,
+    db: Session = Depends(get_db),
+    user: UserRow = Depends(get_current_user),
+) -> VacancyMatchOut:
+    """Уже посчитанная оценка пары; 404 — если матчинг ещё не запускался."""
+    _get_own_resume(db, resume_id, user)
+    row = repo.get_vacancy_match(db, resume_id=resume_id, vacancy_id=vacancy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Match not found")
+    return _match_to_out(row, cached=True)
+
+
+@resumes_router.post("/{resume_id}/match/{vacancy_id}", response_model=VacancyMatchOut)
+def match_single_vacancy(
+    resume_id: int,
+    vacancy_id: str,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    user: UserRow = Depends(get_current_user),
+) -> VacancyMatchOut:
+    """Оценить одну вакансию синхронно. Без ``force`` возвращает сохранённую оценку."""
+    resume = _get_own_resume(db, resume_id, user)
+    vacancy = repo.get_vacancy_row(db, vacancy_id)
+    if vacancy is None:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+    if not force:
+        existing = repo.get_vacancy_match(db, resume_id=resume_id, vacancy_id=vacancy_id)
+        if existing is not None:
+            return _match_to_out(existing, cached=True)
+    try:
+        row = match_service.match_single(
+            db,
+            resume_id=resume_id,
+            resume_text=resume.text,
+            vacancy_id=vacancy_id,
+            vacancy_text=vacancy.cleaned_text or vacancy.raw_text or "",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM: {e}") from e
+    return _match_to_out(row, cached=False)
 
 
 @resumes_router.post("/{resume_id}/match", response_model=MatchCreateResponse, status_code=202)

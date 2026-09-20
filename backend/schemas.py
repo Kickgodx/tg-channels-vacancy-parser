@@ -214,6 +214,23 @@ class MatchCreateResponse(BaseModel):
     status: Literal["running"] = "running"
 
 
+class VacancyMatchOut(BaseModel):
+    """Оценка одной пары резюме↔вакансия (соло-матчинг из карточки вакансии)."""
+
+    resume_id: int
+    vacancy_id: str
+    score: float
+    explanation: str | None = None
+    matching_skills: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+    model: str
+    created_at: datetime
+    cached: bool = Field(
+        default=False,
+        description="True — оценка взята из БД, без нового вызова LLM.",
+    )
+
+
 MatchStatus = Literal["running", "completed", "failed", "cancelled"]
 
 

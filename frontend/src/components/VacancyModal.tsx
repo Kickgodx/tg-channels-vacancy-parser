@@ -1,12 +1,55 @@
-import type { Vacancy } from "../types/api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { api } from "../api/client";
+import type { Vacancy, VacancyMatch } from "../types/api";
 
 interface Props {
   vacancy: Vacancy;
   index: number;
   onClose: () => void;
+  /** Резюме, выбранное на странице вакансий; без него матчинг недоступен. */
+  resumeId?: number | null;
 }
 
-export default function VacancyModal({ vacancy: v, index, onClose }: Props) {
+function scoreClass(score: number): string {
+  if (score >= 80) return "match-score strong";
+  if (score >= 60) return "match-score partial";
+  return "match-score weak";
+}
+
+export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: Props) {
+  const queryClient = useQueryClient();
+  // Оценка из списка (join vacancy_matches) — стартовое состояние до пересчёта.
+  const [match, setMatch] = useState<VacancyMatch | null>(
+    v.match_score != null
+      ? {
+          resume_id: resumeId ?? 0,
+          vacancy_id: v.id,
+          score: v.match_score,
+          explanation: v.match_explanation,
+          matching_skills: [],
+          missing_skills: [],
+          model: "",
+          created_at: "",
+          cached: true,
+        }
+      : null,
+  );
+
+  const matchM = useMutation({
+    mutationFn: ({ force }: { force: boolean }) =>
+      api.matchVacancy(resumeId as number, v.id, force),
+    onSuccess: (data) => {
+      setMatch(data);
+      void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
+    },
+  });
+
+  const canMatch = resumeId != null;
+  const matchTitle = canMatch
+    ? "LLM оценит, насколько выбранное резюме подходит этой вакансии"
+    : "Сначала выберите резюме в панели над таблицей";
+
   return (
     <div className="modal-overlay" onClick={onClose} role="presentation">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -25,7 +68,49 @@ export default function VacancyModal({ vacancy: v, index, onClose }: Props) {
               Канал
             </a>
           )}
+          <button
+            type="button"
+            disabled={!canMatch || matchM.isPending}
+            title={matchTitle}
+            onClick={() => matchM.mutate({ force: match != null })}
+          >
+            {matchM.isPending
+              ? "Оценка…"
+              : match != null
+                ? "Переоценить резюме"
+                : "Оценить резюме"}
+          </button>
         </div>
+        {matchM.isError && (
+          <p className="error">{(matchM.error as Error).message}</p>
+        )}
+        {match && (
+          <aside className="vacancy-match">
+            <div className="vacancy-match-header">
+              <strong>Соответствие резюме</strong>
+              <span className={scoreClass(match.score)}>{Math.round(match.score)} / 100</span>
+              {match.model && <span className="caption">{match.model}</span>}
+            </div>
+            {match.explanation && <p>{match.explanation}</p>}
+            {match.matching_skills.length > 0 && (
+              <p className="match-skills">
+                <strong className="success">Совпадает:</strong>{" "}
+                {match.matching_skills.join(", ")}
+              </p>
+            )}
+            {match.missing_skills.length > 0 && (
+              <p className="match-skills">
+                <strong className="warning">Не хватает:</strong>{" "}
+                {match.missing_skills.join(", ")}
+              </p>
+            )}
+            {match.cached && !matchM.isSuccess && (
+              <p className="caption">
+                Сохранённая оценка — «Переоценить резюме» запустит LLM заново.
+              </p>
+            )}
+          </aside>
+        )}
         <div className="meta-line">
           {v.post_date && <span>Дата: {new Date(v.post_date).toLocaleString()}</span>}
           {v.detected_salary_avg != null && (

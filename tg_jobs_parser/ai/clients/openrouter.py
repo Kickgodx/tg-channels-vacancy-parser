@@ -189,9 +189,11 @@ class OpenRouterClient:
         messages: list[dict[str, str]],
         parse,
         model: str | None = None,
+        reasoning: bool | None = None,
     ) -> tuple[Any, LLMUsage]:
         """Общий вызов chat.completions: kwargs, usage, метрики, разбор через ``parse``."""
         use_model = model or self._ai.model
+        use_reasoning = self._ai.reasoning_enabled if reasoning is None else reasoning
         kwargs: dict[str, Any] = {
             "model": use_model,
             "messages": messages,
@@ -199,7 +201,7 @@ class OpenRouterClient:
             "max_tokens": self._ai.max_completion_tokens,
         }
         extra_body: dict[str, Any] | None = None
-        if self._ai.reasoning_enabled:
+        if use_reasoning:
             extra_body = {"reasoning": {"enabled": True}}
         else:
             kwargs["response_format"] = {"type": "json_object"}
@@ -272,8 +274,14 @@ class OpenRouterClient:
         vacancy_text: str,
         model: str | None = None,
     ) -> tuple[VacancyMatchExtraction, LLMUsage]:
+        """Матчинг идёт своей моделью (``ai.match_model``) — обычно reasoning."""
         messages = build_match_messages(resume_text=resume_text, vacancy_text=vacancy_text)
-        return self._call_llm(messages=messages, parse=_parse_match, model=model)
+        return self._call_llm(
+            messages=messages,
+            parse=_parse_match,
+            model=model or self._ai.resolved_match_model(),
+            reasoning=self._ai.match_reasoning_enabled,
+        )
 
     def extract_with_fallback(
         self,
@@ -338,8 +346,8 @@ class OpenRouterClient:
             for fb in fallbacks:
                 try:
                     _LOG.warning(
-                        "Основная модель %s недоступна (%s), пробуем fallback: %s",
-                        self._ai.model,
+                        "Модель матчинга %s недоступна (%s), пробуем fallback: %s",
+                        self._ai.resolved_match_model(),
                         first_err,
                         fb,
                     )

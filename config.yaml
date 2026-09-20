@@ -82,6 +82,11 @@ ai:
   provider: openrouter
   # id из llm_models.yaml; fallback — default_fallbacks из того же файла (в UI можно сменить)
   model: google/gemini-2.5-flash-lite
+  # Матчинг резюме ↔ вакансия идёт отдельной моделью: здесь уместна reasoning
+  # (качество важнее скорости — вызовов на порядок меньше, чем при парсинге).
+  # Пусто — берётся model выше. При смене на reasoning-модель включи match_reasoning_enabled.
+  match_model: google/gemini-2.5-flash-lite
+  match_reasoning_enabled: false
   max_posts_per_run: 0
   skip_if_vacancy_score_below: 1
   concurrency: 8
