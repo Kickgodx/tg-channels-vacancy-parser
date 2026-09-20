@@ -201,19 +201,6 @@ class ResumeListResponse(BaseModel):
     items: list[ResumeOut] = Field(default_factory=list)
 
 
-class MatchStartRequest(BaseModel):
-    limit: int = Field(
-        default=100, ge=1, le=500,
-        description="Сколько вакансий оценить (топ по vacancy_score среди отфильтрованных).",
-    )
-    filters: VacancyQuery = Field(default_factory=VacancyQuery)
-
-
-class MatchCreateResponse(BaseModel):
-    match_id: uuid.UUID
-    status: Literal["running"] = "running"
-
-
 class VacancyMatchOut(BaseModel):
     """Оценка одной пары резюме↔вакансия (соло-матчинг из карточки вакансии)."""
 
@@ -229,9 +216,6 @@ class VacancyMatchOut(BaseModel):
         default=False,
         description="True — оценка взята из БД, без нового вызова LLM.",
     )
-
-
-MatchStatus = Literal["running", "completed", "failed", "cancelled"]
 
 
 class AuthCredentials(BaseModel):
@@ -253,17 +237,4 @@ class TokenResponse(BaseModel):
     user: UserOut
 
 
-class MatchProgress(BaseModel):
-    """Состояние матчинга — и ответ GET /matches/{id}, и payload SSE progress."""
 
-    match_id: uuid.UUID
-    resume_id: int
-    status: MatchStatus
-    total: int = 0
-    processed: int = 0
-    matched: int = 0
-    skipped_cached: int = 0
-    errors: int = 0
-    tokens_in: int = 0
-    tokens_out: int = 0
-    error: str | None = None

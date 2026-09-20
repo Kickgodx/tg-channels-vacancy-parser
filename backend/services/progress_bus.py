@@ -1,4 +1,4 @@
-"""Pub/sub прогресса парсинга и матчинга для SSE (in-process, один backend-инстанс)."""
+"""Pub/sub прогресса парсинга для SSE (in-process, один backend-инстанс)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-# Любой сериализуемый снимок прогресса: ParseProgressSnapshot (парсинг)
-# или MatchProgress (матчинг резюме).
+# Любой сериализуемый снимок прогресса (сейчас — ParseProgressSnapshot).
 Snapshot = Any
 
 

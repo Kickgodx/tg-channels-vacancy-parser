@@ -123,7 +123,6 @@ app.include_router(fx.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(filters.router, prefix="/api/v1")
 app.include_router(resumes.resumes_router, prefix="/api/v1")
-app.include_router(resumes.matches_router, prefix="/api/v1")
 
 Instrumentator(
     should_group_status_codes=False,

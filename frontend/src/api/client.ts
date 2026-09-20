@@ -3,7 +3,6 @@ import type {
   CompanyStats,
   ConfigDefaults,
   LlmModelsCatalog,
-  MatchProgress,
   MetricsSummary,
   ProgressEvent,
   Resume,
@@ -270,13 +269,7 @@ export const api = {
     if (!res.ok) throw new Error(`Удаление резюме: ${res.status} ${res.statusText}`);
   },
 
-  startMatch: (resumeId: number, limit: number, filters: Record<string, unknown>) =>
-    request<{ match_id: string; status: string }>(`/resumes/${resumeId}/match`, {
-      method: "POST",
-      body: JSON.stringify({ limit, filters }),
-    }),
-
-  /** Соло-матчинг одной вакансии: без force отдаёт сохранённую оценку, с force — новый вызов LLM. */
+  /** Матчинг одной вакансии: без force отдаёт сохранённую оценку, с force — новый вызов LLM. */
   matchVacancy: (resumeId: number, vacancyId: string, force = false) =>
     request<VacancyMatch>(
       `/resumes/${resumeId}/match/${vacancyId}${force ? "?force=true" : ""}`,
@@ -285,40 +278,6 @@ export const api = {
 
   getVacancyMatch: (resumeId: number, vacancyId: string) =>
     request<VacancyMatch>(`/resumes/${resumeId}/match/${vacancyId}`),
-
-  getMatch: (matchId: string) => request<MatchProgress>(`/matches/${matchId}`),
-
-  cancelMatch: (matchId: string) =>
-    request<{ ok: boolean }>(`/matches/${matchId}/cancel`, { method: "POST" }),
-
-  subscribeMatchEvents(
-    matchId: string,
-    onProgress: (data: MatchProgress) => void,
-    onDone: () => void,
-    onError: (err: Error) => void,
-  ): () => void {
-    // EventSource не умеет заголовки — JWT уходит query-параметром access_token
-    const token = getToken();
-    const es = new EventSource(
-      `${API_BASE}/matches/${matchId}/events${token ? `?access_token=${encodeURIComponent(token)}` : ""}`,
-    );
-    es.addEventListener("progress", (ev) => {
-      try {
-        onProgress(JSON.parse((ev as MessageEvent).data) as MatchProgress);
-      } catch (e) {
-        onError(e instanceof Error ? e : new Error(String(e)));
-      }
-    });
-    es.addEventListener("done", () => {
-      es.close();
-      onDone();
-    });
-    es.onerror = () => {
-      es.close();
-      onError(new Error("SSE connection failed"));
-    };
-    return () => es.close();
-  },
 
   subscribeRunEvents(
     runId: string,

@@ -236,7 +236,6 @@ export default function VacanciesPage() {
           setSortBy(id != null ? "match_score" : "post_date");
           setPage(1);
         }}
-        filterParams={filterParams}
       />
 
       <div className="filters-panel">

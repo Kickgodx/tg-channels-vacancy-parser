@@ -94,28 +94,6 @@ def test_match_upsert_and_join_in_list_vacancies(db_session):
     assert next(v for v in items if v.id == "a").match_score == 55
 
 
-def test_list_vacancies_for_matching_skips_matched(db_session):
-    resume = repo.create_resume(db_session, name="r", text="python")
-    db_session.add_all([_vacancy("a", "x", 9), _vacancy("b", "y", 8), _vacancy("c", "z", 7)])
-    db_session.commit()
-    repo.upsert_vacancy_match(
-        db_session, resume_id=resume.id, vacancy_id="a", score=90,
-        explanation=None, matching_skills=[], missing_skills=[], model="m",
-    )
-    db_session.commit()
-
-    rows, already = repo.list_vacancies_for_matching(
-        db_session, VacancyQuery(), resume_id=resume.id, limit=10
-    )
-    assert already == 1
-    assert [r.id for r in rows] == ["b", "c"]  # по vacancy_score desc
-
-    rows, already = repo.list_vacancies_for_matching(
-        db_session, VacancyQuery(), resume_id=resume.id, limit=1
-    )
-    assert [r.id for r in rows] == ["b"]
-
-
 def test_match_prompt_and_parse():
     assert MATCH_PROMPT_VERSION
     messages = build_match_messages(resume_text="Python, FastAPI", vacancy_text="Нужен Python-разработчик")

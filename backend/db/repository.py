@@ -508,36 +508,4 @@ def upsert_vacancy_match(
     return row
 
 
-def list_vacancies_for_matching(
-    session: Session,
-    query: VacancyQuery,
-    *,
-    resume_id: int,
-    limit: int,
-) -> tuple[list[VacancyRow], int]:
-    """
-    Вакансии по фильтрам, ещё не оценённые для резюме; топ по vacancy_score.
 
-    Возвращает (строки, число уже оценённых в отфильтрованном наборе).
-    """
-    dialect = session.get_bind().dialect.name
-    unmatched_join = and_(
-        VacancyMatchRow.vacancy_id == VacancyRow.id,
-        VacancyMatchRow.resume_id == resume_id,
-    )
-    matched_stmt = apply_vacancy_filters(
-        select(func.count(VacancyRow.id)), query, dialect=dialect
-    ).join(VacancyMatchRow, unmatched_join)
-    already_matched = int(session.scalar(matched_stmt) or 0)
-
-    stmt = (
-        apply_vacancy_filters(select(VacancyRow), query, dialect=dialect)
-        .outerjoin(VacancyMatchRow, unmatched_join)
-        .where(VacancyMatchRow.vacancy_id.is_(None))
-        .order_by(
-            VacancyRow.vacancy_score.desc().nulls_last(),
-            VacancyRow.post_date.desc().nulls_last(),
-        )
-        .limit(limit)
-    )
-    return list(session.scalars(stmt).all()), already_matched

@@ -198,22 +198,6 @@ export interface VacancyMatch {
   cached: boolean;
 }
 
-export type MatchStatus = "running" | "completed" | "failed" | "cancelled";
-
-export interface MatchProgress {
-  match_id: string;
-  resume_id: number;
-  status: MatchStatus;
-  total: number;
-  processed: number;
-  matched: number;
-  skipped_cached: number;
-  errors: number;
-  tokens_in: number;
-  tokens_out: number;
-  error?: string | null;
-}
-
 export interface RunDetail {
   id: string;
   status: RunStatus;

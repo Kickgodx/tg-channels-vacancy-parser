@@ -112,19 +112,19 @@ OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
 
 ### Матчинг резюме к вакансиям
 
-Резюме загружается текстом (панель «Резюме» над таблицей) и оценивается LLM
-против вакансий. Оценки кэшируются парой `(resume_id, vacancy_id)` — повтор
-не тратит токены.
+Резюме загружается текстом (панель «Резюме» над таблицей). Дальше оценка идёт
+**по одной вакансии**: открываете карточку → кнопка «Оценить резюме» рядом с
+«Открыть пост» / «Канал» → синхронный вызов LLM. В карточке появляются score,
+пояснение и списки совпадающих / недостающих навыков.
 
-| Режим | Как | Результат |
-|-------|-----|-----------|
-| **Пакетный** | Кнопка «Оценить совпадение»: top-N вакансий по текущим фильтрам, фоновый воркер с `ai.concurrency`, прогресс по SSE | Скоры в колонке **Match**, сортировка `sort_by=match_score` |
-| **Соло** | Кнопка «Оценить резюме» в карточке вакансии (рядом с «Открыть пост» / «Канал») — синхронный вызов | Score, пояснение и списки совпадающих / недостающих навыков прямо в карточке |
-
-Повторный клик в карточке — «Переоценить резюме» (`force=true`), новый вызов
-LLM. Модель матчинга задаётся отдельно от модели парсинга: `ai.match_model`
-(+ `ai.match_reasoning_enabled` для reasoning-моделей) — качество здесь важнее
-скорости, вызовов на порядок меньше.
+- Оценка сохраняется парой `(resume_id, vacancy_id)`: повторное открытие
+  карточки отдаёт её из БД, токены не тратятся. Кнопка «Переоценить резюме»
+  (`force=true`) запускает LLM заново.
+- Посчитанные скоры видны в колонке **Match**, по ним же работает сортировка
+  (`sort_by=match_score` при выбранном резюме).
+- Модель матчинга задаётся отдельно от модели парсинга: `ai.match_model`
+  (+ `ai.match_reasoning_enabled` для reasoning-моделей) — качество здесь
+  важнее скорости, вызовов на порядок меньше.
 
 ### Аутентификация и per-user данные
 
@@ -181,15 +181,13 @@ uvicorn backend.main:app --reload --port 8000
 | `GET` | `/analytics/salaries` \| `/sources` \| `/companies` | Зарплатные квантили, качество каналов, топ компаний |
 | `GET` `POST` `DELETE` | `/filters` | Пресеты фильтров (приватные) |
 | `GET` `POST` `DELETE` | `/resumes` | Резюме пользователя |
-| `POST` | `/resumes/{id}/match` | Пакетный матчинг по фильтрам (фоновый) |
-| `GET` | `/matches/{id}` + `/events` + `/cancel` | Статус пакетного матчинга, SSE, отмена |
-| `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Соло-матчинг одной вакансии (`force=true` — пересчёт) |
+| `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Оценка соответствия одной вакансии (`force=true` — пересчёт) |
 | `GET` | `/fx/rates`, `POST` `/fx/refresh` \| `/fx/recalculate-rub` | Курсы ЦБ и пересчёт зарплат в ₽ |
 | `GET` | `/ai-cache/stats` | Число записей в кэше LLM |
 | `POST` | `/ai-cache/clear` | Полная очистка кэша LLM |
 
-Приватные разделы (`/filters`, `/resumes`, `/matches`) требуют JWT; остальные
-— `X-API-Key`, если `API_KEY` задан.
+Приватные разделы (`/filters`, `/resumes`) требуют JWT; остальные —
+`X-API-Key`, если `API_KEY` задан.
 
 Кэш ответов LLM хранится в PostgreSQL (`ai_extraction_cache`). Параметры в `config.yaml`: `ai.cache_backend: postgres`, `ai.cache_ttl_days` (0 — без срока, иначе дни). Очистка — кнопка на странице **Запуск** или `POST /ai-cache/clear`.
 
@@ -227,7 +225,7 @@ tg_jobs_parser/
 
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
     api/routes/            — health, auth, config, channels, runs, vacancies,
-                             analytics, filters, resumes/matches, fx, ai-cache
+                             analytics, filters, resumes, fx, ai-cache
     db/                    — модели, Alembic, репозиторий, кэш LLM, UPSERT
   alembic/                 — миграции SQL
     services/              — run_service, match_service, auth_service, progress_bus
