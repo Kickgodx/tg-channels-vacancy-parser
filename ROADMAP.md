@@ -16,6 +16,7 @@
 | 2 | `feature/external-export` | Экспорт в Google Sheets / Notion | нет |
 | 3 | `feature/admin-vacancies` | CMS-админка: редактирование/удаление вакансий | нет |
 | 4 | `feature/cover-letter` | Генерация сопроводительного письма под вакансию | да (миграция 009) |
+| 5 | `feature/webauthn` | Вход по passkey (WebAuthn/FIDO2) поверх пароля | да (таблица `webauthn_credentials`) |
 
 **Про миграции:** цепочка инкрементальная — head сейчас
 `007_auth_multiuser`. Новые фичи просто продолжают её
@@ -148,6 +149,45 @@ backend без `down -v`.
 **Готово, когда:** из карточки вакансии генерируется письмо под связку
 резюме+вакансия, повторное открытие отдаёт сохранённое, текст копируется в
 буфер одной кнопкой.
+
+---
+
+## 5. `feature/webauthn` — вход по passkey (WebAuthn/FIDO2)
+
+Пароль + JWT остаются, но дополнительно — беспарольный вход: публичный ключ
+на сервере, приватный не покидает устройство. Убирает shared secret и даёт
+защиту от фишинга; для локального приложения работает на `localhost` без
+HTTPS (WebAuthn разрешён на secure context, `localhost` им считается).
+
+**БД (новая миграция)**
+
+- Таблица `webauthn_credentials`: `credential_id` (PK, base64url),
+  `user_id` (FK → users, CASCADE), `public_key`, `sign_count`, `name`
+  (метка устройства), `transports`, `created_at`, `last_used_at`.
+  Пароль при этом остаётся — passkey дополняет, а не заменяет вход.
+
+**Backend**
+
+- Зависимость `webauthn` (py_webauthn) — только для backend; настройки
+  `RP_ID`/`RP_NAME`/origin в `Settings` (env `WEBAUTHN_*`, дефолты под
+  localhost).
+- `POST /api/v1/auth/webauthn/register/options` → `.../register/verify` —
+  привязка ключа к текущему пользователю (challenge в памяти/короткий TTL,
+  не в БД).
+- `POST /api/v1/auth/webauthn/login/options` → `.../login/verify` —
+  выдаёт тот же JWT, что и `/auth/login`; `sign_count` обновляется.
+- `GET/DELETE /api/v1/auth/webauthn/credentials` — список и отзыв ключей.
+- В `auth_events_total` — `event="webauthn_login"` (метрика уже есть,
+  лейблы просто расширяются).
+
+**Frontend**
+
+- `@simplewebauthn/browser`; кнопка «Войти по passkey» на форме логина.
+- В настройках профиля — список привязанных ключей с именами и кнопкой
+  «Привязать устройство».
+
+**Готово, когда:** пользователь привязывает ключ, логинится им после
+рестарта backend, отзывает ключ; вход по паролю продолжает работать.
 
 ---
 
