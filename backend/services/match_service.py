@@ -24,6 +24,7 @@ _LOG = logging.getLogger(__name__)
 class ActiveMatch:
     match_id: uuid.UUID
     resume_id: int
+    user_id: int
     cancel: threading.Event = field(default_factory=threading.Event)
     status: str = "running"
     total: int = 0
@@ -44,11 +45,11 @@ class MatchRegistry:
         self._active: ActiveMatch | None = None
         self._matches: dict[uuid.UUID, ActiveMatch] = {}
 
-    def register(self, match_id: uuid.UUID, resume_id: int) -> ActiveMatch:
+    def register(self, match_id: uuid.UUID, resume_id: int, user_id: int) -> ActiveMatch:
         with self._lock:
             if self._active is not None and self._active.status == "running":
                 raise RuntimeError("Уже выполняется другой матчинг резюме")
-            m = ActiveMatch(match_id=match_id, resume_id=resume_id)
+            m = ActiveMatch(match_id=match_id, resume_id=resume_id, user_id=user_id)
             self._active = m
             self._matches[match_id] = m
             return m
@@ -88,9 +89,11 @@ def get_status(match_id: uuid.UUID) -> MatchProgress | None:
     return _progress(m) if m is not None else None
 
 
-def start_match(resume_id: int, query: VacancyQuery, *, limit: int) -> uuid.UUID:
+def start_match(
+    resume_id: int, query: VacancyQuery, *, limit: int, user_id: int
+) -> uuid.UUID:
     match_id = uuid.uuid4()
-    m = match_registry.register(match_id, resume_id)
+    m = match_registry.register(match_id, resume_id, user_id)
     t = threading.Thread(
         target=_worker,
         args=(m, query, limit),

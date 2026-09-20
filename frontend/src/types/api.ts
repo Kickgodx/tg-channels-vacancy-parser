@@ -172,6 +172,20 @@ export interface Resume {
   created_at: string;
 }
 
+export interface AuthUser {
+  id: number;
+  email: string;
+  is_admin: boolean;
+  created_at: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  user: AuthUser;
+}
+
 export type MatchStatus = "running" | "completed" | "failed" | "cancelled";
 
 export interface MatchProgress {

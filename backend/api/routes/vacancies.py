@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_db, verify_api_key
+from backend.api.deps import get_db, get_optional_user, verify_api_key
 from backend.api.params import vacancy_query_from_params
 from backend.db import repository as repo
+from backend.db.models import UserRow
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
 from backend.schemas import VacancyListResponse, VacancySortField, VacancySortOrder
 from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
@@ -105,7 +106,14 @@ def list_vacancies(
     sort_order: VacancySortOrder = "desc",
     resume_id: int | None = None,
     db: Session = Depends(get_db),
+    user: UserRow | None = Depends(get_optional_user),
 ) -> VacancyListResponse:
+    if resume_id is not None:
+        if user is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        resume = repo.get_resume(db, resume_id)
+        if resume is None or resume.user_id != user.id:
+            raise HTTPException(status_code=404, detail="Resume not found")
     query = vacancy_query_from_params(
         page=page,
         page_size=page_size,

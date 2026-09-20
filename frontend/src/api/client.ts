@@ -1,4 +1,5 @@
 import type {
+  AuthUser,
   CompanyStats,
   ConfigDefaults,
   LlmModelsCatalog,
@@ -13,11 +14,35 @@ import type {
   SavedFilter,
   SavedFilterParams,
   SourceStats,
+  TokenResponse,
   Vacancy,
 } from "../types/api";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8000/api/v1";
+
+const TOKEN_KEY = "tgjp_token";
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string | null) {
+  if (token) localStorage.setItem(TOKEN_KEY, token);
+  else localStorage.removeItem(TOKEN_KEY);
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function handleUnauthorized(path: string) {
+  // 401 на самом логине — это «неверные креды», не редирект
+  if (path.startsWith("/auth/")) return;
+  setToken(null);
+  window.location.assign("/login");
+}
 
 export interface RunSummary {
   id: string;
@@ -58,9 +83,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders(),
       ...init?.headers,
     },
   });
+  if (res.status === 401) handleUnauthorized(path);
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -76,6 +103,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<{ status: string; database: boolean }>("/health"),
+
+  login: (email: string, password: string) =>
+    request<TokenResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+
+  register: (email: string, password: string) =>
+    request<TokenResponse>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+
+  me: () => request<AuthUser>("/auth/me"),
+
+  logout: () => {
+    setToken(null);
+    window.location.assign("/login");
+  },
 
   getConfigDefaults: () => request<ConfigDefaults>("/config/defaults"),
 
@@ -173,7 +219,11 @@ export const api = {
     }),
 
   deleteFilter: async (id: number) => {
-    const res = await fetch(`${API_BASE}/filters/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}/filters/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (res.status === 401) handleUnauthorized(`/filters/${id}`);
     if (!res.ok) throw new Error(`Удаление пресета: ${res.status} ${res.statusText}`);
   },
 
@@ -211,7 +261,11 @@ export const api = {
     }),
 
   deleteResume: async (id: number) => {
-    const res = await fetch(`${API_BASE}/resumes/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API_BASE}/resumes/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (res.status === 401) handleUnauthorized(`/resumes/${id}`);
     if (!res.ok) throw new Error(`Удаление резюме: ${res.status} ${res.statusText}`);
   },
 
@@ -232,7 +286,11 @@ export const api = {
     onDone: () => void,
     onError: (err: Error) => void,
   ): () => void {
-    const es = new EventSource(`${API_BASE}/matches/${matchId}/events`);
+    // EventSource не умеет заголовки — JWT уходит query-параметром access_token
+    const token = getToken();
+    const es = new EventSource(
+      `${API_BASE}/matches/${matchId}/events${token ? `?access_token=${encodeURIComponent(token)}` : ""}`,
+    );
     es.addEventListener("progress", (ev) => {
       try {
         onProgress(JSON.parse((ev as MessageEvent).data) as MatchProgress);

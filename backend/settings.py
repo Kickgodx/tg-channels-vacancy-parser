@@ -25,6 +25,9 @@ class Settings(BaseSettings):
         alias="CORS_ORIGINS",
     )
     api_key: str | None = Field(default=None, alias="API_KEY")
+    jwt_secret: str | None = Field(default=None, alias="JWT_SECRET")
+    jwt_ttl_minutes: int = Field(default=60, alias="JWT_TTL_MINUTES")
+    auth_registration_open: bool = Field(default=True, alias="AUTH_REGISTRATION_OPEN")
 
     @property
     def cors_origin_list(self) -> list[str]:
