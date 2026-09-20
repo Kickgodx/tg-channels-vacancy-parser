@@ -217,6 +217,25 @@ class MatchCreateResponse(BaseModel):
 MatchStatus = Literal["running", "completed", "failed", "cancelled"]
 
 
+class AuthCredentials(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=6, max_length=256)
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    is_admin: bool
+    created_at: datetime
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int = Field(description="TTL access-токена в секундах")
+    user: UserOut
+
+
 class MatchProgress(BaseModel):
     """Состояние матчинга — и ответ GET /matches/{id}, и payload SSE progress."""
 

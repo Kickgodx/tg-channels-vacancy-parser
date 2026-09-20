@@ -57,7 +57,16 @@ OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
 # DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
 # CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 # API_KEY=                        # если задан — заголовок X-API-Key для API
+# JWT_SECRET=                     # подпись access-токенов; без него — эфемерный (сессии сгорают при рестарте)
+# JWT_TTL_MINUTES=60              # TTL access-токена
+# AUTH_REGISTRATION_OPEN=true     # false — регистрация закрыта после первого пользователя
 ```
+
+Первый вход в UI — через регистрацию (страница `/login`): первый аккаунт
+становится админом и наследует резюме/пресеты, созданные до появления
+пользователей. Резюме, пресеты фильтров и LLM-матчи — per-user; вакансии,
+прогоны и аналитика — общие. `API_KEY` продолжает защищать общие эндпоинты,
+приватные — JWT (`Authorization: Bearer …`).
 
 ---
 
@@ -333,7 +342,7 @@ pytest
 - [x] FastAPI + PostgreSQL + React UI + Docker Compose
 - [ ] Alembic-миграции, восстановление прогресса после рестарта backend
 - [ ] Расширение Telethon: joinchat, rate-limit
-- [ ] JWT / multi-user (сейчас — один локальный оператор, опциональный `API_KEY`)
+- [x] JWT / multi-user (per-user резюме, пресеты, матчи; общие вакансии)
 
 Активный план фичей — см. [ROADMAP.md](ROADMAP.md): дашборд аналитики,
 трекер откликов, полнотекстовый поиск, матчинг резюме, экспорт в

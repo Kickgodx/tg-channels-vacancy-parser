@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes import (
     ai_cache,
     analytics,
+    auth,
     channels,
     config,
     filters,
@@ -111,6 +112,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(config.router, prefix="/api/v1")
 app.include_router(channels.router, prefix="/api/v1")

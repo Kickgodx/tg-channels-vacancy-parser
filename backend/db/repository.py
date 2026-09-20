@@ -21,6 +21,7 @@ from backend.db.models import (
     ParseRunRow,
     ResumeRow,
     SavedFilterRow,
+    UserRow,
     VacancyMatchRow,
     VacancyRow,
 )
@@ -353,29 +354,73 @@ def metrics_from_run(row: ParseRunRow) -> MetricsSummary | None:
     return MetricsSummary.model_validate(row.metrics)
 
 
-def list_saved_filters(session: Session) -> list[SavedFilterRow]:
-    stmt = select(SavedFilterRow).order_by(SavedFilterRow.name.asc())
-    return list(session.scalars(stmt))
+def get_user(session: Session, user_id: int) -> UserRow | None:
+    return session.get(UserRow, user_id)
 
 
-def create_saved_filter(session: Session, *, name: str, params: dict) -> SavedFilterRow:
-    row = SavedFilterRow(name=name, params=params)
+def get_user_by_email(session: Session, email: str) -> UserRow | None:
+    return session.scalar(select(UserRow).where(UserRow.email == email.lower()))
+
+
+def count_users(session: Session) -> int:
+    return int(session.scalar(select(func.count(UserRow.id))) or 0)
+
+
+def create_user(
+    session: Session, *, email: str, password_hash: str, is_admin: bool = False
+) -> UserRow:
+    row = UserRow(
+        email=email.lower(),
+        password_hash=password_hash,
+        is_admin=is_admin,
+    )
     session.add(row)
     session.flush()
     return row
 
 
-def delete_saved_filter(session: Session, filter_id: int) -> bool:
+def claim_legacy_rows(session: Session, user_id: int) -> None:
+    """Привязать ещё ничьи строки (user_id IS NULL) к пользователю — backfill миграции 007."""
+    for model in (ResumeRow, SavedFilterRow):
+        session.execute(
+            update(model).where(model.user_id.is_(None)).values(user_id=user_id)
+        )
+
+
+def list_saved_filters(
+    session: Session, user_id: int | None = None
+) -> list[SavedFilterRow]:
+    """user_id=None — без скоупа (тесты/служебные вызовы); роуты всегда передают id."""
+    stmt = select(SavedFilterRow).order_by(SavedFilterRow.name.asc())
+    if user_id is not None:
+        stmt = stmt.where(SavedFilterRow.user_id == user_id)
+    return list(session.scalars(stmt))
+
+
+def create_saved_filter(
+    session: Session, *, name: str, params: dict, user_id: int | None = None
+) -> SavedFilterRow:
+    row = SavedFilterRow(name=name, params=params, user_id=user_id)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def delete_saved_filter(
+    session: Session, filter_id: int, user_id: int | None = None
+) -> bool:
     row = session.get(SavedFilterRow, filter_id)
-    if row is None:
+    if row is None or (user_id is not None and row.user_id != user_id):
         return False
     session.delete(row)
     session.flush()
     return True
 
 
-def list_resumes(session: Session) -> list[ResumeRow]:
+def list_resumes(session: Session, user_id: int | None = None) -> list[ResumeRow]:
     stmt = select(ResumeRow).order_by(ResumeRow.created_at.desc(), ResumeRow.id.desc())
+    if user_id is not None:
+        stmt = stmt.where(ResumeRow.user_id == user_id)
     return list(session.scalars(stmt))
 
 
@@ -384,17 +429,22 @@ def get_resume(session: Session, resume_id: int) -> ResumeRow | None:
 
 
 def create_resume(
-    session: Session, *, name: str, text: str, skills: list | None = None
+    session: Session,
+    *,
+    name: str,
+    text: str,
+    skills: list | None = None,
+    user_id: int | None = None,
 ) -> ResumeRow:
-    row = ResumeRow(name=name, text=text, skills_json=skills)
+    row = ResumeRow(name=name, text=text, skills_json=skills, user_id=user_id)
     session.add(row)
     session.flush()
     return row
 
 
-def delete_resume(session: Session, resume_id: int) -> bool:
+def delete_resume(session: Session, resume_id: int, user_id: int | None = None) -> bool:
     row = session.get(ResumeRow, resume_id)
-    if row is None:
+    if row is None or (user_id is not None and row.user_id != user_id):
         return False
     session.query(VacancyMatchRow).filter(VacancyMatchRow.resume_id == resume_id).delete()
     session.delete(row)
