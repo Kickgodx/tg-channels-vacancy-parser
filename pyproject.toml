@@ -33,7 +33,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Poetry: poetry install --extras telethon — опционально cryptg для ускорения Telethon на Windows
-dev = ["pytest>=8.0.0"]
+dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0"]
 telethon = ["cryptg>=0.5.0"]
 
 [project.scripts]

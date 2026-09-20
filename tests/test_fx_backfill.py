@@ -51,6 +51,11 @@ def test_backfill_db_rates_only_uses_latest_in_db(db_session, monkeypatch):
         post_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
         detected_salary_avg_rub=None,
     )
+    # UPSERT сам подтягивает «последний курс»: без подмены он сходил бы в ЦБ
+    # и положил в БД сегодняшний курс, который перебил бы засеянный выше.
+    monkeypatch.setattr(
+        fx_repo, "ensure_latest_rates", lambda *_a, **_k: (d, {"RUB": 1.0, "USD": 80.0})
+    )
     upsert_vacancies(db_session, [v], parse_run_id=uuid.uuid4(), fx_config=fx_cfg)
     db_session.commit()
 
