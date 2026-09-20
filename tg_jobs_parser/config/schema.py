@@ -384,6 +384,19 @@ class FxConfig(BaseModel):
     request_timeout_seconds: float = 20.0
 
 
+class RetentionConfig(BaseModel):
+    """Хранение вакансий: TTL → soft delete (archived_at)."""
+
+    vacancy_ttl_days: int = Field(
+        default=40,
+        ge=0,
+        description=(
+            "Через сколько дней архивировать вакансию (по post_date, "
+            "а без неё — по parsed_at). 0 — не архивировать."
+        ),
+    )
+
+
 class OutputConfig(BaseModel):
     directory: str = "output"
     excel_filename: str = "vacancies.xlsx"
@@ -427,6 +440,7 @@ class AppConfig(BaseModel):
     filters: FiltersConfig = Field(default_factory=FiltersConfig)
     parser: ParserConfig = Field(default_factory=ParserConfig)
     fx: FxConfig = Field(default_factory=FxConfig)
+    retention: RetentionConfig = Field(default_factory=RetentionConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     dictionaries: DictionariesConfig = Field(default_factory=DictionariesConfig)

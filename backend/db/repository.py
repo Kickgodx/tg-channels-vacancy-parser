@@ -44,7 +44,14 @@ class VacancyUpsertStats:
 
 _LOG = logging.getLogger(__name__)
 
-VACANCY_TTL_DAYS = 40
+VACANCY_TTL_DAYS = 40  # fallback, если config.yaml не загружается
+
+
+def _vacancy_ttl_days() -> int:
+    try:
+        return load_config(get_settings().config_path).retention.vacancy_ttl_days
+    except Exception:
+        return VACANCY_TTL_DAYS
 
 _SORT_COLUMNS: dict[VacancySortField, object] = {
     "post_date": VacancyRow.post_date,
@@ -221,10 +228,14 @@ def archive_expired_vacancies(
     session: Session,
     *,
     now: datetime | None = None,
+    ttl_days: int | None = None,
 ) -> int:
-    """Архивировать (soft delete) вакансии старше 40 суток по дате поста или сохранения."""
+    """Архивировать (soft delete) вакансии старше TTL суток (post_date или parsed_at)."""
+    ttl = ttl_days if ttl_days is not None else _vacancy_ttl_days()
+    if ttl <= 0:
+        return 0
     now = now or datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=VACANCY_TTL_DAYS)
+    cutoff = now - timedelta(days=ttl)
     result = session.execute(
         update(VacancyRow)
         .where(
