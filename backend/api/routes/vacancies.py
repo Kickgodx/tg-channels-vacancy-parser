@@ -4,16 +4,52 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_db, get_optional_user, verify_api_key
+from backend.api.deps import get_current_user, get_db, get_optional_user, verify_api_key
 from backend.api.params import vacancy_query_from_params
 from backend.db import repository as repo
 from backend.db.models import UserRow
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
-from backend.schemas import VacancyListResponse, VacancySortField, VacancySortOrder
+from backend.schemas import (
+    VacancyImportItemResult,
+    VacancyImportRequest,
+    VacancyImportResponse,
+    VacancyListResponse,
+    VacancySortField,
+    VacancySortOrder,
+)
+from backend.services import import_service
 from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
 from tg_jobs_parser.models.metrics import MetricsSummary
 
 router = APIRouter(prefix="/vacancies", tags=["vacancies"], dependencies=[Depends(verify_api_key)])
+
+
+@router.post("/import", response_model=VacancyImportResponse)
+def import_vacancies(
+    body: VacancyImportRequest,
+    db: Session = Depends(get_db),
+    user: UserRow = Depends(get_current_user),
+) -> VacancyImportResponse:
+    """Импорт вакансий из текста: rules + LLM-разбор и запись в БД (как в прогоне)."""
+    texts = [t.strip() for t in body.texts]
+    if not any(texts):
+        raise HTTPException(status_code=400, detail="Пустой текст вакансии")
+    source_url = (body.source_url or "").strip() or None
+    result = import_service.import_vacancy_texts(db, texts, source_url=source_url)
+    items = [
+        VacancyImportItemResult(
+            index=it.index, status=it.status, message=it.message, vacancy=it.vacancy
+        )
+        for it in result.items
+    ]
+    return VacancyImportResponse(
+        items=items,
+        created=sum(1 for it in items if it.status == "created"),
+        existing=sum(1 for it in items if it.status == "exists"),
+        rejected=sum(1 for it in items if it.status in ("not_vacancy", "error")),
+        ai_enabled=result.ai_enabled,
+        warning=result.warning,
+    )
 
 
 @router.get("/export.xlsx")

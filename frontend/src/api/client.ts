@@ -15,6 +15,7 @@ import type {
   SourceStats,
   TokenResponse,
   Vacancy,
+  VacancyImportResponse,
   VacancyMatch,
 } from "../types/api";
 
@@ -251,6 +252,13 @@ export const api = {
 
   exportRunUrl: (runId: string, kind: "xlsx" | "json") =>
     `${API_BASE}/runs/${runId}/export.${kind}`,
+
+  /** Ручной импорт: тексты вакансий → rules + LLM → запись в БД. */
+  importVacancies: (texts: string[], sourceUrl?: string) =>
+    request<VacancyImportResponse>("/vacancies/import", {
+      method: "POST",
+      body: JSON.stringify({ texts, source_url: sourceUrl || null }),
+    }),
 
   listResumes: () => request<{ items: Resume[] }>("/resumes"),
 

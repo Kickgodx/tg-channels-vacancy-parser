@@ -163,13 +163,15 @@ def upsert_vacancies(
     session: Session,
     vacancies: list[Vacancy],
     *,
-    parse_run_id: uuid.UUID,
+    parse_run_id: uuid.UUID | None,
     fx_config: FxConfig | None = None,
 ) -> VacancyUpsertStats:
     """
     Вставка уникальных вакансий по ``id`` (content hash).
 
     При совпадении текста обновляются только ``last_parse_run_id`` и ``updated_at``.
+    ``parse_run_id=None`` — ручной импорт без прогона: существующая привязка
+    к прогону при update не затирается.
     """
     if not vacancies:
         return VacancyUpsertStats()
@@ -198,16 +200,18 @@ def upsert_vacancies(
             data["parsed_at"] = now
         stmt = insert(VacancyRow).values(**data)
         if is_existing:
+            conflict_set = {
+                "updated_at": now,
+                "detected_salary_avg_rub": data["detected_salary_avg_rub"],
+                "ai_notes": data["ai_notes"],
+                "ai_confidence": data["ai_confidence"],
+                "extraction_source": data["extraction_source"],
+            }
+            if parse_run_id is not None:
+                conflict_set["last_parse_run_id"] = parse_run_id
             stmt = stmt.on_conflict_do_update(
                 index_elements=["id"],
-                set_={
-                    "last_parse_run_id": parse_run_id,
-                    "updated_at": now,
-                    "detected_salary_avg_rub": data["detected_salary_avg_rub"],
-                    "ai_notes": data["ai_notes"],
-                    "ai_confidence": data["ai_confidence"],
-                    "extraction_source": data["extraction_source"],
-                },
+                set_=conflict_set,
             )
             updated_existing += 1
         else:

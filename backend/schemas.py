@@ -230,6 +230,36 @@ class VacancyMatchOut(BaseModel):
     )
 
 
+class VacancyImportRequest(BaseModel):
+    """Ручной импорт: тексты вакансий (например, скопированные с HH) + опциональная ссылка."""
+
+    texts: list[str] = Field(min_length=1, max_length=50)
+    source_url: str | None = Field(
+        default=None,
+        max_length=2048,
+        description="Ссылка на оригинал (hh.ru и т.п.) — сохраняется как post_url.",
+    )
+
+
+VacancyImportStatus = Literal["created", "exists", "not_vacancy", "error"]
+
+
+class VacancyImportItemResult(BaseModel):
+    index: int
+    status: VacancyImportStatus
+    message: str | None = None
+    vacancy: Vacancy | None = None
+
+
+class VacancyImportResponse(BaseModel):
+    items: list[VacancyImportItemResult]
+    created: int
+    existing: int
+    rejected: int
+    ai_enabled: bool
+    warning: str | None = None
+
+
 class AuthCredentials(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=6, max_length=256)

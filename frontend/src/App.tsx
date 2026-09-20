@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { api, getToken } from "./api/client";
 import DashboardPage from "./pages/DashboardPage";
+import ImportPage from "./pages/ImportPage";
 import LoginPage from "./pages/LoginPage";
 import ResumesPage from "./pages/ResumesPage";
 import VacanciesPage from "./pages/VacanciesPage";
@@ -38,6 +39,7 @@ export default function App() {
           <NavLink to="/" end>
             Парсинг
           </NavLink>
+          <NavLink to="/import">Импорт</NavLink>
           <NavLink to="/vacancies">Вакансии</NavLink>
           <NavLink to="/resumes">Резюме</NavLink>
           <UserBadge />
@@ -58,6 +60,14 @@ export default function App() {
           element={
             <RequireAuth>
               <RunPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/import"
+          element={
+            <RequireAuth>
+              <ImportPage />
             </RequireAuth>
           }
         />

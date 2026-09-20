@@ -218,6 +218,24 @@ export interface VacancyMatch {
   cached: boolean;
 }
 
+export type VacancyImportStatus = "created" | "exists" | "not_vacancy" | "error";
+
+export interface VacancyImportItem {
+  index: number;
+  status: VacancyImportStatus;
+  message?: string | null;
+  vacancy?: Vacancy | null;
+}
+
+export interface VacancyImportResponse {
+  items: VacancyImportItem[];
+  created: number;
+  existing: number;
+  rejected: number;
+  ai_enabled: boolean;
+  warning?: string | null;
+}
+
 export interface RunDetail {
   id: string;
   status: RunStatus;
