@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, type VacancyQueryParams } from "../api/client";
 import AnalyticsPanel from "../components/AnalyticsPanel";
 import MetricsCharts from "../components/MetricsCharts";
@@ -59,21 +60,46 @@ export default function VacanciesPage() {
     },
   });
 
-  const [page, setPage] = useState(1);
-  const [q, setQ] = useState("");
-  const [sourceChannel, setSourceChannel] = useState("");
-  const [grade, setGrade] = useState("");
-  const [specializations, setSpecializations] = useState<string[]>([]);
-  const [workFormat, setWorkFormat] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [hasSalaryOnly, setHasSalaryOnly] = useState(false);
-  const [sortBy, setSortBy] = useState<VacancySortField>("post_date");
-  const [sortOrder, setSortOrder] = useState<VacancySortOrder>("desc");
-  const [tab, setTab] = useState<VacanciesTab>("list");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const rawPage = Number(searchParams.get("page"));
+  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+  const q = searchParams.get("q") ?? "";
+  const sourceChannel = searchParams.get("source_channel") ?? "";
+  const grade = searchParams.get("grade") ?? "";
+  const specializations = useMemo(() => searchParams.getAll("specialization"), [searchParams]);
+  const workFormat = searchParams.get("work_format") ?? "";
+  const dateFrom = searchParams.get("date_from") ?? "";
+  const dateTo = searchParams.get("date_to") ?? "";
+  const hasSalaryOnly = searchParams.get("has_salary") === "true";
+  const rawSortBy = searchParams.get("sort_by");
+  const sortBy: VacancySortField = SORTABLE_COLUMNS.includes(rawSortBy as VacancySortField)
+    ? (rawSortBy as VacancySortField)
+    : "post_date";
+  const sortOrder: VacancySortOrder = searchParams.get("sort_order") === "asc" ? "asc" : "desc";
+  const tab: VacanciesTab = searchParams.get("tab") === "analytics" ? "analytics" : "list";
+  const rawResumeId = Number(searchParams.get("resume_id"));
+  const resumeId = Number.isInteger(rawResumeId) && rawResumeId > 0 ? rawResumeId : null;
+
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presetName, setPresetName] = useState("");
-  const [resumeId, setResumeId] = useState<number | null>(null);
+
+  const updateParams = (patch: Record<string, string | number | string[] | null>) => {
+    const next = new URLSearchParams(searchParams);
+    if (!("page" in patch)) next.delete("page");
+    Object.entries(patch).forEach(([k, v]) => {
+      next.delete(k);
+      if (v == null) return;
+      if (Array.isArray(v)) {
+        v.forEach((item) => {
+          if (item !== "") next.append(k, item);
+        });
+      } else if (v !== "") {
+        next.set(k, String(v));
+      }
+    });
+    setSearchParams(next, { replace: true });
+  };
 
   const filterParams = useMemo(
     () =>
@@ -149,19 +175,18 @@ export default function VacanciesPage() {
 
   const applyPreset = (f: SavedFilter) => {
     const p = f.params;
-    setQ(p.q ?? "");
-    setSourceChannel(p.source_channel ?? "");
-    setGrade(p.grade ?? "");
-    setSpecializations(p.specializations ?? []);
-    setWorkFormat(p.work_format ?? "");
-    setDateFrom(p.date_from ?? "");
-    setDateTo(p.date_to ?? "");
-    setHasSalaryOnly(!!p.has_salary);
-    if (SORTABLE_COLUMNS.includes(p.sort_by as VacancySortField)) {
-      setSortBy(p.sort_by as VacancySortField);
-    }
-    if (p.sort_order === "asc" || p.sort_order === "desc") setSortOrder(p.sort_order);
-    setPage(1);
+    updateParams({
+      q: p.q ?? null,
+      source_channel: p.source_channel ?? null,
+      grade: p.grade ?? null,
+      specialization: p.specializations ?? [],
+      work_format: p.work_format ?? null,
+      date_from: p.date_from ?? null,
+      date_to: p.date_to ?? null,
+      has_salary: p.has_salary ? "true" : null,
+      sort_by: SORTABLE_COLUMNS.includes(p.sort_by as VacancySortField) ? p.sort_by ?? null : null,
+      sort_order: p.sort_order === "asc" || p.sort_order === "desc" ? p.sort_order : null,
+    });
   };
 
   const presets = presetsQ.data?.items ?? [];
@@ -231,11 +256,12 @@ export default function VacanciesPage() {
 
       <ResumePanel
         selectedId={resumeId}
-        onSelect={(id) => {
-          setResumeId(id);
-          setSortBy(id != null ? "match_score" : "post_date");
-          setPage(1);
-        }}
+        onSelect={(id) =>
+          updateParams({
+            resume_id: id,
+            sort_by: id != null ? "match_score" : null,
+          })
+        }
       />
 
       <div className="filters-panel">
@@ -243,20 +269,14 @@ export default function VacanciesPage() {
           type="search"
           placeholder="Поиск по тексту…"
           value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setPage(1);
-          }}
+          onChange={(e) => updateParams({ q: e.target.value })}
         />
         <input
           placeholder="Канал (@name)"
           value={sourceChannel}
-          onChange={(e) => {
-            setSourceChannel(e.target.value);
-            setPage(1);
-          }}
+          onChange={(e) => updateParams({ source_channel: e.target.value })}
         />
-        <select value={grade} onChange={(e) => { setGrade(e.target.value); setPage(1); }}>
+        <select value={grade} onChange={(e) => updateParams({ grade: e.target.value })}>
           <option value="">Любой грейд</option>
           {gradeOptions.filter((g) => g !== "unknown").map((g) => (
             <option key={g} value={g}>
@@ -265,7 +285,7 @@ export default function VacanciesPage() {
           ))}
           <option value="unknown">unknown</option>
         </select>
-        <select value={workFormat} onChange={(e) => { setWorkFormat(e.target.value); setPage(1); }}>
+        <select value={workFormat} onChange={(e) => updateParams({ work_format: e.target.value })}>
           <option value="">Любой формат</option>
           {(defaultsQ.data?.work_format_options ?? []).map((wf) => (
             <option key={wf} value={wf}>
@@ -275,20 +295,17 @@ export default function VacanciesPage() {
         </select>
         <label>
           Дата от
-          <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} />
+          <input type="date" value={dateFrom} onChange={(e) => updateParams({ date_from: e.target.value })} />
         </label>
         <label>
           Дата до
-          <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} />
+          <input type="date" value={dateTo} onChange={(e) => updateParams({ date_to: e.target.value })} />
         </label>
         <label className="checkbox-row filters-salary-only">
           <input
             type="checkbox"
             checked={hasSalaryOnly}
-            onChange={(e) => {
-              setHasSalaryOnly(e.target.checked);
-              setPage(1);
-            }}
+            onChange={(e) => updateParams({ has_salary: e.target.checked ? "true" : null })}
           />
           Только с указанной зарплатой
         </label>
@@ -301,12 +318,13 @@ export default function VacanciesPage() {
             <input
               type="checkbox"
               checked={specializations.includes(s)}
-              onChange={() => {
-                setSpecializations((prev) =>
-                  prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
-                );
-                setPage(1);
-              }}
+              onChange={() =>
+                updateParams({
+                  specialization: specializations.includes(s)
+                    ? specializations.filter((x) => x !== s)
+                    : [...specializations, s],
+                })
+              }
             />
             {s}
           </label>
@@ -376,7 +394,7 @@ export default function VacanciesPage() {
           role="tab"
           aria-selected={tab === "list"}
           className={`page-tab${tab === "list" ? " active" : ""}`}
-          onClick={() => setTab("list")}
+          onClick={() => updateParams({ tab: null, page: page > 1 ? page : null })}
         >
           Список
         </button>
@@ -385,7 +403,7 @@ export default function VacanciesPage() {
           role="tab"
           aria-selected={tab === "analytics"}
           className={`page-tab${tab === "analytics" ? " active" : ""}`}
-          onClick={() => setTab("analytics")}
+          onClick={() => updateParams({ tab: "analytics", page: page > 1 ? page : null })}
         >
           Аналитика
         </button>
@@ -406,20 +424,22 @@ export default function VacanciesPage() {
                   resumeId={resumeId}
                   sortBy={sortBy}
                   sortOrder={sortOrder}
-                  onSortChange={(by, order) => {
-                    setSortBy(by);
-                    setSortOrder(order);
-                    setPage(1);
-                  }}
+                  onSortChange={(by, order) => updateParams({ sort_by: by, sort_order: order })}
                 />
               ) : (
                 <p>Нет вакансий по выбранным фильтрам.</p>
               )}
               <div className="pager">
-                <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                <button
+                  disabled={page <= 1}
+                  onClick={() => updateParams({ page: page - 1 > 1 ? page - 1 : null })}
+                >
                   Назад
                 </button>
-                <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                <button
+                  disabled={page >= totalPages}
+                  onClick={() => updateParams({ page: page + 1 })}
+                >
                   Вперёд
                 </button>
               </div>
