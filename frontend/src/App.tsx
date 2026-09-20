@@ -3,6 +3,7 @@ import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom"
 import { api, getToken } from "./api/client";
 import DashboardPage from "./pages/DashboardPage";
 import LoginPage from "./pages/LoginPage";
+import ResumesPage from "./pages/ResumesPage";
 import VacanciesPage from "./pages/VacanciesPage";
 import RunPage from "./pages/RunPage";
 
@@ -35,9 +36,10 @@ export default function App() {
       {authed && (
         <nav>
           <NavLink to="/" end>
-            Запуск
+            Парсинг
           </NavLink>
           <NavLink to="/vacancies">Вакансии</NavLink>
+          <NavLink to="/resumes">Резюме</NavLink>
           <UserBadge />
         </nav>
       )}
@@ -64,6 +66,14 @@ export default function App() {
           element={
             <RequireAuth>
               <VacanciesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/resumes"
+          element={
+            <RequireAuth>
+              <ResumesPage />
             </RequireAuth>
           }
         />

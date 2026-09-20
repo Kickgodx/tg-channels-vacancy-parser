@@ -260,6 +260,12 @@ export const api = {
       body: JSON.stringify({ name, text }),
     }),
 
+  updateResume: (id: number, name: string, text: string) =>
+    request<Resume>(`/resumes/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, text }),
+    }),
+
   deleteResume: async (id: number) => {
     const res = await fetch(`${API_BASE}/resumes/${id}`, {
       method: "DELETE",

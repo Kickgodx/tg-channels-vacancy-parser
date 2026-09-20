@@ -140,6 +140,41 @@ def test_resumes_are_per_user(client: TestClient):
     )
 
 
+def test_resume_update(client: TestClient):
+    t1 = _register(client, "a@example.com").json()["access_token"]
+    t2 = _register(client, "b@example.com").json()["access_token"]
+
+    rid = client.post(
+        "/api/v1/resumes",
+        headers=_auth(t1),
+        json={"name": "CV", "text": "old text"},
+    ).json()["id"]
+
+    assert (
+        client.put(
+            f"/api/v1/resumes/{rid}", headers=_auth(t2), json={"name": "x"}
+        ).status_code
+        == 404
+    )
+    assert client.put(f"/api/v1/resumes/{rid}", json={"name": "x"}).status_code == 401
+
+    r = client.put(
+        f"/api/v1/resumes/{rid}",
+        headers=_auth(t1),
+        json={"name": "CV v2", "text": "new text"},
+    )
+    assert r.status_code == 200
+    assert r.json()["name"] == "CV v2"
+    assert r.json()["text"] == "new text"
+
+    r = client.put(
+        f"/api/v1/resumes/{rid}", headers=_auth(t1), json={"text": "newer text"}
+    )
+    assert r.status_code == 200
+    assert r.json()["name"] == "CV v2"
+    assert r.json()["text"] == "newer text"
+
+
 def test_saved_filters_are_per_user(client: TestClient):
     t1 = _register(client, "a@example.com").json()["access_token"]
     t2 = _register(client, "b@example.com").json()["access_token"]

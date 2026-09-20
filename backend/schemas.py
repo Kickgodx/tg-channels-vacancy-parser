@@ -190,6 +190,11 @@ class ResumeCreate(BaseModel):
     text: str = Field(min_length=1)
 
 
+class ResumeUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    text: str | None = Field(default=None, min_length=1)
+
+
 class ResumeOut(BaseModel):
     id: int
     name: str

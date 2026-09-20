@@ -10,6 +10,7 @@ from backend.schemas import (
     ResumeCreate,
     ResumeListResponse,
     ResumeOut,
+    ResumeUpdate,
     VacancyMatchOut,
 )
 from backend.services import match_service
@@ -54,6 +55,20 @@ def get_resume(
     user: UserRow = Depends(get_current_user),
 ) -> ResumeOut:
     return _to_out(_get_own_resume(db, resume_id, user))
+
+
+@resumes_router.put("/{resume_id}", response_model=ResumeOut)
+def update_resume(
+    resume_id: int,
+    body: ResumeUpdate,
+    db: Session = Depends(get_db),
+    user: UserRow = Depends(get_current_user),
+) -> ResumeOut:
+    name = body.name.strip() if body.name is not None else None
+    row = repo.update_resume(db, resume_id, user_id=user.id, name=name, text=body.text)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return _to_out(row)
 
 
 @resumes_router.delete("/{resume_id}", status_code=204)
