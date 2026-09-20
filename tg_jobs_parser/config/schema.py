@@ -179,6 +179,13 @@ class AiConfig(BaseModel):
         default=False,
         description="true для reasoning-модели матчинга (OpenRouter reasoning вместо json_object).",
     )
+    cover_letter_model: str = Field(
+        default="",
+        description=(
+            "Модель для генерации сопроводительных писем. "
+            "Пусто — берётся ``match_model``, затем ``model``."
+        ),
+    )
     base_url: str = Field(default="https://openrouter.ai/api/v1")
     max_input_chars: int = Field(default=6000, ge=500, le=32000)
     max_posts_per_run: int = Field(
@@ -271,6 +278,10 @@ class AiConfig(BaseModel):
     def resolved_match_model(self) -> str:
         """Модель матчинга: ``match_model`` или, если не задана, основная ``model``."""
         return self.match_model.strip() or self.model.strip()
+
+    def resolved_cover_letter_model(self) -> str:
+        """Модель писем: ``cover_letter_model`` → ``match_model`` → ``model``."""
+        return self.cover_letter_model.strip() or self.resolved_match_model()
 
     def resolved_fallback_models(self) -> list[str]:
         """Запасные модели без дубликатов и без совпадения с ``model``."""

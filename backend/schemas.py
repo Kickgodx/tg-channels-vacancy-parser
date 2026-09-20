@@ -230,6 +230,35 @@ class VacancyMatchOut(BaseModel):
     )
 
 
+CoverLetterTone = Literal["neutral", "friendly", "formal"]
+
+
+class CoverLetterRequest(BaseModel):
+    """Параметры генерации сопроводительного письма (тело POST)."""
+
+    tone: CoverLetterTone = "neutral"
+    extra_notes: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="Свободные пожелания к письму (акценты, что упомянуть).",
+    )
+
+
+class CoverLetterOut(BaseModel):
+    """Сгенерированное письмо для пары резюме↔вакансия."""
+
+    resume_id: int
+    vacancy_id: str
+    text: str
+    tone: str
+    model: str
+    created_at: datetime
+    cached: bool = Field(
+        default=False,
+        description="True — текст взят из БД, без нового вызова LLM.",
+    )
+
+
 class VacancyImportRequest(BaseModel):
     """Ручной импорт: тексты вакансий (например, скопированные с HH) + опциональная ссылка."""
 

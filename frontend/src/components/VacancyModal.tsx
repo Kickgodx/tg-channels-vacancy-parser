@@ -1,7 +1,14 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { MatchImportance, SkillMatch, Vacancy, VacancyMatch } from "../types/api";
+import type {
+  CoverLetter,
+  CoverLetterTone,
+  MatchImportance,
+  SkillMatch,
+  Vacancy,
+  VacancyMatch,
+} from "../types/api";
 
 interface Props {
   vacancy: Vacancy;
@@ -45,6 +52,12 @@ const BREAKDOWN_ROWS: [keyof NonNullable<VacancyMatch["breakdown"]>, string][] =
   ["work_format_match", "Формат работы"],
 ];
 
+const TONE_OPTIONS: { value: CoverLetterTone; label: string }[] = [
+  { value: "neutral", label: "Нейтральный" },
+  { value: "friendly", label: "Дружелюбный" },
+  { value: "formal", label: "Формальный" },
+];
+
 export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: Props) {
   const queryClient = useQueryClient();
   // Оценка из списка (join vacancy_matches) — стартовое состояние до пересчёта.
@@ -78,6 +91,55 @@ export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: P
     ? "LLM оценит, насколько выбранное резюме подходит этой вакансии"
     : "Сначала выберите резюме в панели над таблицей";
 
+  // Сопроводительное письмо: сохранённый вариант подтягивается при открытии.
+  const [letter, setLetter] = useState<CoverLetter | null>(null);
+  const [letterDraft, setLetterDraft] = useState("");
+  const [letterTone, setLetterTone] = useState<CoverLetterTone>("neutral");
+  const [letterCopied, setLetterCopied] = useState(false);
+
+  const savedLetterQ = useQuery({
+    queryKey: ["cover-letter", resumeId, v.id],
+    queryFn: () =>
+      api.getCoverLetter(resumeId as number, v.id).catch(() => null),
+    enabled: resumeId != null,
+    staleTime: Infinity,
+    retry: false,
+  });
+
+  useEffect(() => {
+    const saved = savedLetterQ.data;
+    if (saved) {
+      setLetter(saved);
+      setLetterDraft(saved.text);
+      if (saved.tone === "friendly" || saved.tone === "formal") {
+        setLetterTone(saved.tone);
+      }
+    }
+  }, [savedLetterQ.data]);
+
+  const letterM = useMutation({
+    mutationFn: ({ force }: { force: boolean }) =>
+      api.generateCoverLetter(resumeId as number, v.id, letterTone, force),
+    onSuccess: (data) => {
+      setLetter(data);
+      setLetterDraft(data.text);
+      setLetterCopied(false);
+    },
+  });
+
+  const copyLetter = async () => {
+    try {
+      await navigator.clipboard.writeText(letterDraft);
+      setLetterCopied(true);
+    } catch {
+      setLetterCopied(false);
+    }
+  };
+
+  const letterTitle = canMatch
+    ? "LLM напишет черновик сопроводительного письма под эту вакансию"
+    : "Сначала выберите резюме в панели над таблицей";
+
   return (
     <div className="modal-overlay" onClick={onClose} role="presentation">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -108,9 +170,36 @@ export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: P
                 ? "Переоценить резюме"
                 : "Оценить резюме"}
           </button>
+          <select
+            value={letterTone}
+            onChange={(e) => setLetterTone(e.target.value as CoverLetterTone)}
+            disabled={!canMatch || letterM.isPending}
+            title="Тон сопроводительного письма"
+          >
+            {TONE_OPTIONS.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!canMatch || letterM.isPending}
+            title={letterTitle}
+            onClick={() => letterM.mutate({ force: letter != null })}
+          >
+            {letterM.isPending
+              ? "Генерация…"
+              : letter != null
+                ? "Перегенерировать письмо"
+                : "Сопроводительное"}
+          </button>
         </div>
         {matchM.isError && (
           <p className="error">{(matchM.error as Error).message}</p>
+        )}
+        {letterM.isError && (
+          <p className="error">{(letterM.error as Error).message}</p>
         )}
         {match && (
           <aside className="vacancy-match">
@@ -189,6 +278,29 @@ export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: P
             {match.cached && !matchM.isSuccess && (
               <p className="caption">
                 Сохранённая оценка — «Переоценить резюме» запустит LLM заново.
+              </p>
+            )}
+          </aside>
+        )}
+        {letter && (
+          <aside className="cover-letter">
+            <div className="vacancy-match-header">
+              <strong>Сопроводительное письмо</strong>
+              {letter.model && <span className="caption">{letter.model}</span>}
+              <button type="button" onClick={copyLetter}>
+                {letterCopied ? "Скопировано" : "Копировать"}
+              </button>
+            </div>
+            <textarea
+              className="cover-letter-text"
+              value={letterDraft}
+              onChange={(e) => setLetterDraft(e.target.value)}
+              rows={12}
+            />
+            {letter.cached && !letterM.isSuccess && (
+              <p className="caption">
+                Сохранённый вариант — «Перегенерировать письмо» запустит LLM заново.
+                Правки в поле не сохраняются — они для копирования.
               </p>
             )}
           </aside>

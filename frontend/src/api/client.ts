@@ -2,6 +2,8 @@ import type {
   AuthUser,
   CompanyStats,
   ConfigDefaults,
+  CoverLetter,
+  CoverLetterTone,
   LlmModelsCatalog,
   MetricsSummary,
   ProgressEvent,
@@ -292,6 +294,32 @@ export const api = {
 
   getVacancyMatch: (resumeId: number, vacancyId: string) =>
     request<VacancyMatch>(`/resumes/${resumeId}/match/${vacancyId}`),
+
+  /** Сопроводительное письмо: без force отдаёт сохранённое, с force — новый вызов LLM. */
+  generateCoverLetter: (
+    resumeId: number,
+    vacancyId: string,
+    tone: CoverLetterTone,
+    force = false,
+  ) =>
+    request<CoverLetter>(
+      `/resumes/${resumeId}/cover-letter/${vacancyId}${force ? "?force=true" : ""}`,
+      { method: "POST", body: JSON.stringify({ tone }) },
+    ),
+
+  getCoverLetter: (resumeId: number, vacancyId: string) =>
+    request<CoverLetter>(`/resumes/${resumeId}/cover-letter/${vacancyId}`),
+
+  deleteCoverLetter: async (resumeId: number, vacancyId: string) => {
+    const res = await fetch(
+      `${API_BASE}/resumes/${resumeId}/cover-letter/${vacancyId}`,
+      { method: "DELETE", headers: authHeaders() },
+    );
+    if (res.status === 401)
+      handleUnauthorized(`/resumes/${resumeId}/cover-letter/${vacancyId}`);
+    if (!res.ok && res.status !== 404)
+      throw new Error(`Удаление письма: ${res.status} ${res.statusText}`);
+  },
 
   subscribeRunEvents(
     runId: string,

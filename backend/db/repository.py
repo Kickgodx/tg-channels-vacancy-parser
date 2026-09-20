@@ -19,6 +19,7 @@ from tg_jobs_parser.models.vacancy import Vacancy
 from backend.fx.apply import apply_salary_rub_for_vacancy, preload_fx_rates_for_vacancies
 from backend.observability import record_vacancies_archived, record_vacancy_upsert
 from backend.db.models import (
+    CoverLetterRow,
     ParseRunRow,
     ResumeRow,
     SavedFilterRow,
@@ -484,6 +485,7 @@ def delete_resume(session: Session, resume_id: int, user_id: int | None = None) 
     if row is None or (user_id is not None and row.user_id != user_id):
         return False
     session.query(VacancyMatchRow).filter(VacancyMatchRow.resume_id == resume_id).delete()
+    session.query(CoverLetterRow).filter(CoverLetterRow.resume_id == resume_id).delete()
     session.delete(row)
     session.flush()
     return True
@@ -544,6 +546,52 @@ def upsert_vacancy_match(
         row.created_at = datetime.now(timezone.utc)
     session.flush()
     return row
+
+
+def get_cover_letter(
+    session: Session, *, resume_id: int, vacancy_id: str
+) -> CoverLetterRow | None:
+    return session.get(CoverLetterRow, (resume_id, vacancy_id))
+
+
+def upsert_cover_letter(
+    session: Session,
+    *,
+    resume_id: int,
+    vacancy_id: str,
+    text: str,
+    tone: str,
+    model: str,
+) -> CoverLetterRow:
+    """Записать/обновить письмо пары (resume, vacancy) — кэш генерации по PK."""
+    row = session.get(CoverLetterRow, (resume_id, vacancy_id))
+    if row is None:
+        row = CoverLetterRow(
+            resume_id=resume_id,
+            vacancy_id=vacancy_id,
+            text=text,
+            tone=tone,
+            model=model,
+        )
+        session.add(row)
+    else:
+        row.text = text
+        row.tone = tone
+        row.model = model
+        row.created_at = datetime.now(timezone.utc)
+    session.flush()
+    return row
+
+
+def delete_cover_letter(
+    session: Session, *, resume_id: int, vacancy_id: str
+) -> bool:
+    row = session.get(CoverLetterRow, (resume_id, vacancy_id))
+    if row is None:
+        return False
+    session.delete(row)
+    session.flush()
+    return True
 
 
 

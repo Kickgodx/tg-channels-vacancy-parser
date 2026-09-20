@@ -139,13 +139,30 @@ confidence оценки, пояснение и списки совпадающи
   (+ `ai.match_reasoning_enabled` для reasoning-моделей) — качество здесь
   важнее скорости, вызовов на порядок меньше.
 
+### Сопроводительные письма
+
+Из карточки вакансии — кнопка «Сопроводительное» рядом с «Оценить резюме»:
+LLM пишет черновик отклика под конкретную вакансию по выбранному резюме
+(120–200 слов, язык — по языку вакансии, без выдуманного опыта). Тон —
+выбором рядом с кнопкой (нейтральный / дружелюбный / формальный). Если пара
+уже оценена, в промпт подмешивается сохранённый матч (сильные стороны).
+
+- Письмо хранится парой `(resume_id, vacancy_id)` в `cover_letters`:
+  повторное открытие карточки отдаёт его из БД, токены не тратятся.
+  «Перегенерировать письмо» (`force=true`) вызывает LLM заново;
+  `DELETE` сбрасывает сохранённый вариант.
+- Текст открывается в редактируемом поле — правки локальные, для кнопки
+  «Копировать»; в БД остаётся исходный вариант LLM.
+- Модель — `ai.cover_letter_model` (пусто → `match_model` → `model`),
+  reasoning-флаг общий с матчингом (`ai.match_reasoning_enabled`).
+
 ### Аутентификация и per-user данные
 
 Своя лёгкая JWT-аутентификация: argon2-хэш пароля (`pwdlib`) + HS256
 (`pyjwt`). Первый зарегистрированный аккаунт становится админом и наследует
 резюме/пресеты, созданные до появления пользователей.
 
-- Приватное (по `user_id`): резюме, пресеты фильтров, матчи.
+- Приватное (по `user_id`): резюме, пресеты фильтров, матчи, письма.
 - Общее: вакансии, прогоны, аналитика, курсы ЦБ — единый корпус.
 - Токен хранится в `localStorage`, уходит в `Authorization: Bearer …`;
   401 → редирект на `/login`. Для SSE (EventSource не умеет заголовки)
@@ -196,6 +213,7 @@ uvicorn backend.main:app --reload --port 8000
 | `GET` `POST` `DELETE` | `/filters` | Пресеты фильтров (приватные) |
 | `GET` `POST` `PUT` `DELETE` | `/resumes` | Резюме пользователя |
 | `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Оценка соответствия одной вакансии (`force=true` — пересчёт) |
+| `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Сопроводительное письмо (`force=true` — перегенерация, `tone`/`extra_notes` в теле) |
 | `GET` | `/fx/rates`, `POST` `/fx/refresh` \| `/fx/recalculate-rub` | Курсы ЦБ и пересчёт зарплат в ₽ |
 | `GET` | `/ai-cache/stats` | Число записей в кэше LLM |
 | `POST` | `/ai-cache/clear` | Полная очистка кэша LLM |
@@ -225,6 +243,7 @@ uvicorn backend.main:app --reload --port 8000
 | `saved_filters` | Пресеты фильтров (`user_id`) |
 | `resumes` | Резюме пользователя (`user_id`) |
 | `vacancy_matches` | Оценки соответствия, PK `(resume_id, vacancy_id)` — он же кэш матчинга |
+| `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 
 **Если меняете колонки/таблицы** — добавьте новую миграцию (`alembic revision`) и обновите модели в `backend/db/models.py`; при следующем `docker compose up` она применится автоматически, данные сохранятся.
@@ -249,7 +268,8 @@ tg_jobs_parser/
                              analytics, filters, resumes, fx, ai-cache
     db/                    — модели, Alembic, репозиторий, кэш LLM, UPSERT
   alembic/                 — миграции SQL
-    services/              — run_service, match_service, auth_service, progress_bus
+    services/              — run_service, match_service, cover_letter_service,
+                             auth_service, import_service, progress_bus
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Vacancies
@@ -338,6 +358,7 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 | `model` | Id из `llm_models.yaml` — модель парсинга вакансий |
 | `match_model` | Модель матчинга резюме ↔ вакансия (обычно reasoning). Пусто — берётся `model` |
 | `match_reasoning_enabled` | `true`, если `match_model` — reasoning-модель (OpenRouter `reasoning` вместо `json_object`) |
+| `cover_letter_model` | Модель генерации сопроводительных писем. Пусто — `match_model`, затем `model` |
 | `fallback_models` | Запасные модели |
 | `concurrency`, `requests_per_minute` | Темп и параллелизм |
 | `stop_llm_when_rate_limited` | Отключить LLM при 429 до конца прогона |
@@ -415,8 +436,8 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **Prometheus** | Scrape backend каждые 15 с (`observability/prometheus.yml`) |
 | **Grafana** | Дашборды **tg-jobs-parser API**, **tg-jobs-parser LLM** и **tg-jobs-parser Pipeline** (папка `tg-jobs-parser`) |
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
-| **Доменные метрики** | `backend/observability.py`: прогоны (`parse_runs_*`), UPSERT и TTL-архивация вакансий, ручной импорт, матчинг резюме↔вакансия (`vacancy_match_*`), auth-события, запросы к ЦБ |
-| **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, прогоны, LLM-кэш, свежесть курсов ЦБ) |
+| **Доменные метрики** | `backend/observability.py`: прогоны (`parse_runs_*`), UPSERT и TTL-архивация вакансий, ручной импорт, матчинг резюме↔вакансия (`vacancy_match_*`), письма (`cover_letter_*`), auth-события, запросы к ЦБ |
+| **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
 | **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` из формата логов и шлёт в Loki (`observability/alloy-config.alloy`) |
 
@@ -434,8 +455,9 @@ pytest -n 8     # параллельно (pytest-xdist)
 ```
 
 В том числе: `tests/test_api_health.py`, `tests/test_auth.py`,
-`tests/test_solo_match.py`, `tests/test_upsert_vacancies.py`,
-`tests/test_db_transfer.py`, тесты ядра extraction/AI.
+`tests/test_solo_match.py`, `tests/test_cover_letter.py`,
+`tests/test_upsert_vacancies.py`, `tests/test_db_transfer.py`, тесты ядра
+extraction/AI.
 
 Тесты офлайновые: `tests/conftest.py` подставляет `CONFIG_PATH` на конфиг с
 выключенным `fx` — иначе агрегаты ходят за курсами в ЦБ на каждый запрос.

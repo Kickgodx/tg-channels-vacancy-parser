@@ -123,6 +123,27 @@ def record_match(
         MATCH_SCORE.observe(score)
 
 
+# --- Сопроводительные письма -------------------------------------------------
+
+COVER_LETTER_CALLS = Counter(
+    "cover_letter_calls_total",
+    "Генерации сопроводительных писем резюме↔вакансия",
+    labelnames=("outcome",),  # success | cached | error
+)
+
+COVER_LETTER_DURATION = Histogram(
+    "cover_letter_duration_seconds",
+    "Длительность LLM-генерации письма (вызов + разбор)",
+    buckets=(1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 120.0, 300.0),
+)
+
+
+def record_cover_letter(*, outcome: str, duration_seconds: float | None = None) -> None:
+    COVER_LETTER_CALLS.labels(outcome=outcome).inc()
+    if duration_seconds is not None:
+        COVER_LETTER_DURATION.observe(max(duration_seconds, 0.0))
+
+
 # --- Auth -------------------------------------------------------------------
 
 AUTH_EVENTS = Counter(
@@ -165,6 +186,7 @@ class _DBStatsCollector:
         yield GaugeMetricFamily("db_resumes", "Резюме в БД")
         yield GaugeMetricFamily("db_users", "Пользователи в БД")
         yield GaugeMetricFamily("db_vacancy_matches", "Оценки резюме↔вакансия")
+        yield GaugeMetricFamily("db_cover_letters", "Сопроводительные письма в БД")
         yield GaugeMetricFamily("db_ai_cache_entries", "Записи LLM-кэша в БД")
         yield GaugeMetricFamily("db_parse_runs", "Прогоны в БД по статусу", labels=["status"])
         yield GaugeMetricFamily(
@@ -191,6 +213,9 @@ class _DBStatsCollector:
             "db_vacancy_matches", "Сохранённые оценки резюме↔вакансия", value=counts["matches"]
         )
         yield GaugeMetricFamily(
+            "db_cover_letters", "Сохранённые сопроводительные письма", value=counts["cover_letters"]
+        )
+        yield GaugeMetricFamily(
             "db_ai_cache_entries", "Записи LLM-кэша в БД", value=counts["ai_cache"]
         )
 
@@ -214,6 +239,7 @@ class _DBStatsCollector:
 
         from backend.db.models import (
             AIExtractionCacheRow,
+            CoverLetterRow,
             ExchangeRateRow,
             ParseRunRow,
             ResumeRow,
@@ -252,6 +278,9 @@ class _DBStatsCollector:
             )
             counts["matches"] = int(
                 s.scalar(select(func.count()).select_from(VacancyMatchRow)) or 0
+            )
+            counts["cover_letters"] = int(
+                s.scalar(select(func.count()).select_from(CoverLetterRow)) or 0
             )
             counts["ai_cache"] = int(
                 s.scalar(select(func.count()).select_from(AIExtractionCacheRow)) or 0
