@@ -49,7 +49,7 @@ def match_single(
         overall_score=overall_score,
         confidence=extraction.confidence,
         breakdown=extraction.breakdown.model_dump(),
-        explanation=explanation.explanation,
+        explanation=extraction.explanation,
         matching_skills=[s.model_dump() for s in extraction.matching_skills],
         missing_skills=[s.model_dump() for s in extraction.missing_skills],
         strengths=extraction.strengths,

@@ -150,6 +150,63 @@ def test_solo_match_404_and_auth(api_client, stub_llm):
     assert stub_llm == []
 
 
+def test_match_single_end_to_end(api_client, monkeypatch):
+    """Реальный match_service.match_single со stubbed OpenRouterClient:
+    extraction → calculate_overall_score → vacancy_matches → API response."""
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+    from tg_jobs_parser.ai.schema import (
+        MatchBreakdown,
+        SkillMatch,
+        VacancyMatchExtraction,
+    )
+
+    class _FakeClient:
+        def __init__(self, ai):
+            pass
+
+        def match_with_fallback(self, *, resume_text, vacancy_text):
+            extraction = VacancyMatchExtraction(
+                confidence=88,
+                breakdown=MatchBreakdown(
+                    role_match=90, skills_match=70, seniority_match=80,
+                    domain_match=100, work_format_match=100,
+                ),
+                matching_skills=[
+                    SkillMatch(skill="Python", importance="critical",
+                               evidence="В резюме указан Python.")
+                ],
+                missing_skills=[
+                    SkillMatch(skill="Kubernetes", importance="important",
+                               evidence="Опыт с Kubernetes в резюме не указан.")
+                ],
+                strengths=["Совпадает основной стек."],
+                risks=["Опыт с Kubernetes в резюме не указан."],
+                explanation="Кандидат соответствует роли, пробел — Kubernetes.",
+            )
+            return extraction, LLMUsage(model="m1")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(match_service, "OpenRouterClient", _FakeClient)
+
+    token = _register(api_client, "a@example.com")
+    vid = _add_vacancy()
+    rid = api_client.post(
+        "/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}
+    ).json()["id"]
+
+    r = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # 90*0.3 + 70*0.35 + 80*0.2 + 100*0.1 + 100*0.05 = 82.5 → 82 (banker's round)
+    assert body["overall_score"] == 82
+    assert body["confidence"] == 88
+    assert body["breakdown"]["skills_match"] == 70
+    assert body["matching_skills"][0]["importance"] == "critical"
+    assert body["explanation"] == "Кандидат соответствует роли, пробел — Kubernetes."
+
+
 def test_solo_match_reports_llm_failure(api_client, monkeypatch):
     def _boom(*_a, **_k):
         raise RuntimeError("OpenRouter API: 503")
