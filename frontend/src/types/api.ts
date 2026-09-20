@@ -186,6 +186,18 @@ export interface TokenResponse {
   user: AuthUser;
 }
 
+export interface VacancyMatch {
+  resume_id: number;
+  vacancy_id: string;
+  score: number;
+  explanation?: string | null;
+  matching_skills: string[];
+  missing_skills: string[];
+  model: string;
+  created_at: string;
+  cached: boolean;
+}
+
 export type MatchStatus = "running" | "completed" | "failed" | "cancelled";
 
 export interface MatchProgress {

@@ -463,6 +463,16 @@ def delete_resume(session: Session, resume_id: int, user_id: int | None = None) 
     return True
 
 
+def get_vacancy_row(session: Session, vacancy_id: str) -> VacancyRow | None:
+    return session.get(VacancyRow, vacancy_id)
+
+
+def get_vacancy_match(
+    session: Session, *, resume_id: int, vacancy_id: str
+) -> VacancyMatchRow | None:
+    return session.get(VacancyMatchRow, (resume_id, vacancy_id))
+
+
 def upsert_vacancy_match(
     session: Session,
     *,

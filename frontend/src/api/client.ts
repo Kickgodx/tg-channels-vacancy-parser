@@ -16,6 +16,7 @@ import type {
   SourceStats,
   TokenResponse,
   Vacancy,
+  VacancyMatch,
 } from "../types/api";
 
 const API_BASE =
@@ -274,6 +275,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ limit, filters }),
     }),
+
+  /** Соло-матчинг одной вакансии: без force отдаёт сохранённую оценку, с force — новый вызов LLM. */
+  matchVacancy: (resumeId: number, vacancyId: string, force = false) =>
+    request<VacancyMatch>(
+      `/resumes/${resumeId}/match/${vacancyId}${force ? "?force=true" : ""}`,
+      { method: "POST" },
+    ),
+
+  getVacancyMatch: (resumeId: number, vacancyId: string) =>
+    request<VacancyMatch>(`/resumes/${resumeId}/match/${vacancyId}`),
 
   getMatch: (matchId: string) => request<MatchProgress>(`/matches/${matchId}`),
 

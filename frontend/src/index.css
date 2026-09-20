@@ -460,6 +460,51 @@ tr.clickable:hover {
   color: #343a40;
 }
 
+.vacancy-match {
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  background: #f1fff5;
+  border-left: 3px solid #51cf66;
+  font-size: 0.9rem;
+}
+
+.vacancy-match-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.match-score {
+  font-weight: 700;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  color: #fff;
+}
+
+.match-score.strong {
+  background: #2b8a3e;
+}
+
+.match-score.partial {
+  background: #e67700;
+}
+
+.match-score.weak {
+  background: #c92a2a;
+}
+
+.vacancy-match p {
+  margin: 0.3rem 0 0;
+  line-height: 1.5;
+}
+
+.match-skills {
+  font-size: 0.87rem;
+}
+
 .login-page {
   display: flex;
   justify-content: center;

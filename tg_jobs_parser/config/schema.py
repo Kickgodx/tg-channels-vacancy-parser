@@ -168,6 +168,17 @@ class AiConfig(BaseModel):
         default_factory=list,
         description="Запасные модели (id из llm_models.yaml). Пусто — default_fallbacks из реестра.",
     )
+    match_model: str = Field(
+        default="",
+        description=(
+            "Модель для матчинга резюме к вакансиям (обычно reasoning). "
+            "Пусто — берётся ``model``."
+        ),
+    )
+    match_reasoning_enabled: bool = Field(
+        default=False,
+        description="true для reasoning-модели матчинга (OpenRouter reasoning вместо json_object).",
+    )
     base_url: str = Field(default="https://openrouter.ai/api/v1")
     max_input_chars: int = Field(default=6000, ge=500, le=32000)
     max_posts_per_run: int = Field(
@@ -256,6 +267,10 @@ class AiConfig(BaseModel):
         if normalized not in {"postgres", "file"}:
             raise ValueError("ai.cache_backend must be 'postgres' or 'file'")
         return normalized
+
+    def resolved_match_model(self) -> str:
+        """Модель матчинга: ``match_model`` или, если не задана, основная ``model``."""
+        return self.match_model.strip() or self.model.strip()
 
     def resolved_fallback_models(self) -> list[str]:
         """Запасные модели без дубликатов и без совпадения с ``model``."""

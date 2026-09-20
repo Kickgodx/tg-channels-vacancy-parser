@@ -404,6 +404,7 @@ export default function VacanciesPage() {
               {data.items.length > 0 ? (
                 <VacancyTable
                   items={data.items}
+                  resumeId={resumeId}
                   sortBy={sortBy}
                   sortOrder={sortOrder}
                   onSortChange={(by, order) => {
