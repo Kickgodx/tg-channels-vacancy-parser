@@ -232,6 +232,7 @@ class OpenRouterClient:
         parse,
         model: str | None = None,
         reasoning: bool | None = None,
+        reasoning_effort: str = "",
         json_schema: dict[str, Any] | None = None,
         plain_text: bool = False,
     ) -> tuple[Any, LLMUsage]:
@@ -246,7 +247,9 @@ class OpenRouterClient:
         }
         extra_body: dict[str, Any] | None = None
         if use_reasoning:
-            extra_body = {"reasoning": {"enabled": True}}
+            extra_body = {
+                "reasoning": {"effort": reasoning_effort} if reasoning_effort else {"enabled": True}
+            }
         elif json_schema is not None:
             kwargs["response_format"] = {
                 "type": "json_schema",
@@ -271,7 +274,14 @@ class OpenRouterClient:
             if not response.choices:
                 raise RuntimeError("OpenRouter: пустой choices в ответе")
 
-            message = response.choices[0].message
+            choice = response.choices[0]
+            message = choice.message
+            if not getattr(message, "content", None) and choice.finish_reason == "length":
+                raise RuntimeError(
+                    f"OpenRouter: {use_model} исчерпала max_tokens="
+                    f"{self._ai.max_completion_tokens} до ответа (ушло на рассуждения) — "
+                    "увеличьте ai.max_completion_tokens или понизьте reasoning effort"
+                )
             content = _message_content(message)
             if not content:
                 raise RuntimeError("OpenRouter: пустой ответ модели")
@@ -337,6 +347,7 @@ class OpenRouterClient:
             parse=_parse_match,
             model=model or self._ai.resolved_match_model(),
             reasoning=self._ai.match_reasoning_enabled,
+            reasoning_effort=self._ai.match_reasoning_effort,
             json_schema=_strict_json_schema(VacancyMatchExtraction),
         )
         try:
@@ -360,7 +371,7 @@ class OpenRouterClient:
         """Сопроводительное письмо — обычный текст, не JSON.
 
         Модель — ``ai.cover_letter_model`` (пусто → ``match_model`` → ``model``),
-        reasoning-флаг общий с матчингом. Пустой ответ — один controlled retry.
+        reasoning-флаг и уровень общие с матчингом. Пустой ответ — один controlled retry.
         """
         messages = build_cover_letter_messages(
             resume_text=resume_text,
@@ -374,6 +385,7 @@ class OpenRouterClient:
             parse=_parse_cover_letter,
             model=model or self._ai.resolved_cover_letter_model(),
             reasoning=self._ai.match_reasoning_enabled,
+            reasoning_effort=self._ai.match_reasoning_effort,
             plain_text=True,
         )
         try:

@@ -137,7 +137,9 @@ confidence оценки, пояснение и списки совпадающи
   (`sort_by=match_score` при выбранном резюме).
 - Модель матчинга задаётся отдельно от модели парсинга: `ai.match_model`
   (+ `ai.match_reasoning_enabled` для reasoning-моделей) — качество здесь
-  важнее скорости, вызовов на порядок меньше.
+  важнее скорости, вызовов на порядок меньше. Глубина рассуждений —
+  `ai.match_reasoning_effort` (`high`, `xhigh`, …), одна на все модели:
+  OpenRouter сам сводит уровень к ближайшему, который поддерживает модель.
 
 ### Сопроводительные письма
 
@@ -154,7 +156,8 @@ LLM пишет черновик отклика под конкретную ва�
 - Текст открывается в редактируемом поле — правки локальные, для кнопки
   «Копировать»; в БД остаётся исходный вариант LLM.
 - Модель — `ai.cover_letter_model` (пусто → `match_model` → `model`),
-  reasoning-флаг общий с матчингом (`ai.match_reasoning_enabled`).
+  reasoning-флаг и уровень общие с матчингом (`ai.match_reasoning_enabled`,
+  `ai.match_reasoning_effort`).
 
 ### Аутентификация и per-user данные
 
@@ -358,6 +361,7 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 | `model` | Id из `llm_models.yaml` — модель парсинга вакансий |
 | `match_model` | Модель матчинга резюме ↔ вакансия (обычно reasoning). Пусто — берётся `model` |
 | `match_reasoning_enabled` | `true`, если `match_model` — reasoning-модель (OpenRouter `reasoning` вместо `json_object`) |
+| `match_reasoning_effort` | Уровень рассуждений матчинга и писем: `max` / `xhigh` / `high` / `medium` / `low` / `minimal` / `none`. Только при `match_reasoning_enabled: true`; пусто — дефолт модели. Неподдерживаемый уровень OpenRouter сводит к ближайшему (напр. Gemini 3: `xhigh` → `high`); модели без выбора уровня его игнорируют. Рассуждения расходуют `max_completion_tokens` — на `xhigh`/`max` лимит стоит поднять |
 | `cover_letter_model` | Модель генерации сопроводительных писем. Пусто — `match_model`, затем `model` |
 | `fallback_models` | Запасные модели |
 | `concurrency`, `requests_per_minute` | Темп и параллелизм |
