@@ -85,8 +85,15 @@ ai:
   # Матчинг резюме ↔ вакансия идёт отдельной моделью: здесь уместна reasoning
   # (качество важнее скорости — вызовов на порядок меньше, чем при парсинге).
   # Пусто — берётся model выше. При смене на reasoning-модель включи match_reasoning_enabled.
-  match_model: google/gemini-2.5-flash-lite
-  match_reasoning_enabled: false
+  # match_model: google/gemini-3.8-flash
+  # match_model: z-ai/glm-5.3
+  match_model: xiaomi/mimo-v2.6-pro
+  match_reasoning_enabled: true
+  # Уровень рассуждений (OpenRouter reasoning.effort): max / xhigh / high / medium / low /
+  # minimal / none; пусто — дефолт модели. Неподдерживаемый уровень сводится к ближайшему.
+  match_reasoning_effort: high
+  # Сопроводительные письма идут отдельной моделью; пусто — match_model, затем model.
+  # cover_letter_model:
   max_posts_per_run: 0
   skip_if_vacancy_score_below: 1
   concurrency: 8
