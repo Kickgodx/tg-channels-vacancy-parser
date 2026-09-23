@@ -240,14 +240,17 @@ def test_match_uses_match_model_and_reasoning(monkeypatch):
         model="parse/model",
         match_model="reasoning/model",
         match_reasoning_enabled=True,
+        match_reasoning_effort="xhigh",
         reasoning_enabled=False,
     )
     client = OpenRouterClient(ai)
     seen: dict = {}
 
-    def _fake_call(*, messages, parse, model=None, reasoning=None, json_schema=None):
+    def _fake_call(*, messages, parse, model=None, reasoning=None, reasoning_effort="",
+                   json_schema=None):
         seen["model"] = model
         seen["reasoning"] = reasoning
+        seen["reasoning_effort"] = reasoning_effort
         return object(), LLMUsage(model=model or "")
 
     monkeypatch.setattr(client, "_call_llm", _fake_call)
@@ -255,6 +258,7 @@ def test_match_uses_match_model_and_reasoning(monkeypatch):
 
     assert seen["model"] == "reasoning/model"
     assert seen["reasoning"] is True
+    assert seen["reasoning_effort"] == "xhigh"
 
 
 def test_match_retries_once_on_invalid_json(monkeypatch):
@@ -268,7 +272,8 @@ def test_match_retries_once_on_invalid_json(monkeypatch):
     client = OpenRouterClient(AiConfig(model="m"))
     attempts: list[int] = []
 
-    def _flaky(*, messages, parse, model=None, reasoning=None, json_schema=None):
+    def _flaky(*, messages, parse, model=None, reasoning=None, reasoning_effort="",
+               json_schema=None):
         attempts.append(1)
         if len(attempts) == 1:
             raise _json.JSONDecodeError("bad", "doc", 0)
@@ -280,7 +285,8 @@ def test_match_retries_once_on_invalid_json(monkeypatch):
     assert len(attempts) == 2
 
     # обе попытки провалились — ошибка пробрасывается (дальше fallback-цепочка)
-    def _always_bad(*, messages, parse, model=None, reasoning=None, json_schema=None):
+    def _always_bad(*, messages, parse, model=None, reasoning=None, reasoning_effort="",
+                    json_schema=None):
         raise ValueError("broken")
 
     monkeypatch.setattr(client, "_call_llm", _always_bad)

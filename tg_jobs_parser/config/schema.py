@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from tg_jobs_parser.ai.models_catalog import LlmModelEntry
 
+# Значения OpenRouter ``reasoning.effort`` (по убыванию).
+REASONING_EFFORTS = ("max", "xhigh", "high", "medium", "low", "minimal", "none")
+
 
 DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
     "QA": ["qa", "quality assurance", "тестировщик", "тестирование"],
@@ -179,6 +182,15 @@ class AiConfig(BaseModel):
         default=False,
         description="true для reasoning-модели матчинга (OpenRouter reasoning вместо json_object).",
     )
+    match_reasoning_effort: str = Field(
+        default="",
+        description=(
+            "Уровень рассуждений матчинга и писем (OpenRouter ``reasoning.effort``): "
+            "max / xhigh / high / medium / low / minimal / none. Действует только при "
+            "``match_reasoning_enabled: true``; пусто — дефолт модели. Неподдерживаемый "
+            "моделью уровень OpenRouter сводит к ближайшему."
+        ),
+    )
     cover_letter_model: str = Field(
         default="",
         description=(
@@ -266,6 +278,14 @@ class AiConfig(BaseModel):
         if v not in allowed:
             raise ValueError(f"ai.mode must be one of {allowed}")
         return v
+
+    @field_validator("match_reasoning_effort", mode="before")
+    @classmethod
+    def validate_reasoning_effort(cls, v: object) -> str:
+        normalized = str(v or "").strip().lower()
+        if normalized and normalized not in REASONING_EFFORTS:
+            raise ValueError(f"ai.match_reasoning_effort must be one of {REASONING_EFFORTS}")
+        return normalized
 
     @field_validator("cache_backend")
     @classmethod

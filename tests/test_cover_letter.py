@@ -284,8 +284,8 @@ def test_cover_letter_uses_own_model_without_json_format(monkeypatch):
     client = OpenRouterClient(ai)
     seen: dict = {}
 
-    def _fake_call(*, messages, parse, model=None, reasoning=None, json_schema=None,
-                   plain_text=False):
+    def _fake_call(*, messages, parse, model=None, reasoning=None, reasoning_effort="",
+                   json_schema=None, plain_text=False):
         seen["model"] = model
         seen["plain_text"] = plain_text
         return "Текст письма", LLMUsage(model=model or "")
