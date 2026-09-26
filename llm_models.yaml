@@ -3,18 +3,21 @@
 #
 # cost: USD за 1M токенов (input/output), напр. "0.25/1.5"
 
-default_model: deepseek/deepseek-v4-flash-0731
+default_model: google/gemini-2.5-flash-lite
 
 default_fallbacks:
+  - google/gemini-3.1-flash-lite
+  - deepseek/deepseek-v4-flash
   - google/gemini-2.5-flash-lite
   - mistralai/mistral-small-3.2-24b-instruct
   - mistralai/mistral-small-24b-instruct-2501
   - meta-llama/llama-3.3-70b-instruct
-  - deepseek/deepseek-v4-flash
   - microsoft/phi-4
-  - google/gemini-3.1-flash-lite
 
 models:
+  - id: meta/muse-spark-1.3
+    name: Muse Spark 1.3
+    cost: "1.25/4.25"
   - id: google/gemini-3.1-flash-lite
     name: Gemini 3.1 Flash Lite
     cost: "0.25/1.5"
