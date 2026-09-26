@@ -16,6 +16,7 @@
 | 2 | `feature/external-export` | Экспорт в Google Sheets / Notion | нет |
 | 3 | `feature/admin-vacancies` | CMS-админка: редактирование/удаление вакансий | нет |
 | 4 | `feature/webauthn` | Вход по passkey (WebAuthn/FIDO2) поверх пароля | да (таблица `webauthn_credentials`) |
+| 5 | `feature/llm-evals-match` | Golden/evals для match + cover letter | нет |
 
 **Про миграции:** цепочка инкрементальная — head сейчас
 `009_cover_letters`. Новые фичи просто продолжают её
@@ -148,6 +149,20 @@ HTTPS (WebAuthn разрешён на secure context, `localhost` им счит�
 
 **Готово, когда:** пользователь привязывает ключ, логинится им после
 рестарта backend, отзывает ключ; вход по паролю продолжает работать.
+
+---
+
+## 5. LLM evals: match + cover letter
+
+Extraction уже имеет golden set (`evals/golden/extraction.jsonl`) и offline
+scorer. Дальше:
+
+- Golden для матчинга (`evals/golden/match/`): диапазоны score/breakdown,
+  ключевые matching/missing skills.
+- Cover letter: чеклист или LLM-as-judge (язык, без галлюцинаций, длина).
+- Опционально: сэмпл failed prod → кандидат в golden (ручной review).
+
+Не делать: полноценную eval-платформу (LangSmith и т.п.) без явной нужды.
 
 ---
 

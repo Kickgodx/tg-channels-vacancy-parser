@@ -1,12 +1,23 @@
-"""Промпты для извлечения полей вакансии (RU + EN)."""
+"""Промпты для извлечения полей вакансии (RU + EN).
+
+Версии промптов (EXTRACT / MATCH / COVER_LETTER):
+- Bump при смысловом изменении system/user/few-shot (правила полей, схема,
+  примеры) — иначе кэш LLM отдаст ответы от старого промпта.
+- Не bump при правках комментариев в этом файле или опечатках вне текста,
+  который уходит в модель.
+"""
 
 from __future__ import annotations
 
 import json
+import warnings
 
 from tg_jobs_parser.ai.schema import VacancyAIExtraction
 from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
+
+# Источник истины для ключа кэша extraction. Меняете промпт → bump.
+EXTRACT_PROMPT_VERSION = "extract-v3"
 
 _SPECIALIZATION_RULES = """
 - detected_specializations — ONLY the job role(s) this post is hiring for (usually ONE primary role).
@@ -20,10 +31,20 @@ _SPECIALIZATION_RULES = """
 - Prefer one canonical name from ALLOWED_SPECIALIZATIONS (e.g. "Go" OR "Golang", not both unless two roles are hired).
 - You MAY add a new role name only if clearly stated in the vacancy (e.g. Rust) even if not in ALLOWED list."""
 
+_JOB_SEEKER_RULES = """
+- is_job_post=true ONLY when an employer/recruiter is hiring (offering a job).
+- Job seeker / candidate posts → is_job_post=false even if they name a role (e.g. "QA Engineer"):
+  • RU: «ищу работу», «открыт к предложениям», «резюме в личку», «рассмотрю вакансии».
+  • EN: "looking for a … role/job/position", "open to opportunities", "DM me for CV/resume",
+    "seeking a position", "available for hire" (candidate voice).
+- A role title alone does NOT make it a vacancy. Prefer false when the author is the candidate.
+"""
+
 SYSTEM_PROMPT_V1 = """You extract structured IT job vacancy fields from Telegram posts (Russian and/or English).
 Return ONE JSON object only. No markdown, no commentary outside JSON.
 Rules:
 - If the post is a resume, course ad, spam, or discussion without hiring — set is_job_post=false and rejection_reason briefly.
+""" + _JOB_SEEKER_RULES + """
 - If SEARCH_CONTEXT sets ANY_IT_SPECIALIZATION=true — do not reject an IT job only because the role/stack is outside target_specializations (e.g. PHP, Ruby, .NET are valid).
 - Do NOT invent salary, company, or URLs: use null/[] when absent in text.
 - Numbers in URLs (vacancy id in path, e.g. /76348/) are NOT salary — salary_min/max must be null if pay is not stated in prose.
@@ -31,11 +52,32 @@ Rules:
 - work_format: one of remote, hybrid, office, relocation, unknown (or null).
 - detected_grade: one of """ + ", ".join(GRADE_OPTIONS) + """ (use unknown if not stated).
   Title/role grade wins (e.g. "Senior QA" → senior). Do NOT treat verb "to staff" / "staffing" as grade staff.
-- salary_currency: ISO code (RUB, USD, EUR). /HOUR suffix ONLY for explicit hourly pay («₽/час», «$15–30 в час», «почасовая оплата», «р/ч»). Monthly RUB: «200 тр», «300к», «гросс», «вилка» → RUB without /HOUR (never RUB/HOUR for «тр» or «к»).
+- salary_currency: ISO (RUB, USD, EUR) PLUS period when needed:
+  • Explicit hourly («₽/час», «$25/hour», «в час», «почасовая», «/hr») → MUST be
+    «USD/HOUR» or «RUB/HOUR» (keep hourly amounts as stated; do NOT convert to monthly).
+  • Monthly («200 тр», «300к», «гросс», «вилка», monthly USD/EUR) → plain RUB/USD/EUR,
+    never …/HOUR.
 - application_urls: external apply links (hh.ru, careers pages, forms). Exclude t.me channel links unless they are the apply form.
 - confidence: 0..1 how sure you are about the main fields.
 - notes: optional short clarifications (ambiguity, missing data, assumptions) — always in Russian, 1–3 sentences; null if nothing useful to add.
 - rejection_reason: when is_job_post=false — brief reason in Russian."""
+
+
+def resolve_extract_prompt_version(configured: str | None = None) -> str:
+    """Версия промпта extraction для кэша/логов — всегда ``EXTRACT_PROMPT_VERSION``.
+
+    Если в config задано другое значение — warning (синхронизируйте или bump'ните
+    константу при смене промпта).
+    """
+    cfg = (configured or "").strip()
+    if cfg and cfg != EXTRACT_PROMPT_VERSION:
+        warnings.warn(
+            f"ai.prompt_version={cfg!r} отличается от EXTRACT_PROMPT_VERSION="
+            f"{EXTRACT_PROMPT_VERSION!r}; для кэша используется константа.",
+            UserWarning,
+            stacklevel=2,
+        )
+    return EXTRACT_PROMPT_VERSION
 
 _FEW_SHOT_USER = """Example job post:
 "Senior Go Developer, remote EU, 350-450k RUB, Requirements: Go, Kubernetes, Docker, apply: https://example.com/careers/go".
@@ -74,6 +116,39 @@ Example JSON:
     ensure_ascii=False,
 )
 
+_FEW_SHOT_RESUME_EN = """Example NOT a job (English job seeker — role name is NOT hiring):
+"Looking for a QA Engineer role. Open to remote. DM me for CV."
+Example JSON:
+""" + json.dumps(
+    {
+        "is_job_post": False,
+        "rejection_reason": "кандидат ищет работу, не вакансия работодателя",
+        "confidence": 0.95,
+        "notes": None,
+    },
+    ensure_ascii=False,
+)
+
+_FEW_SHOT_HOURLY = """Example hourly pay (keep /HOUR; do NOT convert to monthly):
+"Freelance React Native engineer, $25–40 / hour, remote. Apply https://careers.example.com/rn"
+Example JSON:
+""" + json.dumps(
+    {
+        "is_job_post": True,
+        "rejection_reason": None,
+        "detected_specializations": ["Frontend"],
+        "detected_grade": "unknown",
+        "salary_min": 25,
+        "salary_max": 40,
+        "salary_currency": "USD/HOUR",
+        "work_format": "remote",
+        "application_urls": ["https://careers.example.com/rn"],
+        "confidence": 0.9,
+        "notes": None,
+    },
+    ensure_ascii=False,
+)
+
 
 def build_messages(
     *,
@@ -97,6 +172,10 @@ def build_messages(
             _FEW_SHOT_USER
             + "\n\n"
             + _FEW_SHOT_RESUME
+            + "\n\n"
+            + _FEW_SHOT_RESUME_EN
+            + "\n\n"
+            + _FEW_SHOT_HOURLY
             + "\n\n---\n\n",
         )
 

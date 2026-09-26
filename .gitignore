@@ -38,6 +38,9 @@ build/
 # --- AI-кэш LLM ---
 .cache/
 
+# --- LLM eval reports ---
+evals/reports/
+
 # --- проект: артефакты запуска (не коммитить выгрузки и сессии Telegram) ---
 output/
 logs/

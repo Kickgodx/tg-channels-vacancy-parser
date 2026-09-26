@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from tg_jobs_parser.ai.cache import AIExtractionCache
 from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
 from tg_jobs_parser.ai.models_catalog import LlmModelEntry
+from tg_jobs_parser.ai.prompts import resolve_extract_prompt_version
 from tg_jobs_parser.ai.rate_limit import LlmQuotaExhausted
 from tg_jobs_parser.ai.merger import merge_rules_and_ai
 from tg_jobs_parser.ai.search_context import SearchContext, build_search_context
@@ -174,10 +175,11 @@ class AIEnrichmentService:
                 return vacancy
 
         text = (vacancy.cleaned_text or vacancy.raw_text or "")[: self._ai.max_input_chars]
+        prompt_version = resolve_extract_prompt_version(self._ai.prompt_version)
         cached = self._cache.get(
             text=text,
             model=self._ai.model,
-            prompt_version=self._ai.prompt_version,
+            prompt_version=prompt_version,
             mode=self._ai.mode,
         )
         if cached is not None:
@@ -231,7 +233,7 @@ class AIEnrichmentService:
             self._cache.put(
                 text=text,
                 model=self._ai.model,
-                prompt_version=self._ai.prompt_version,
+                prompt_version=prompt_version,
                 mode=self._ai.mode,
                 extraction=extraction,
             )

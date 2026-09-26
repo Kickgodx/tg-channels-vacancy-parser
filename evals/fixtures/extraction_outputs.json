@@ -1,0 +1,399 @@
+{
+  "resume-go-ru": {
+    "is_job_post": false
+  },
+  "resume-qa-en": {
+    "is_job_post": false
+  },
+  "spam-course": {
+    "is_job_post": false
+  },
+  "spam-discussion": {
+    "is_job_post": false
+  },
+  "go-senior-remote-salary": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Go"
+    ],
+    "detected_grade": "senior",
+    "salary_min": 350000,
+    "salary_max": 450000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "technologies": [
+      "Go",
+      "Kubernetes",
+      "Docker"
+    ],
+    "application_urls": [
+      "https://example.com/careers/go"
+    ]
+  },
+  "go-unit-tests-not-qa": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Go"
+    ],
+    "detected_grade": "middle",
+    "salary_min": 250000,
+    "salary_max": 300000,
+    "salary_currency": "RUB",
+    "work_format": "office"
+  },
+  "salary-tr-monthly": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Backend",
+      "Python"
+    ],
+    "salary_min": 200000,
+    "salary_max": 280000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "application_urls": [
+      "https://hh.ru/vacancy/123"
+    ]
+  },
+  "salary-k-monthly": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Frontend"
+    ],
+    "salary_min": 180000,
+    "salary_max": 220000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "application_urls": [
+      "https://forms.example.com/fe"
+    ]
+  },
+  "salary-hourly-usd": {
+    "is_job_post": true,
+    "salary_min": 25,
+    "salary_max": 40,
+    "salary_currency": "USD/HOUR",
+    "work_format": "remote",
+    "application_urls": [
+      "https://careers.example.com/rn"
+    ]
+  },
+  "salary-hourly-rub": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "AQA"
+    ],
+    "salary_min": 2000,
+    "salary_max": 3000,
+    "salary_currency": "RUB/HOUR",
+    "work_format": "remote"
+  },
+  "url-id-not-salary": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "DevOps"
+    ],
+    "salary_min": null,
+    "salary_max": null,
+    "work_format": "hybrid",
+    "application_urls": [
+      "https://jobs.example.com/vacancy/76348/"
+    ]
+  },
+  "qa-manual-explicit": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Manual QA"
+    ],
+    "detected_grade": "junior+",
+    "salary_min": 80000,
+    "salary_max": 110000,
+    "salary_currency": "RUB",
+    "work_format": "office"
+  },
+  "k8s-in-go-not-devops": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Backend"
+    ],
+    "detected_grade": "senior",
+    "salary_min": 4000,
+    "salary_max": 5000,
+    "salary_currency": "EUR",
+    "work_format": "remote"
+  },
+  "java-middle-hybrid": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Java"
+    ],
+    "detected_grade": "middle",
+    "salary_min": 300000,
+    "salary_max": 380000,
+    "salary_currency": "RUB",
+    "work_format": "hybrid",
+    "application_urls": [
+      "https://example.com/jobs/java"
+    ]
+  },
+  "exclude-tme-channel-link": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Data Analyst"
+    ],
+    "salary_min": 150000,
+    "salary_max": 200000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "application_urls": [
+      "https://apply.example.com/da"
+    ]
+  },
+  "staff-grade-title": {
+    "is_job_post": true,
+    "detected_grade": "staff",
+    "salary_min": 500000,
+    "salary_max": 700000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "application_urls": [
+      "https://careers.example.com/staff"
+    ]
+  },
+  "staffing-not-staff-grade": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Python"
+    ],
+    "detected_grade": "middle",
+    "salary_min": 250000,
+    "salary_max": null,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "application_urls": [
+      "https://hh.ru/vacancy/999"
+    ]
+  },
+  "relocation-format": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "iOS"
+    ],
+    "detected_grade": "senior",
+    "salary_min": 70000,
+    "salary_max": 90000,
+    "salary_currency": "EUR",
+    "work_format": "relocation",
+    "application_urls": [
+      "https://jobs.example.com/ios"
+    ]
+  },
+  "unknown-grade-no-level": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Rust"
+    ],
+    "detected_grade": "unknown",
+    "work_format": "remote",
+    "salary_min": null,
+    "salary_max": null
+  },
+  "php-any-it-ok": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "PHP"
+    ],
+    "detected_grade": "middle",
+    "salary_min": 180000,
+    "salary_max": 220000,
+    "salary_currency": "RUB",
+    "work_format": "office",
+    "application_urls": [
+      "https://example.com/php"
+    ]
+  },
+  "sre-title-is-devops": {
+    "is_job_post": true,
+    "detected_grade": "unknown",
+    "salary_min": 300000,
+    "salary_max": 400000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "application_urls": [
+      "https://careers.example.com/sre"
+    ]
+  },
+  "lead-frontend": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Frontend"
+    ],
+    "detected_grade": "lead",
+    "salary_min": 450000,
+    "salary_max": 550000,
+    "salary_currency": "RUB",
+    "work_format": "hybrid",
+    "application_urls": [
+      "https://forms.example.com/lead-fe"
+    ]
+  },
+  "no-salary-stated": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "AQA"
+    ],
+    "detected_grade": "middle",
+    "salary_min": null,
+    "salary_max": null,
+    "work_format": "remote"
+  },
+  "ml-engineer": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "ML"
+    ],
+    "detected_grade": "senior",
+    "salary_min": 4000,
+    "salary_max": 5500,
+    "salary_currency": "USD",
+    "work_format": "remote",
+    "application_urls": [
+      "https://ml.example.com/jobs/1"
+    ]
+  },
+  "android-kotlin": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Android"
+    ],
+    "detected_grade": "middle+",
+    "salary_min": 220000,
+    "salary_max": 280000,
+    "salary_currency": "RUB",
+    "work_format": "office",
+    "application_urls": [
+      "https://hh.ru/vacancy/555"
+    ]
+  },
+  "hire-en-backend": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Backend"
+    ],
+    "detected_grade": "middle",
+    "salary_min": 4000,
+    "salary_max": 5500,
+    "salary_currency": "USD",
+    "work_format": "remote",
+    "application_urls": [
+      "https://careers.example.com/be"
+    ]
+  },
+  "cicd-in-java-not-devops": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Java"
+    ],
+    "detected_grade": "senior",
+    "salary_min": 350000,
+    "salary_max": 420000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "application_urls": [
+      "https://hh.ru/vacancy/777"
+    ]
+  },
+  "analyst-word-not-role": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Go"
+    ],
+    "detected_grade": "middle",
+    "salary_min": 280000,
+    "salary_max": 340000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "application_urls": [
+      "https://example.com/go-mid"
+    ]
+  },
+  "resume-open-to-offers": {
+    "is_job_post": false
+  },
+  "spam-webinar": {
+    "is_job_post": false
+  },
+  "dotnet-office": {
+    "is_job_post": true,
+    "detected_grade": "middle",
+    "salary_min": 200000,
+    "salary_max": 260000,
+    "salary_currency": "RUB",
+    "work_format": "office",
+    "application_urls": [
+      "https://hh.ru/vacancy/888"
+    ]
+  },
+  "salary-single-usd-month": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "DevOps"
+    ],
+    "detected_grade": "senior",
+    "salary_min": 7000,
+    "salary_max": null,
+    "salary_currency": "USD",
+    "work_format": "remote",
+    "application_urls": [
+      "https://jobs.example.com/devops-sr"
+    ]
+  },
+  "principal-grade": {
+    "is_job_post": true,
+    "detected_grade": "principal",
+    "salary_min": 600000,
+    "salary_max": 800000,
+    "salary_currency": "RUB",
+    "work_format": "hybrid",
+    "application_urls": [
+      "https://careers.example.com/principal"
+    ]
+  },
+  "intern-qa": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Manual QA"
+    ],
+    "detected_grade": "intern",
+    "salary_min": 40000,
+    "salary_max": 60000,
+    "salary_currency": "RUB",
+    "work_format": "office",
+    "application_urls": [
+      "https://forms.example.com/intern-qa"
+    ]
+  },
+  "only-tme-no-apply-url": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Python"
+    ],
+    "detected_grade": "middle",
+    "salary_min": 220000,
+    "salary_max": 280000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "application_urls": []
+  },
+  "flutter-mobile": {
+    "is_job_post": true,
+    "detected_grade": "middle",
+    "salary_min": 250000,
+    "salary_max": 320000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "application_urls": [
+      "https://example.com/flutter"
+    ]
+  }
+}

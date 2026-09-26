@@ -128,9 +128,17 @@ class VacancyAIExtraction(BaseModel):
     def norm_currency(cls, v: object) -> str | None:
         if v is None or (isinstance(v, str) and not str(v).strip()):
             return None
-        from tg_jobs_parser.fx.convert import normalize_currency
+        from tg_jobs_parser.fx.convert import parse_salary_currency
 
-        return normalize_currency(str(v).strip().upper()[:8], default_if_missing="RUB")
+        # Сохраняем период (…/HOUR): normalize_currency оставляет только ISO.
+        iso, period = parse_salary_currency(str(v).strip())
+        if not iso:
+            return None
+        if period == "hour":
+            return f"{iso}/HOUR"
+        if period == "year":
+            return f"{iso}/YEAR"
+        return iso
 
 
 Importance = Literal["critical", "important", "secondary"]

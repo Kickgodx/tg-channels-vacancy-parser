@@ -15,6 +15,20 @@ cd frontend && npm run build                   # tsc -b + vite build
   `backend/db/vacancy_metrics.py`) на каждый вызов ходят за курсами в ЦБ —
   прогон растягивается с 10 с до ~5 мин. Тест, которому нужен курс, должен
   подменять `fx_repository.ensure_latest_rates`, а не полагаться на сеть.
+- LLM live evals помечены `@pytest.mark.llm` — **не** входят в обычный
+  `pytest -q`. Опционально:
+  `pytest -m llm` или
+  `.venv/Scripts/python.exe -m tg_jobs_parser.evals.run_extraction`.
+
+## LLM hygiene (промпты / golden / evals)
+
+- Версии: `EXTRACT_PROMPT_VERSION`, `MATCH_PROMPT_VERSION`,
+  `COVER_LETTER_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py`.
+  Смысловое изменение промпта → **bump** версии (кэш ключуется версией).
+- Golden extraction: `evals/golden/extraction.jsonl`. Новый кейс — новая
+  строка JSONL + запись в `evals/fixtures/extraction_outputs.json` (для
+  offline CI).
+- Scorer: `tg_jobs_parser/evals/score_extraction.py`.
 
 ## Миграции
 

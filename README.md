@@ -286,8 +286,11 @@ tg_jobs_parser/
     parsers/               — Telethon
     extraction/            — rules
     ai/                    — OpenRouter, кэш, token cost
+    evals/                 — scorer + live runner golden extraction
     filters/, deduplication/, analytics/, exporters/
 
+  evals/golden/            — golden JSONL (extraction; match/cover — позже)
+  evals/fixtures/          — offline ответы для pytest
   sessions/                — Telethon session (не в git)
   .cache/ai_extractions/   — дисковый кэш LLM
   output/                  — Excel/JSON при экспорте
@@ -367,9 +370,31 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 | `concurrency`, `requests_per_minute` | Темп и параллелизм |
 | `stop_llm_when_rate_limited` | Отключить LLM при 429 до конца прогона |
 | `max_completion_tokens` | Лимит выходных токенов |
-| `use_cache` | Дисковый кэш `.cache/ai_extractions/` |
+| `use_cache` | Дисковый/Postgres кэш LLM |
+| `prompt_version` | Должен совпадать с `EXTRACT_PROMPT_VERSION` в коде; кэш ключуется константой |
 
 Ключ в `.env`: `OPENROUTER_API_KEY=sk-or-v1-...`
+
+### LLM golden set и evals
+
+Регрессии extraction ловятся без «на глаз»:
+
+| Артефакт | Путь |
+|----------|------|
+| Golden dataset | `evals/golden/extraction.jsonl` |
+| Offline fixtures | `evals/fixtures/extraction_outputs.json` |
+| Scorer | `tg_jobs_parser/evals/score_extraction.py` |
+| Версии промптов | `EXTRACT_PROMPT_VERSION` / `MATCH_PROMPT_VERSION` / `COVER_LETTER_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py` |
+
+```powershell
+# Offline (в обычном pytest -q)
+.venv\Scripts\python.exe -m pytest tests/test_evals_extraction.py -q
+
+# Live против OpenRouter (дорого; не в CI)
+.venv\Scripts\python.exe -m tg_jobs_parser.evals.run_extraction
+```
+
+Правило: изменили system/few-shot extraction → bump `EXTRACT_PROMPT_VERSION` → старый кэш не подхватится. Новый кейс — строка в JSONL + fixture для offline.
 
 В UI и в `run_params` доступен блок **`ai_stats`**: вызовы, кэш, токены, **стоимость USD** (input / output / total).
 

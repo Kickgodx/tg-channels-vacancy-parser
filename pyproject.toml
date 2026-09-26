@@ -46,3 +46,7 @@ where = ["."]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-m \"not llm\""
+markers = [
+  "llm: live OpenRouter calls (needs OPENROUTER_API_KEY; not in default CI)",
+]

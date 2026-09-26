@@ -229,7 +229,13 @@ class AiConfig(BaseModel):
         description="При X-RateLimit-Remaining=0 / дневном лимите — отключить LLM до конца прогона (rules).",
     )
     use_few_shot: bool = False
-    prompt_version: str = "v1"
+    prompt_version: str = Field(
+        default="extract-v3",
+        description=(
+            "Должен совпадать с EXTRACT_PROMPT_VERSION в ai/prompts.py. "
+            "Кэш всегда ключуется константой; расхождение → warning."
+        ),
+    )
     use_cache: bool = True
     cache_backend: str = Field(
         default="postgres",
