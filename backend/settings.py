@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     jwt_secret: str | None = Field(default=None, alias="JWT_SECRET")
     jwt_ttl_minutes: int = Field(default=60, alias="JWT_TTL_MINUTES")
     auth_registration_open: bool = Field(default=True, alias="AUTH_REGISTRATION_OPEN")
+    http_log_bodies: bool = Field(default=True, alias="HTTP_LOG_BODIES")
+    http_log_body_limit: int = Field(default=4096, alias="HTTP_LOG_BODY_LIMIT")
 
     @property
     def cors_origin_list(self) -> list[str]:

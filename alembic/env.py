@@ -10,7 +10,9 @@ from backend.db.base import Base
 from backend.db import models  # noqa: F401 — регистрация таблиц
 
 config = context.config
-if config.config_file_name is not None:
+# Из backend (migrate.upgrade_head) логирование уже настроено — fileConfig
+# отключил бы все существующие логгеры приложения и подменил root-handler.
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata

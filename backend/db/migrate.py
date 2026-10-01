@@ -22,6 +22,7 @@ def alembic_ini_path() -> Path:
 
 def upgrade_head() -> None:
     cfg = Config(str(alembic_ini_path()))
+    cfg.attributes["configure_logger"] = False
     command.upgrade(cfg, "head")
 
 
