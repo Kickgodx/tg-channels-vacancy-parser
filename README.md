@@ -62,6 +62,8 @@ OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
 # JWT_SECRET=                     # подпись access-токенов; без него — эфемерный (сессии сгорают при рестарте)
 # JWT_TTL_MINUTES=60              # TTL access-токена
 # AUTH_REGISTRATION_OPEN=true     # false — регистрация закрыта после первого пользователя
+# HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе
+# HTTP_LOG_BODY_LIMIT=4096        # макс. символов тела в логе, дальше — «…[truncated, N bytes]»
 ```
 
 Первый вход в UI — через регистрацию на странице `/login`; подробнее — в
@@ -471,6 +473,12 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` из формата логов и шлёт в Loki (`observability/alloy-config.alloy`) |
 
 Конфигурация: `observability/prometheus.yml`, `observability/loki-config.yml`, `observability/alloy-config.alloy`, provisioning Grafana — `observability/grafana/provisioning/` (datasource Loki добавлен, логи — в Explore рядом с метриками).
+
+**HTTP-лог** (`backend/http_logging.py`, логгер `backend.http`, вместо `uvicorn.access`): одна строка на запрос — `METHOD path status Nms {json}`, в JSON — заголовки запроса и ответа, тела для JSON / form / `text/*` / XML (SSE, бинарные ответы и `Content-Disposition: attachment` — без тела). Маскируются `Authorization` (остаётся схема: `Bearer ***`), `Cookie`/`Set-Cookie`, `X-API-Key`, query-параметры и ключи тела вида `password`/`token`/`access_token`/`secret`/`api_key`. Уровень: 4xx — `WARNING`, 5xx — `ERROR`; `/metrics` не логируется. Разбор в Grafana Explore:
+
+```logql
+{service="backend", logger="backend.http"} | regexp `(?P<http>\{.*\})$` | line_format "{{.http}}" | json
+```
 
 Из health-check, OpenAPI и `/metrics` HTTP-метрики не собираются (шум от probes и документации). LLM-метрики пишутся при парсинге с `ai.enabled: true` в том же процессе backend. При недоступной БД `db_*` gauges отдают пустой набор — scrape не падает.
 
