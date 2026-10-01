@@ -110,6 +110,10 @@ app = FastAPI(
     version="0.2.0",
     description="Backend: Telethon parsing, AI enrichment, PostgreSQL storage",
     lifespan=lifespan,
+    # FastAPI >= 0.142 трассирует сам и добавляет свой OTLP-экспортёр к глобальному
+    # provider'у — с нашей инструментацией (backend/tracing.py) это дубли span'ов
+    # и трассы без исключений путей. Старые версии кладут параметр в app.extra.
+    telemetry={"tracing": False, "metrics": False, "logs": False, "auto_configure": False},
 )
 
 settings = get_settings()
@@ -158,8 +162,11 @@ def main() -> None:
     import uvicorn
 
     s = get_settings()
+    # Объект, а не строка "backend.main:app": при `python -m backend.main` строка
+    # заставила бы uvicorn импортировать модуль второй раз — второй app без
+    # OTel-инструментации (её получил первый, из `__main__`).
     uvicorn.run(
-        "backend.main:app",
+        app,
         host=s.api_host,
         port=s.api_port,
         reload=False,

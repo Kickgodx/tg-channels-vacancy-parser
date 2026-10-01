@@ -333,6 +333,8 @@ poetry install --extras telethon   # cryptg (опционально)
 poetry install --extras ai         # OpenRouter
 ```
 
+**Версии зависимостей фиксирует `poetry.lock`.** Docker-образ backend ставит их из lock-файла: `poetry export` → `pip install --require-hashes`, затем проект `--no-deps` и `pip check`. Поэтому в контейнере те же версии, что локально и в тестах, а не самые свежие из диапазонов `pyproject.toml`. Новая зависимость: `poetry add <pkg>`, обновление: `poetry update <pkg>`. Оба коммитятся вместе с `poetry.lock`, а `poetry lock` без `--regenerate` уже залоченные версии не поднимает.
+
 Проверка:
 
 ```powershell
