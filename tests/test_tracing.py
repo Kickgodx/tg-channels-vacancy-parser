@@ -151,6 +151,56 @@ def test_llm_call_span_has_genai_attributes(exporter, monkeypatch):
     assert "Письмо" not in str(dict(span.attributes))
 
 
+@pytest.mark.parametrize(
+    "instrumentor_path",
+    [
+        "opentelemetry.instrumentation.fastapi:FastAPIInstrumentor",
+        "opentelemetry.instrumentation.sqlalchemy:SQLAlchemyInstrumentor",
+        "opentelemetry.instrumentation.httpx:HTTPXClientInstrumentor",
+    ],
+)
+def test_installed_libraries_satisfy_instrumentations(instrumentor_path):
+    """При конфликте версий instrument() молча ничего не делает (так SQL пропал из трасс в Docker)."""
+    import importlib
+
+    from opentelemetry.instrumentation.dependencies import get_dependency_conflicts
+
+    module, cls = instrumentor_path.split(":")
+    instrumentor = getattr(importlib.import_module(module), cls)()
+    assert get_dependency_conflicts(instrumentor.instrumentation_dependencies()) is None
+
+
+def test_sql_spans_are_children_of_current_span(exporter):
+    import sqlalchemy
+    from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
+
+    instrumentor = SQLAlchemyInstrumentor()
+    instrumentor.instrument(tracer_provider=trace.get_tracer_provider())
+    try:
+        engine = sqlalchemy.create_engine("sqlite://")
+        with trace.get_tracer("test").start_as_current_span("vacancy.match") as parent:
+            with engine.connect() as conn:
+                conn.execute(sqlalchemy.text("SELECT 1"))
+        engine.dispose()
+    finally:
+        instrumentor.uninstrument()
+
+    sql = [s for s in exporter.get_finished_spans() if s.name.startswith("SELECT")]
+    assert sql and all(s.parent.span_id == parent.get_span_context().span_id for s in sql)
+
+
+def test_main_serves_the_instrumented_app_object(monkeypatch):
+    """Строка "backend.main:app" при `python -m backend.main` дала бы второй, неинструментированный app."""
+    import uvicorn
+
+    import backend.main as backend_main
+
+    calls = []
+    monkeypatch.setattr(uvicorn, "run", lambda target, **kw: calls.append(target))
+    backend_main.main()
+    assert calls == [backend_main.app]
+
+
 def test_post_workers_inherit_parent_span(exporter):
     from tg_jobs_parser.parse_runner import _process_posts_parallel
 

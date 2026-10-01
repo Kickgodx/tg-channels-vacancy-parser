@@ -1,3 +1,19 @@
+# Зависимости ставятся из poetry.lock (те же версии, что проверены локально и в тестах),
+# а не по диапазонам из pyproject.toml: иначе каждая сборка тянет свежие версии.
+
+# --- 1. poetry.lock → requirements.txt с хешами (Poetry в итоговый образ не попадает)
+FROM python:3.12-slim AS requirements
+
+RUN pip install --no-cache-dir "poetry==2.3.2" "poetry-plugin-export==1.10.1"
+
+WORKDIR /src
+COPY pyproject.toml poetry.lock ./
+# README.md объявлен в pyproject — Poetry проверяет, что он есть; для export хватит пустого.
+RUN touch README.md \
+    && poetry check --lock \
+    && poetry export --only main --format requirements.txt --output requirements.txt
+
+# --- 2. образ backend
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -6,17 +22,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=requirements /src/requirements.txt ./
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
+
 COPY pyproject.toml README.md alembic.ini ./
 COPY tg_jobs_parser ./tg_jobs_parser
 COPY backend ./backend
 COPY alembic ./alembic
 COPY config.yaml llm_models.yaml ./
 
-RUN pip install --no-cache-dir -e .
+# Сам проект — без зависимостей: они уже стоят ровно по lock.
+RUN pip install --no-cache-dir --no-deps -e . \
+    && pip check
 
 ENV PYTHONUNBUFFERED=1
 ENV LOG_DIR=
 
 EXPOSE 8000
 
-CMD ["python", "-m", "backend.main"]
+# Console script из pyproject (backend.main:main): модуль импортируется под своим
+# именем (логгеры `backend.main`, а не `__main__`) и выполняется ровно один раз.
+CMD ["tg-jobs-api"]

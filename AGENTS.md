@@ -37,6 +37,18 @@ Alembic-цепочка инкрементальная, `upgrade head` приме
 `down -v`. Колонки с FK добавлять через `op.batch_alter_table` с **именованным**
 constraint: SQLite (тесты) не умеет `ALTER TABLE ADD COLUMN` с FK.
 
+## Зависимости
+
+- Источник версий — `poetry.lock`: Docker (`Dockerfile.backend`) ставит ровно его
+  (`poetry export` → `pip install --require-hashes`). Изменили зависимости в
+  `pyproject.toml` → `poetry lock` и коммит lock-файла; `.venv` держать в
+  синхроне с lock (иначе тесты проверяют не то, что уедет в образ).
+- OpenTelemetry: SDK `1.X` и contrib `0.Yb0` — только парой. Инструментация при
+  несовместимой версии библиотеки молча не включается — это ловит
+  `test_installed_libraries_satisfy_instrumentations` (`tests/test_tracing.py`).
+- PowerShell 5 (`Set-Content -Encoding utf8`, `>`) пишет BOM/UTF-16 — TOML/JSON
+  править через Python или edit-инструмент.
+
 ## Прочее
 
 - Реализованные фичи описываются в `README.md`; из `ROADMAP.md` выполненный
