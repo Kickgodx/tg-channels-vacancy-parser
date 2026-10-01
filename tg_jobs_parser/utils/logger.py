@@ -19,6 +19,8 @@ from contextvars import ContextVar
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
 
+from opentelemetry import trace
+
 request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 """ID текущего HTTP-запроса (MDC): ставит ``backend.http_logging``, попадает в каждую строку лога."""
 
@@ -29,12 +31,26 @@ _listener: QueueListener | None = None
 
 
 class RequestIdFilter(logging.Filter):
-    """Добавляет ``record.request_id`` и префикс ``request_id=… | `` (пустой вне запроса)."""
+    """MDC-контекст записи: ``request_id`` (HTTP-запрос) и ``trace_id`` (текущий sampled span).
+
+    Префикс ``request_id=… trace_id=… | `` — только из имеющихся частей, вне
+    запроса/трассы пустой. Без настроенного OpenTelemetry SDK span'ов нет.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
         rid = request_id_var.get()
+        span_ctx = trace.get_current_span().get_span_context()
+        trace_id = (
+            format(span_ctx.trace_id, "032x")
+            if span_ctx.is_valid and span_ctx.trace_flags.sampled
+            else None
+        )
         record.request_id = rid
-        record.request_id_part = f"request_id={rid} | " if rid else ""
+        record.trace_id = trace_id
+        parts = [f"request_id={rid}"] if rid else []
+        if trace_id:
+            parts.append(f"trace_id={trace_id}")
+        record.context_part = f"{' '.join(parts)} | " if parts else ""
         return True
 
 
@@ -86,7 +102,7 @@ def setup_logging(
     root.handlers.clear()
     root.setLevel(level)
     formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)s | %(name)s | %(request_id_part)s%(message)s",
+        "%(asctime)s | %(levelname)s | %(name)s | %(context_part)s%(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]

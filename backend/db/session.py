@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
+import sqlalchemy
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.db.base import Base
@@ -37,7 +37,9 @@ def get_engine():
         if url.startswith("postgresql"):
             pool_kw["pool_size"] = 10
             pool_kw["max_overflow"] = 20
-        _engine = create_engine(url, connect_args=connect_args, **pool_kw)
+        # Через модуль, а не `from sqlalchemy import create_engine`: OTel-инструментация
+        # подменяет `sqlalchemy.create_engine` уже после импорта этого модуля.
+        _engine = sqlalchemy.create_engine(url, connect_args=connect_args, **pool_kw)
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
     return _engine
 

@@ -1,0 +1,39 @@
+# Grafana Tempo single-binary: хранилище трасс на локальном диске, retention 7 дней.
+# Трассы приходят по OTLP от Alloy (backend → alloy:4318 → tempo:4317).
+# Монтируется в контейнер как /etc/tempo/tempo.yaml.
+
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 168h # 7 дней
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+overrides:
+  defaults:
+    global:
+      # Прогон парсинга с AI — одна трасса на тысячи LLM/HTTP/SQL span'ов.
+      max_bytes_per_trace: 50000000

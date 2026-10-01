@@ -39,6 +39,8 @@ services:
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       PYTHONUNBUFFERED: "1"
       LOG_DIR: ""
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
     env_file:
       - .env
     volumes:
@@ -88,6 +90,7 @@ services:
     depends_on:
       - prometheus
       - loki
+      - tempo
     restart: unless-stopped
 
   loki:
@@ -116,6 +119,21 @@ services:
       - alloy_data:/var/lib/alloy/data
     depends_on:
       - loki
+      - tempo
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.7.2
+    logging: *default-logging
+    # Образ работает под uid 10001, а named volume создаётся root'ом — без
+    # этого Tempo не может писать WAL/блоки в /var/tempo.
+    user: root
+    command: -config.file=/etc/tempo/tempo.yaml
+    ports:
+      - "3200:3200"
+    volumes:
+      - ./observability/tempo-config.yml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
     restart: unless-stopped
 
 volumes:
@@ -123,3 +141,4 @@ volumes:
   grafana_data:
   loki_data:
   alloy_data:
+  tempo_data:

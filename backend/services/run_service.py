@@ -7,6 +7,9 @@ import threading
 import time
 import uuid
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
 from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -23,6 +26,7 @@ from backend.services.progress_bus import progress_bus
 from backend.services.run_registry import run_registry
 
 _LOG = logging.getLogger(__name__)
+_TRACER = trace.get_tracer(__name__)
 
 
 def start_parse_run(config: AppConfig, body: RunCreateRequest) -> uuid.UUID:
@@ -39,9 +43,10 @@ def start_parse_run(config: AppConfig, body: RunCreateRequest) -> uuid.UUID:
     with session_scope() as session:
         repo.set_run_status(session, run_id, "running")
 
+    origin = trace.get_current_span().get_span_context()
     thread = threading.Thread(
         target=_run_worker,
-        args=(run_id, config, active.cancel_token),
+        args=(run_id, config, active.cancel_token, origin),
         name=f"parse-run-{run_id}",
         daemon=True,
     )
@@ -58,11 +63,27 @@ def cancel_run(run_id: uuid.UUID) -> bool:
     return True
 
 
-def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
-    from tg_jobs_parser.utils.logger import setup_logging
+def _run_worker(
+    run_id: uuid.UUID,
+    config: AppConfig,
+    cancel_token,
+    origin: trace.SpanContext | None = None,
+) -> None:
+    """Прогон — отдельная трасса ``parse_run`` (минуты–часы) со ссылкой на POST /runs."""
+    links = [trace.Link(origin)] if origin is not None and origin.is_valid else None
+    with _TRACER.start_as_current_span(
+        "parse_run",
+        links=links,
+        attributes={
+            "parse.run_id": str(run_id),
+            "parse.channels": len(config.sources.channels),
+            "parse.ai_enabled": config.ai.enabled,
+        },
+    ) as span:
+        _run_worker_traced(run_id, config, cancel_token, span)
 
-    setup_logging()
 
+def _run_worker_traced(run_id: uuid.UUID, config: AppConfig, cancel_token, span) -> None:
     active = run_registry.get(run_id)
     if active is None:
         return
@@ -182,6 +203,12 @@ def _run_worker(run_id: uuid.UUID, config: AppConfig, cancel_token) -> None:
                 repo.set_run_status(session, run_id, "failed", error_message=str(e))
     finally:
         res = result or active.result
+        span.set_attribute("parse.status", active.status or "unknown")
+        if res is not None:
+            span.set_attribute("parse.posts_fetched", res.posts_fetched)
+            span.set_attribute("parse.vacancies_unique", len(res.vacancies_unique))
+        if active.status == "failed":
+            span.set_status(Status(StatusCode.ERROR, active.error or "failed"))
         record_parse_run_finished(
             status=active.status,
             posts_fetched=res.posts_fetched if res else 0,

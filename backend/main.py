@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry import trace
 
 from backend.api.routes import (
     ai_cache,
@@ -27,6 +28,7 @@ from backend.db import repository as repo
 import backend.observability  # noqa: F401 — регистрация доменных метрик и db_* gauges в /metrics
 from backend.db.session import init_db, session_scope
 from backend.http_logging import HttpLoggingMiddleware
+from backend.tracing import setup_tracing, shutdown_tracing
 from backend.settings import get_settings
 from prometheus_fastapi_instrumentator import Instrumentator
 from tg_jobs_parser.config.loader import load_config
@@ -37,6 +39,7 @@ from tg_jobs_parser.utils.logger import setup_logging
 setup_logging()
 try_load_dotenv()
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+_TRACER = trace.get_tracer(__name__)
 
 
 def _sync_fx_on_startup() -> None:
@@ -46,8 +49,10 @@ def _sync_fx_on_startup() -> None:
         cfg = load_config(get_settings().config_path)
         if not cfg.fx.enabled or cfg.fx.sync_days_on_startup <= 0:
             return
-        with session_scope() as session:
-            n = fx_repo.sync_recent_days(session, cfg.fx)
+        with _TRACER.start_as_current_span("fx.sync_on_startup") as span:
+            with session_scope() as session:
+                n = fx_repo.sync_recent_days(session, cfg.fx)
+            span.set_attribute("fx.rates_synced", n)
         log.info(
             "Курсы ЦБ: синхронизировано записей за последние %s дн.: %s",
             cfg.fx.sync_days_on_startup,
@@ -97,6 +102,7 @@ async def lifespan(_app: FastAPI):
     finally:
         retention_stop.set()
         retention_thread.join(timeout=1)
+        shutdown_tracing()
 
 
 app = FastAPI(
@@ -121,6 +127,7 @@ app.add_middleware(
     body_limit=settings.http_log_body_limit,
     exclude_paths=settings.http_log_exclude_path_set,
 )
+setup_tracing(app, settings)
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")

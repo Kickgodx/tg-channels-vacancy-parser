@@ -29,6 +29,13 @@ dependencies = [
   "prometheus-fastapi-instrumentator (>=7.0.0)",
   "pwdlib[argon2]>=0.2.0",
   "pyjwt>=2.8.0",
+  # OpenTelemetry: SDK и contrib-инструментации выпускаются парами (1.X ↔ 0.Yb0) — держим в паре.
+  "opentelemetry-api==1.44.0",
+  "opentelemetry-sdk==1.44.0",
+  "opentelemetry-exporter-otlp-proto-http==1.44.0",
+  "opentelemetry-instrumentation-fastapi==0.65b0",
+  "opentelemetry-instrumentation-sqlalchemy==0.65b0",
+  "opentelemetry-instrumentation-httpx==0.65b0",
 ]
 
 [project.optional-dependencies]

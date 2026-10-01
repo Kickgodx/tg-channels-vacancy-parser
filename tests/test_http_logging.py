@@ -134,7 +134,7 @@ def test_incoming_request_id_reused_only_if_uuid(mini_client):
 def test_route_logs_carry_request_id_prefix(mini_client):
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
-    handler.setFormatter(logging.Formatter("%(name)s | %(request_id_part)s%(message)s"))
+    handler.setFormatter(logging.Formatter("%(name)s | %(context_part)s%(message)s"))
     handler.addFilter(RequestIdFilter())
     root = logging.getLogger()
     root.addHandler(handler)

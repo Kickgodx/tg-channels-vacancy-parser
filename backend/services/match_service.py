@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import time
 
+from opentelemetry import trace
+
 from backend.db import repository as repo
 from backend.observability import record_match
 from backend.settings import get_settings
@@ -13,6 +15,7 @@ from tg_jobs_parser.ai.schema import calculate_overall_score
 from tg_jobs_parser.config.loader import load_config
 
 _LOG = logging.getLogger(__name__)
+_TRACER = trace.get_tracer(__name__)
 
 
 def match_single(
@@ -23,24 +26,29 @@ def match_single(
     ``overall_score`` считается здесь (детерминированно), LLM отдаёт только
     breakdown-оценки и объяснение.
     """
-    cfg = load_config(get_settings().config_path)
-    max_chars = cfg.ai.max_input_chars
-    started = time.perf_counter()
-    try:
-        client = OpenRouterClient(cfg.ai)
+    with _TRACER.start_as_current_span(
+        "vacancy.match", attributes={"resume.id": resume_id, "vacancy.id": vacancy_id}
+    ) as span:
+        cfg = load_config(get_settings().config_path)
+        max_chars = cfg.ai.max_input_chars
+        started = time.perf_counter()
         try:
-            extraction, usage = client.match_with_fallback(
-                resume_text=resume_text[:max_chars],
-                vacancy_text=vacancy_text[:max_chars],
-            )
-        finally:
-            client.close()
-    except Exception:
-        record_match(outcome="error", duration_seconds=time.perf_counter() - started)
-        raise
-    overall_score = calculate_overall_score(
-        extraction.breakdown, extraction.missing_skills
-    )
+            client = OpenRouterClient(cfg.ai)
+            try:
+                extraction, usage = client.match_with_fallback(
+                    resume_text=resume_text[:max_chars],
+                    vacancy_text=vacancy_text[:max_chars],
+                )
+            finally:
+                client.close()
+        except Exception:
+            record_match(outcome="error", duration_seconds=time.perf_counter() - started)
+            raise
+        overall_score = calculate_overall_score(
+            extraction.breakdown, extraction.missing_skills
+        )
+        span.set_attribute("match.overall_score", overall_score)
+        span.set_attribute("gen_ai.response.model", usage.model)
     record_match(
         outcome="success",
         duration_seconds=time.perf_counter() - started,
