@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     auth_registration_open: bool = Field(default=True, alias="AUTH_REGISTRATION_OPEN")
     http_log_bodies: bool = Field(default=True, alias="HTTP_LOG_BODIES")
     http_log_body_limit: int = Field(default=4096, alias="HTTP_LOG_BODY_LIMIT")
+    otel_enabled: bool = Field(default=False, alias="OTEL_ENABLED")
+    otel_traces_sample_ratio: float = Field(default=1.0, alias="OTEL_TRACES_SAMPLE_RATIO")
     http_log_exclude_paths: str = Field(
         default="/metrics,/api/v1/health,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico",
         alias="HTTP_LOG_EXCLUDE_PATHS",

@@ -28,6 +28,8 @@ from collections import deque
 from typing import Any
 from urllib.parse import parse_qsl, urlencode
 
+from opentelemetry import trace
+
 from tg_jobs_parser.utils.logger import request_id_var
 
 _LOG = logging.getLogger("backend.http")
@@ -199,6 +201,7 @@ class HttpLoggingMiddleware:
         started = time.perf_counter()
         request_id = resolve_request_id(scope.get("headers") or [])
         token = request_id_var.set(request_id)
+        trace.get_current_span().set_attribute("request_id", request_id)
         method = scope["method"]
         query = redact_query(scope.get("query_string", b"").decode("latin-1"))
         path = scope["path"] + (f"?{query}" if query else "")

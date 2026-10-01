@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import re
@@ -11,6 +12,9 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import TYPE_CHECKING
 from datetime import datetime, timezone
 from pathlib import Path
+
+from opentelemetry import context as otel_context
+from opentelemetry import trace
 
 from tg_jobs_parser.analytics.metrics_builder import build_metrics
 from tg_jobs_parser.config.schema import AppConfig
@@ -60,6 +64,7 @@ if TYPE_CHECKING:
     from tg_jobs_parser.ai.enricher import AIEnrichmentService
 
 _LOG = get_logger(__name__)
+_TRACER = trace.get_tracer(__name__)
 
 
 def _channel_parser(
@@ -286,7 +291,12 @@ def _process_posts_parallel(
     """Параллельная пост-обработка с проверкой отмены между завершёнными задачами."""
     processed = 0
     with pool_cls(max_workers=workers, thread_name_prefix="post-proc") as ex:
-        futures = {ex.submit(process_one, post): post for post in all_posts}
+        # copy_context: воркеры наследуют текущий OTel-span (LLM-вызовы — дети
+        # parse.process_posts, а не отдельные трассы); один Context на задачу.
+        futures = {
+            ex.submit(contextvars.copy_context().run, process_one, post): post
+            for post in all_posts
+        }
         pending = set(futures.keys())
         while pending:
             if cancel and cancel.is_cancelled():
@@ -301,6 +311,11 @@ def _process_posts_parallel(
                 yield processed, v
                 if processed % batch_step == 0 or processed == len(all_posts):
                     emit_progress(processed)
+
+
+def _end_span(span: trace.Span, ctx_token) -> None:
+    otel_context.detach(ctx_token)
+    span.end()
 
 
 def _api_run(cli_overrides: dict | None) -> bool:
@@ -397,7 +412,13 @@ def run_parse(
     try:
         if cancel:
             cancel.check()
-        fetch_results = channel_fetcher.fetch_posts_many(channels_unique)
+        with _TRACER.start_as_current_span(
+            "parse.fetch_posts", attributes={"parse.channels": len(channels_unique)}
+        ) as fetch_span:
+            fetch_results = channel_fetcher.fetch_posts_many(channels_unique)
+            fetch_span.set_attribute(
+                "parse.posts_fetched", sum(len(posts) for _, posts, _ in fetch_results)
+            )
         if cancel:
             cancel.check()
     except ParseCancelled:
@@ -469,6 +490,8 @@ def run_parse(
     db_flush_step = max(1, config.parser.db_flush_every_posts)
     db_flush_pending = max(1, config.parser.db_flush_pending_vacancies)
     pending_uniques: list[Vacancy] = []  # уникальные вакансии, ещё не ушедшие в sink
+    process_span: trace.Span | None = None
+    process_ctx_token = None
     try:
 
         def _register_candidate(v: Vacancy) -> None:
@@ -550,6 +573,15 @@ def run_parse(
             workers = max(2, min(8, (os.cpu_count() or 4)))
 
         pool_cls = DaemonThreadPoolExecutor if ai_service is not None else ThreadPoolExecutor
+        process_span = _TRACER.start_span(
+            "parse.process_posts",
+            attributes={
+                "parse.posts_total": len(all_posts),
+                "parse.workers": workers,
+                "parse.ai_enabled": ai_service is not None,
+            },
+        )
+        process_ctx_token = otel_context.attach(trace.set_span_in_context(process_span))
         process_started = time.monotonic()
         if len(all_posts) < 200 and ai_service is None:
             for i, post in enumerate(all_posts, 1):
@@ -599,6 +631,9 @@ def run_parse(
                     )
 
         process_elapsed = time.monotonic() - process_started
+        process_span.set_attribute("parse.vacancies_found", len(candidates))
+        _end_span(process_span, process_ctx_token)
+        process_span = process_ctx_token = None
         _emit_progress(len(all_posts), phase="post_processing_done")
         if ai_service is not None:
             ai_service.log_batch_finished()
@@ -663,5 +698,8 @@ def run_parse(
         _LOG.warning("Прогон прерван (Ctrl+C).")
         raise
     finally:
+        if process_span is not None:
+            process_span.set_attribute("parse.interrupted", True)
+            _end_span(process_span, process_ctx_token)
         if ai_service is not None:
             ai_service.close()

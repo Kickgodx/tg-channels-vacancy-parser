@@ -1,0 +1,176 @@
+"""OpenTelemetry: sampler, excluded_urls, FastAPI-span'ы, корреляция с логами, LLM/parse span'ы."""
+
+from __future__ import annotations
+
+import io
+import logging
+import re
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import SpanKind
+from opentelemetry.util._once import Once
+
+from backend.http_logging import HttpLoggingMiddleware
+from backend.tracing import build_sampler, excluded_urls, instrument_app
+from tg_jobs_parser.utils.logger import RequestIdFilter
+
+
+@pytest.fixture
+def exporter():
+    """Глобальный TracerProvider с in-memory экспортом; после теста — сброс (как в тестах OTel)."""
+    exp = InMemorySpanExporter()
+    provider = TracerProvider(sampler=build_sampler(1.0))
+    provider.add_span_processor(SimpleSpanProcessor(exp))
+    trace._TRACER_PROVIDER_SET_ONCE = Once()
+    trace._TRACER_PROVIDER = None
+    trace.set_tracer_provider(provider)
+    yield exp
+    provider.shutdown()
+    trace._TRACER_PROVIDER_SET_ONCE = Once()
+    trace._TRACER_PROVIDER = None
+
+
+@pytest.fixture
+def log_stream():
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(name)s | %(context_part)s%(message)s"))
+    handler.addFilter(RequestIdFilter())
+    root = logging.getLogger()
+    old_level = root.level
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+    yield stream
+    root.removeHandler(handler)
+    root.setLevel(old_level)
+
+
+def test_excluded_urls_are_anchored_to_full_path():
+    patterns = [re.compile(p) for p in excluded_urls(frozenset({"/metrics", "/api/v1/health"})).split(",")]
+
+    def disabled(url: str) -> bool:
+        return any(p.search(url) for p in patterns)
+
+    assert disabled("http://backend:8000/metrics")
+    assert disabled("http://localhost/api/v1/health")
+    assert not disabled("http://localhost/api/v1/vacancies/metrics")
+    assert not disabled("http://localhost/api/v1/health/extra")
+
+
+def test_sampler_drops_only_orphan_client_spans(exporter):
+    tracer = trace.get_tracer("test")
+    with tracer.start_as_current_span("orphan sql", kind=SpanKind.CLIENT):
+        pass
+    with tracer.start_as_current_span("parse_run"):
+        with tracer.start_as_current_span("child sql", kind=SpanKind.CLIENT):
+            pass
+    with tracer.start_as_current_span("GET /x", kind=SpanKind.SERVER):
+        pass
+    assert sorted(s.name for s in exporter.get_finished_spans()) == ["GET /x", "child sql", "parse_run"]
+
+
+@pytest.fixture
+def traced_client(exporter):
+    app = FastAPI()
+    log = logging.getLogger("backend.test_route")
+
+    @app.get("/items")
+    def items():
+        log.info("inside route")
+        return {"ok": True}
+
+    @app.get("/metrics")
+    def metrics():
+        return {"ok": True}
+
+    app.add_middleware(HttpLoggingMiddleware)
+    instrument_app(
+        app, exclude_paths=frozenset({"/metrics"}), tracer_provider=trace.get_tracer_provider()
+    )
+    with TestClient(app) as c:
+        yield c
+
+
+def test_server_span_has_request_id_and_masked_query(traced_client, exporter, log_stream):
+    r = traced_client.get("/items?access_token=supersecret&page=2")
+    rid = r.headers["x-request-id"]
+
+    server = [s for s in exporter.get_finished_spans() if s.kind == SpanKind.SERVER]
+    assert len(server) == 1
+    span = server[0]
+    assert span.attributes["request_id"] == rid
+    assert not any("supersecret" in str(v) for v in span.attributes.values())
+    assert [s for s in exporter.get_finished_spans() if s.name.endswith((" send", " receive"))] == []
+
+    trace_id = format(span.context.trace_id, "032x")
+    lines = log_stream.getvalue().splitlines()
+    assert f"backend.test_route | request_id={rid} trace_id={trace_id} | inside route" in lines
+    assert any(
+        line.startswith(f"backend.http | request_id={rid} trace_id={trace_id} | REQUEST GET /items?access_token=***")
+        for line in lines
+    )
+    assert not any("supersecret" in line for line in lines if line.startswith("backend."))
+
+
+def test_excluded_path_has_no_span(traced_client, exporter):
+    traced_client.get("/metrics")
+    assert exporter.get_finished_spans() == ()
+
+
+def test_llm_call_span_has_genai_attributes(exporter, monkeypatch):
+    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
+    from tg_jobs_parser.config.schema import AiConfig
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = OpenRouterClient(AiConfig(model="parse/model", cover_letter_model="writer/model"))
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="Письмо"), finish_reason="stop")],
+        usage=SimpleNamespace(prompt_tokens=120, completion_tokens=30),
+    )
+    monkeypatch.setattr(client, "_create_completion", lambda kwargs: response)
+
+    with trace.get_tracer("test").start_as_current_span("cover_letter.generate"):
+        text, _ = client.cover_letter(resume_text="python", vacancy_text="vacancy")
+    assert text == "Письмо"
+
+    span = next(s for s in exporter.get_finished_spans() if s.name.startswith("chat "))
+    assert span.name == "chat writer/model"
+    assert span.attributes["gen_ai.request.model"] == "writer/model"
+    assert span.attributes["llm.task"] == "cover_letter"
+    assert span.attributes["llm.outcome"] == "success"
+    assert span.attributes["gen_ai.usage.input_tokens"] == 120
+    assert span.attributes["gen_ai.usage.output_tokens"] == 30
+    assert "Письмо" not in str(dict(span.attributes))
+
+
+def test_post_workers_inherit_parent_span(exporter):
+    from tg_jobs_parser.parse_runner import _process_posts_parallel
+
+    seen: list[int] = []
+
+    def process_one(post):
+        seen.append(trace.get_current_span().get_span_context().trace_id)
+        return post
+
+    with trace.get_tracer("test").start_as_current_span("parse.process_posts") as parent:
+        results = list(
+            _process_posts_parallel(
+                [1, 2, 3, 4],
+                workers=2,
+                pool_cls=ThreadPoolExecutor,
+                process_one=process_one,
+                cancel=None,
+                batch_step=10,
+                emit_progress=lambda n: None,
+            )
+        )
+    assert len(results) == 4
+    assert seen == [parent.get_span_context().trace_id] * 4

@@ -9,6 +9,9 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
+
 from tg_jobs_parser.ai.prompts import (
     build_cover_letter_messages,
     build_match_messages,
@@ -26,6 +29,7 @@ from tg_jobs_parser.observability.llm_metrics import record_request, record_toke
 from tg_jobs_parser.utils.logger import get_logger
 
 _LOG = get_logger(__name__)
+_TRACER = trace.get_tracer(__name__)
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.I)
 
@@ -97,6 +101,13 @@ def _parse_cover_letter(raw: str) -> str:
     if not text:
         raise ValueError("OpenRouter: пустое письмо")
     return text
+
+
+_LLM_TASKS = {
+    _parse_extraction: "extract",
+    _parse_match: "match",
+    _parse_cover_letter: "cover_letter",
+}
 
 
 def _message_content(message: Any) -> str:
@@ -265,56 +276,75 @@ class OpenRouterClient:
         if extra_body:
             kwargs["extra_body"] = extra_body
 
-        start = time.perf_counter()
-        outcome = "error"
-        usage: LLMUsage | None = None
-        try:
-            response = self._create_completion(kwargs)
-
-            if not response.choices:
-                raise RuntimeError("OpenRouter: пустой choices в ответе")
-
-            choice = response.choices[0]
-            message = choice.message
-            if not getattr(message, "content", None) and choice.finish_reason == "length":
-                raise RuntimeError(
-                    f"OpenRouter: {use_model} исчерпала max_tokens="
-                    f"{self._ai.max_completion_tokens} до ответа (ушло на рассуждения) — "
-                    "увеличьте ai.max_completion_tokens или понизьте reasoning effort"
-                )
-            content = _message_content(message)
-            if not content:
-                raise RuntimeError("OpenRouter: пустой ответ модели")
-
-            usage_raw = response.usage
-            usage = LLMUsage(
-                prompt_tokens=int(getattr(usage_raw, "prompt_tokens", None) or 0),
-                completion_tokens=int(getattr(usage_raw, "completion_tokens", None) or 0),
-                model=use_model,
-            )
+        span_attrs = {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.system": "openrouter",
+            "gen_ai.request.model": use_model,
+            "gen_ai.request.temperature": self._ai.temperature,
+            "gen_ai.request.max_tokens": self._ai.max_completion_tokens,
+            "llm.task": _LLM_TASKS.get(parse, "chat"),
+            "llm.reasoning": bool(use_reasoning),
+        }
+        with _TRACER.start_as_current_span(
+            f"chat {use_model}",
+            kind=SpanKind.CLIENT,
+            attributes={k: v for k, v in span_attrs.items() if v is not None},
+        ) as span:
+            start = time.perf_counter()
+            outcome = "error"
+            usage: LLMUsage | None = None
             try:
-                result = parse(content)
-            except (json.JSONDecodeError, ValueError) as e:
-                outcome = "parse_error"
-                _LOG.warning("Не удалось разобрать JSON от %s: %s", use_model, e)
-                raise
-            outcome = "success"
-            return result, usage
-        except LlmQuotaExhausted:
-            outcome = "rate_limited"
-            raise
-        finally:
-            record_request(
-                model=use_model,
-                outcome=outcome,
-                duration_seconds=time.perf_counter() - start,
-            )
-            if usage is not None:
-                record_tokens(
+                response = self._create_completion(kwargs)
+
+                if not response.choices:
+                    raise RuntimeError("OpenRouter: пустой choices в ответе")
+
+                choice = response.choices[0]
+                if choice.finish_reason:
+                    span.set_attribute("gen_ai.response.finish_reasons", [str(choice.finish_reason)])
+                message = choice.message
+                if not getattr(message, "content", None) and choice.finish_reason == "length":
+                    raise RuntimeError(
+                        f"OpenRouter: {use_model} исчерпала max_tokens="
+                        f"{self._ai.max_completion_tokens} до ответа (ушло на рассуждения) — "
+                        "увеличьте ai.max_completion_tokens или понизьте reasoning effort"
+                    )
+                content = _message_content(message)
+                if not content:
+                    raise RuntimeError("OpenRouter: пустой ответ модели")
+
+                usage_raw = response.usage
+                usage = LLMUsage(
+                    prompt_tokens=int(getattr(usage_raw, "prompt_tokens", None) or 0),
+                    completion_tokens=int(getattr(usage_raw, "completion_tokens", None) or 0),
                     model=use_model,
-                    prompt_tokens=usage.prompt_tokens,
-                    completion_tokens=usage.completion_tokens,
                 )
+                try:
+                    result = parse(content)
+                except (json.JSONDecodeError, ValueError) as e:
+                    outcome = "parse_error"
+                    _LOG.warning("Не удалось разобрать JSON от %s: %s", use_model, e)
+                    raise
+                outcome = "success"
+                return result, usage
+            except LlmQuotaExhausted:
+                outcome = "rate_limited"
+                raise
+            finally:
+                span.set_attribute("llm.outcome", outcome)
+                record_request(
+                    model=use_model,
+                    outcome=outcome,
+                    duration_seconds=time.perf_counter() - start,
+                )
+                if usage is not None:
+                    span.set_attribute("gen_ai.usage.input_tokens", usage.prompt_tokens)
+                    span.set_attribute("gen_ai.usage.output_tokens", usage.completion_tokens)
+                    record_tokens(
+                        model=use_model,
+                        prompt_tokens=usage.prompt_tokens,
+                        completion_tokens=usage.completion_tokens,
+                    )
 
     def extract(
         self,

@@ -31,10 +31,11 @@ docker compose up --build
 | **Prometheus** | http://localhost:9090 |
 | **Grafana** | http://localhost:3000 (login: `admin` / `admin`) |
 | **Loki** | http://localhost:3100 (API; логи смотрятся в Grafana → Explore) |
-| **Alloy** | http://localhost:12345 (UI пайплайна сбора логов) |
+| **Alloy** | http://localhost:12345 (UI пайплайна сбора логов и трасс) |
+| **Tempo** | http://localhost:3200 (API; трассы смотрятся в Grafana → Explore → Tempo) |
 | **PostgreSQL** | `localhost:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
 
-Prometheus, Grafana и стек логов (Loki + Alloy) поднимаются вместе с основным стеком. Backend отдаёт метрики HTTP на `http://localhost:8000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
+Prometheus, Grafana, стек логов (Loki + Alloy) и трассировка (Tempo) поднимаются вместе с основным стеком. Backend отдаёт метрики HTTP на `http://localhost:8000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
 
 ### Первая авторизация Telethon
 
@@ -65,6 +66,11 @@ OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
 # HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе
 # HTTP_LOG_BODY_LIMIT=4096        # макс. символов тела в логе, дальше — «…[truncated, N bytes]»
 # HTTP_LOG_EXCLUDE_PATHS=/metrics,/api/v1/health,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico
+#                                  (те же пути не трассируются)
+# OTEL_ENABLED=false              # OpenTelemetry-трассировка (в compose — true)
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # куда слать OTLP (в compose — http://alloy:4318)
+# OTEL_TRACES_SAMPLE_RATIO=1.0    # доля сохраняемых трасс (head sampling)
+# OTEL_SERVICE_NAME=tg-jobs-parser-backend
 ```
 
 Первый вход в UI — через регистрацию на странице `/login`; подробнее — в
@@ -471,9 +477,10 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **Доменные метрики** | `backend/observability.py`: прогоны (`parse_runs_*`), UPSERT и TTL-архивация вакансий, ручной импорт, матчинг резюме↔вакансия (`vacancy_match_*`), письма (`cover_letter_*`), auth-события, запросы к ЦБ |
 | **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
-| **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` (labels) и `request_id` (structured metadata) из формата логов и шлёт в Loki (`observability/alloy-config.alloy`) |
+| **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и отправляет в Tempo (`observability/alloy-config.alloy`) |
+| **Tempo** | Хранение трасс (local, retention 7 дней — `observability/tempo-config.yml`) |
 
-Конфигурация: `observability/prometheus.yml`, `observability/loki-config.yml`, `observability/alloy-config.alloy`, provisioning Grafana — `observability/grafana/provisioning/` (datasource Loki добавлен, логи — в Explore рядом с метриками).
+Конфигурация: `observability/prometheus.yml`, `observability/loki-config.yml`, `observability/tempo-config.yml`, `observability/alloy-config.alloy`, provisioning Grafana — `observability/grafana/provisioning/` (datasources Prometheus, Loki и Tempo с переходами лог ↔ трасса).
 
 **HTTP-лог** (`backend/http_logging.py`, логгер `backend.http`, вместо `uvicorn.access`). Каждому запросу присваивается `request_id` (UUID; валидный входящий `X-Request-ID` переиспользуется), он возвращается в заголовке ответа `X-Request-ID` и попадает в **каждую** строку лога, записанную во время запроса (и в логи роутов/сервисов): `... | backend.http | request_id=<uuid> | ...`. На запрос — две записи:
 
@@ -491,6 +498,27 @@ Alloy кладёт `request_id` в **structured metadata** Loki (не label — 
 # разобрать JSON HTTP-записей (поля event, status, body_*, headers_*)
 {service="backend", logger="backend.http"} | regexp `(?P<http>\{.*\})$` | line_format "{{.http}}" | json
 ```
+
+### Трассировка (OpenTelemetry → Tempo)
+
+Трасса показывает, на что ушло время внутри одного запроса или прогона: дерево span'ов с длительностями. `backend/tracing.py` поднимает OpenTelemetry SDK при `OTEL_ENABLED=true`. Цепочка: backend → OTLP/HTTP → Alloy (batch) → Tempo → Grafana.
+
+| Что трассируется | Как |
+|---|---|
+| Входящие HTTP | FastAPI-инструментация; span'ы `send`/`receive` отключены, пути из `HTTP_LOG_EXCLUDE_PATHS` не трассируются, `?access_token=` маскируется в атрибутах. Атрибут `request_id` — тот же, что в логах и `X-Request-ID` |
+| SQL | SQLAlchemy-инструментация (текст запроса с плейсхолдерами, без значений параметров) |
+| Исходящие HTTP | httpx-инструментация: OpenRouter (через openai SDK), ЦБ |
+| LLM | `chat <model>`: `gen_ai.request.model`, `gen_ai.usage.input_tokens`/`output_tokens`, `llm.task` (`extract`/`match`/`cover_letter`), `llm.outcome`. Промпты и ответы в span не пишутся |
+| Прогон парсинга | Отдельная трасса `parse_run` (со ссылкой на `POST /runs`): `parse.fetch_posts` (Telethon) → `parse.process_posts` → LLM-вызовы из пула потоков (контекст пробрасывается в воркеры) |
+| Матчинг / письма / курсы ЦБ | `vacancy.match`, `cover_letter.generate`, `fx.sync_on_startup` |
+
+Sampling: доля трасс — `OTEL_TRACES_SAMPLE_RATIO`. Sampler отбрасывает SQL/HTTP-span'ы без родителя: COUNT'ы `db_*`-коллектора на каждый scrape `/metrics` и фоновые запросы иначе дали бы тысячи трасс из одного span'а. Без `OTEL_ENABLED` (CLI, тесты) API OpenTelemetry работает как no-op.
+
+**Связь логов и трасс.** Внутри span'а каждая строка лога получает `trace_id`: `... | request_id=<uuid> trace_id=<32 hex> | ...`. Alloy кладёт его в structured metadata. В Grafana:
+
+- в Loki у строки с `trace_id` есть кнопка **«Открыть трассу»** (derived field);
+- в Tempo у span'а есть **«Logs for this span»**: это логи с тем же `trace_id`;
+- поиск в Tempo (TraceQL): `{ span.request_id = "<uuid>" }`, `{ name = "parse_run" }`, `{ span.llm.task = "match" && duration > 10s }`.
 
 Из health-check, OpenAPI и `/metrics` HTTP-метрики не собираются (шум от probes и документации). LLM-метрики пишутся при парсинге с `ai.enabled: true` в том же процессе backend. При недоступной БД `db_*` gauges отдают пустой набор — scrape не падает.
 

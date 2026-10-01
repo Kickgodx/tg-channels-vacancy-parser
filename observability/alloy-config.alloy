@@ -1,7 +1,9 @@
-// Grafana Alloy: сбор stdout/stderr контейнеров этого compose-проекта в Loki.
-// Пайплайн: discovery.docker → relabel (labels service/container/stream)
-// → loki.source.docker → loki.process (level/logger из формата utils/logger.py)
-// → loki.write.
+// Grafana Alloy — единый коллектор:
+// 1) логи: stdout/stderr контейнеров этого compose-проекта → Loki.
+//    discovery.docker → relabel (labels service/container/stream)
+//    → loki.source.docker → loki.process (level/logger, request_id/trace_id)
+//    → loki.write.
+// 2) трассы: OTLP от backend (http :4318 / grpc :4317) → batch → Tempo.
 
 logging {
 	level  = "info"
@@ -43,9 +45,10 @@ loki.source.docker "containers" {
 loki.process "app" {
 	// Формат backend (tg_jobs_parser/utils/logger.py):
 	// "2026-09-20 10:00:00 | INFO | backend.main | сообщение"
-	// внутри HTTP-запроса: "... | backend.http | request_id=<uuid> | сообщение"
+	// с контекстом: "... | backend.http | request_id=<uuid> trace_id=<32 hex> | сообщение"
+	// (каждая часть контекста необязательна).
 	stage.regex {
-		expression = `^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| (?P<level>[A-Z]+) \| (?P<logger>[^|]+?) \|(?: request_id=(?P<request_id>[0-9a-f-]{36}) \|)?`
+		expression = `^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| (?P<level>[A-Z]+) \| (?P<logger>[^|]+?) \| (?:request_id=(?P<request_id>[0-9a-f-]{36}) ?)?(?:trace_id=(?P<trace_id>[0-9a-f]{32}) )?`
 	}
 
 	stage.labels {
@@ -55,11 +58,12 @@ loki.process "app" {
 		}
 	}
 
-	// request_id уникален на запрос — не label (кардинальность), а structured
-	// metadata: фильтр в LogQL `| request_id="<uuid>"`.
+	// request_id/trace_id уникальны — не labels (кардинальность), а structured
+	// metadata: фильтр в LogQL `| request_id="<uuid>"` / `| trace_id="<hex>"`.
 	stage.structured_metadata {
 		values = {
 			request_id = "",
+			trace_id   = "",
 		}
 	}
 
@@ -69,5 +73,35 @@ loki.process "app" {
 loki.write "local" {
 	endpoint {
 		url = "http://loki:3100/loki/api/v1/push"
+	}
+}
+
+otelcol.receiver.otlp "default" {
+	http {
+		endpoint = "0.0.0.0:4318"
+	}
+
+	grpc {
+		endpoint = "0.0.0.0:4317"
+	}
+
+	output {
+		traces = [otelcol.processor.batch.default.input]
+	}
+}
+
+otelcol.processor.batch "default" {
+	output {
+		traces = [otelcol.exporter.otlp.tempo.input]
+	}
+}
+
+otelcol.exporter.otlp "tempo" {
+	client {
+		endpoint = "tempo:4317"
+
+		tls {
+			insecure = true
+		}
 	}
 }
