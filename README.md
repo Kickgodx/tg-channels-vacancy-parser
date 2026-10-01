@@ -64,6 +64,7 @@ OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
 # AUTH_REGISTRATION_OPEN=true     # false — регистрация закрыта после первого пользователя
 # HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе
 # HTTP_LOG_BODY_LIMIT=4096        # макс. символов тела в логе, дальше — «…[truncated, N bytes]»
+# HTTP_LOG_EXCLUDE_PATHS=/metrics,/api/v1/health,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico
 ```
 
 Первый вход в UI — через регистрацию на странице `/login`; подробнее — в
@@ -444,7 +445,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 По умолчанию `--mode merge` — UPSERT по первичному ключу (существующие строки обновляются).  
 `replace` — сначала очищает все четыре таблицы, затем загружает дамп.
 
-Логи: консоль + `logs/app.log` (в Docker — только stdout, их собирает Alloy в Loki). Графики CLI: `output/charts/` (matplotlib).
+Логи: консоль + `logs/app.log` (в Docker — только stdout, их собирает Alloy в Loki). Запись асинхронная: `QueueHandler` на root кладёт запись в очередь, stdout/файл пишет фоновый `QueueListener` — логирование не блокирует event loop. `app.log` ротируется по 10 МБ, хранится 5 частей `app.log.N.gz`. Stdout контейнеров в `docker-compose.yml` — `json-file` с ротацией (5 × 10 МБ, сжатие ротированных частей). Графики CLI: `output/charts/` (matplotlib).
 
 ---
 
@@ -470,13 +471,24 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **Доменные метрики** | `backend/observability.py`: прогоны (`parse_runs_*`), UPSERT и TTL-архивация вакансий, ручной импорт, матчинг резюме↔вакансия (`vacancy_match_*`), письма (`cover_letter_*`), auth-события, запросы к ЦБ |
 | **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
-| **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` из формата логов и шлёт в Loki (`observability/alloy-config.alloy`) |
+| **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` (labels) и `request_id` (structured metadata) из формата логов и шлёт в Loki (`observability/alloy-config.alloy`) |
 
 Конфигурация: `observability/prometheus.yml`, `observability/loki-config.yml`, `observability/alloy-config.alloy`, provisioning Grafana — `observability/grafana/provisioning/` (datasource Loki добавлен, логи — в Explore рядом с метриками).
 
-**HTTP-лог** (`backend/http_logging.py`, логгер `backend.http`, вместо `uvicorn.access`): одна строка на запрос — `METHOD path status Nms {json}`, в JSON — заголовки запроса и ответа, тела для JSON / form / `text/*` / XML (SSE, бинарные ответы и `Content-Disposition: attachment` — без тела). Маскируются `Authorization` (остаётся схема: `Bearer ***`), `Cookie`/`Set-Cookie`, `X-API-Key`, query-параметры и ключи тела вида `password`/`token`/`access_token`/`secret`/`api_key`. Уровень: 4xx — `WARNING`, 5xx — `ERROR`; `/metrics` не логируется. Разбор в Grafana Explore:
+**HTTP-лог** (`backend/http_logging.py`, логгер `backend.http`, вместо `uvicorn.access`). Каждому запросу присваивается `request_id` (UUID; валидный входящий `X-Request-ID` переиспользуется), он возвращается в заголовке ответа `X-Request-ID` и попадает в **каждую** строку лога, записанную во время запроса (и в логи роутов/сервисов): `... | backend.http | request_id=<uuid> | ...`. На запрос — две записи:
+
+- `REQUEST METHOD path {json}` — до обработки: клиент, заголовки, тело;
+- `RESPONSE METHOD path status Nms {json}` — после ответа: статус, длительность, заголовки, тело.
+
+Тела пишутся для JSON / form / `text/*` / XML (SSE, бинарные ответы и `Content-Disposition: attachment` — без тела). Маскируются `Authorization` (остаётся схема: `Bearer ***`), `Cookie`/`Set-Cookie`, `X-API-Key`, query-параметры и ключи тела вида `password`/`token`/`access_token`/`secret`/`api_key`. Уровень `RESPONSE`: 4xx — `WARNING`, 5xx — `ERROR`. Не логируются шумные эндпоинты из `HTTP_LOG_EXCLUDE_PATHS` (по умолчанию `/metrics`, health-check, Swagger/ReDoc/OpenAPI, favicon) и CORS preflight (`OPTIONS` с `Access-Control-Request-Method`).
+
+Alloy кладёт `request_id` в **structured metadata** Loki (не label — уникален на запрос). В Grafana Explore:
 
 ```logql
+# всё по одному запросу: REQUEST, логи обработчика, RESPONSE
+{service="backend"} | request_id="3f2b8c1e-0d4a-4c7e-9a51-2b6f1d9e8a70"
+
+# разобрать JSON HTTP-записей (поля event, status, body_*, headers_*)
 {service="backend", logger="backend.http"} | regexp `(?P<http>\{.*\})$` | line_format "{{.http}}" | json
 ```
 

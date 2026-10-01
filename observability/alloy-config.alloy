@@ -43,14 +43,23 @@ loki.source.docker "containers" {
 loki.process "app" {
 	// Формат backend (tg_jobs_parser/utils/logger.py):
 	// "2026-09-20 10:00:00 | INFO | backend.main | сообщение"
+	// внутри HTTP-запроса: "... | backend.http | request_id=<uuid> | сообщение"
 	stage.regex {
-		expression = `^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| (?P<level>[A-Z]+) \| (?P<logger>[^|]+?) \|`
+		expression = `^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| (?P<level>[A-Z]+) \| (?P<logger>[^|]+?) \|(?: request_id=(?P<request_id>[0-9a-f-]{36}) \|)?`
 	}
 
 	stage.labels {
 		values = {
 			level  = "",
 			logger = "",
+		}
+	}
+
+	// request_id уникален на запрос — не label (кардинальность), а structured
+	// metadata: фильтр в LogQL `| request_id="<uuid>"`.
+	stage.structured_metadata {
+		values = {
+			request_id = "",
 		}
 	}
 

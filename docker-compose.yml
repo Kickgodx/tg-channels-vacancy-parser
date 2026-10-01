@@ -1,6 +1,17 @@
+# Ротация stdout-логов контейнеров (по умолчанию json-file растёт без лимита):
+# до 5 файлов по 10 МБ на контейнер, ротированные — gzip. Alloy читает логи
+# через Docker API, на сбор в Loki это не влияет.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+    compress: "true"
+
 services:
   postgres:
     image: postgres:16-alpine
+    logging: *default-logging
     environment:
       POSTGRES_USER: tgjobs
       POSTGRES_PASSWORD: tgjobs
@@ -19,6 +30,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
+    logging: *default-logging
     ports:
       - "8000:8000"
     environment:
@@ -42,6 +54,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    logging: *default-logging
     ports:
       - "5173:5173"
     environment:
@@ -51,6 +64,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v3.2.1
+    logging: *default-logging
     ports:
       - "9090:9090"
     volumes:
@@ -61,6 +75,7 @@ services:
 
   grafana:
     image: grafana/grafana:11.5.2
+    logging: *default-logging
     ports:
       - "3000:3000"
     environment:
@@ -77,6 +92,7 @@ services:
 
   loki:
     image: grafana/loki:3.4.2
+    logging: *default-logging
     command: -config.file=/etc/loki/local-config.yaml
     ports:
       - "3100:3100"
@@ -87,6 +103,7 @@ services:
 
   alloy:
     image: grafana/alloy:v1.7.5
+    logging: *default-logging
     # root нужен для чтения docker.sock; Docker Desktop на Windows тоже
     # отдаёт unix-сокет внутрь WSL2-VM, поэтому путь кроссплатформенный.
     user: root

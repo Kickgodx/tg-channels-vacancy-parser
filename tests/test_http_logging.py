@@ -1,9 +1,11 @@
-"""HTTP-лог: заголовки/тела запросов и ответов, маскирование секретов."""
+"""HTTP-лог: request_id, раздельные REQUEST/RESPONSE, маскирование секретов."""
 
 from __future__ import annotations
 
+import io
 import json
 import logging
+import uuid
 
 import pytest
 from fastapi import FastAPI, Request
@@ -11,6 +13,7 @@ from fastapi.responses import Response, StreamingResponse
 from fastapi.testclient import TestClient
 
 from backend.http_logging import MASK, HttpLoggingMiddleware, render_body
+from tg_jobs_parser.utils.logger import RequestIdFilter
 
 
 def _records(caplog) -> list[dict]:
@@ -22,17 +25,25 @@ def _records(caplog) -> list[dict]:
     return out
 
 
-def _last(caplog, path: str) -> dict:
-    return [r for r in _records(caplog) if r["path"].startswith(path)][-1]
+def _last(caplog, path: str, event: str = "response") -> dict:
+    return [
+        r for r in _records(caplog) if r["event"] == event and r["path"].startswith(path)
+    ][-1]
 
 
 @pytest.fixture
 def mini_client():
     app = FastAPI()
+    log = logging.getLogger("backend.test_route")
 
     @app.post("/echo")
     async def echo(request: Request):
         return await request.json()
+
+    @app.get("/sync-log")
+    def sync_log():
+        log.info("inside route")
+        return {"ok": True}
 
     @app.get("/bin")
     def binary():
@@ -71,37 +82,102 @@ def test_auth_bodies_and_headers_are_redacted(api_client, caplog):
     assert r.status_code == 201
     token = r.json()["access_token"]
 
-    rec = _last(caplog, "/api/v1/auth/register")
-    assert rec["method"] == "POST" and rec["status"] == 201
-    assert rec["request"]["body"] == {"email": "a@b.c", "password": MASK}
-    assert rec["response"]["body"]["access_token"] == MASK
-    assert rec["response"]["body"]["user"]["email"] == "a@b.c"
+    req = _last(caplog, "/api/v1/auth/register", "request")
+    resp = _last(caplog, "/api/v1/auth/register")
+    assert req["method"] == "POST" and resp["status"] == 201
+    assert req["body"] == {"email": "a@b.c", "password": MASK}
+    assert resp["body"]["access_token"] == MASK
+    assert resp["body"]["user"]["email"] == "a@b.c"
 
     api_client.get(
         "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}", "X-Trace": "t1"}
     )
-    rec = _last(caplog, "/api/v1/auth/me")
-    assert rec["request"]["headers"]["authorization"] == f"Bearer {MASK}"
-    assert rec["request"]["headers"]["x-trace"] == "t1"
-    assert rec["response"]["body"]["email"] == "a@b.c"
+    req = _last(caplog, "/api/v1/auth/me", "request")
+    assert req["headers"]["authorization"] == f"Bearer {MASK}"
+    assert req["headers"]["x-trace"] == "t1"
+    assert _last(caplog, "/api/v1/auth/me")["body"]["email"] == "a@b.c"
 
     api_client.get(f"/api/v1/auth/me?access_token={token}&x=1")
-    rec = _last(caplog, "/api/v1/auth/me?")
-    assert rec["path"] == "/api/v1/auth/me?access_token=***&x=1"
+    assert _last(caplog, "/api/v1/auth/me?")["path"] == "/api/v1/auth/me?access_token=***&x=1"
 
     full_log = "\n".join(r.getMessage() for r in caplog.records if r.name == "backend.http")
     assert token not in full_log
     assert "hunter22" not in full_log
 
 
+def test_request_and_response_are_separate_records_with_same_id(mini_client, caplog):
+    caplog.set_level(logging.INFO)
+    r = mini_client.post("/echo", json={"a": 1})
+    rid = r.headers["x-request-id"]
+    assert uuid.UUID(rid)
+
+    recs = [x for x in _records(caplog) if x["request_id"] == rid]
+    assert [x["event"] for x in recs] == ["request", "response"]
+    req, resp = recs
+    assert req["body"] == {"a": 1} and "status" not in req
+    assert resp["body"] == {"a": 1} and resp["status"] == 200
+    assert resp["headers"]["x-request-id"] == rid
+
+    messages = [x.getMessage() for x in caplog.records if x.name == "backend.http"]
+    assert messages[-2].startswith("REQUEST POST /echo {")
+    assert messages[-1].startswith("RESPONSE POST /echo 200 ")
+
+
+def test_incoming_request_id_reused_only_if_uuid(mini_client):
+    rid = str(uuid.uuid4())
+    assert mini_client.get("/sync-log", headers={"X-Request-ID": rid}).headers["x-request-id"] == rid
+    other = mini_client.get("/sync-log", headers={"X-Request-ID": "evil | injected"})
+    assert other.headers["x-request-id"] != "evil | injected"
+    assert uuid.UUID(other.headers["x-request-id"])
+
+
+def test_route_logs_carry_request_id_prefix(mini_client):
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(name)s | %(request_id_part)s%(message)s"))
+    handler.addFilter(RequestIdFilter())
+    root = logging.getLogger()
+    root.addHandler(handler)
+    old_level = root.level
+    root.setLevel(logging.INFO)
+    try:
+        rid = mini_client.get("/sync-log").headers["x-request-id"]
+        logging.getLogger("backend.test_route").info("outside request")
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(old_level)
+
+    lines = stream.getvalue().splitlines()
+    assert f"backend.test_route | request_id={rid} | inside route" in lines
+    assert any(line.startswith(f"backend.http | request_id={rid} | REQUEST GET /sync-log") for line in lines)
+    assert any(line.startswith(f"backend.http | request_id={rid} | RESPONSE GET /sync-log 200") for line in lines)
+    assert "backend.test_route | outside request" in lines
+
+
+def test_noisy_endpoints_and_preflight_are_not_logged(api_client, caplog):
+    caplog.set_level(logging.INFO, logger="backend.http")
+    assert api_client.get("/api/v1/health").status_code == 200
+    assert api_client.get("/metrics").status_code == 200
+    assert api_client.get("/openapi.json").status_code == 200
+    preflight = api_client.options(
+        "/api/v1/auth/me",
+        headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "GET"},
+    )
+    assert preflight.status_code == 200
+    assert "x-request-id" not in preflight.headers
+    assert _records(caplog) == []
+
+    api_client.get("/api/v1/auth/me")
+    assert [r["event"] for r in _records(caplog)] == ["request", "response"]
+
+
 def test_nested_json_redaction(mini_client, caplog):
     caplog.set_level(logging.INFO, logger="backend.http")
     payload = {"cfg": {"api_key": "k", "x_api_key": "k2", "max_tokens": 5}, "list": [{"secret": 1}]}
     mini_client.post("/echo", json=payload)
-    rec = _last(caplog, "/echo")
     expected = {"cfg": {"api_key": MASK, "x_api_key": MASK, "max_tokens": 5}, "list": [{"secret": MASK}]}
-    assert rec["request"]["body"] == expected
-    assert rec["response"]["body"] == expected
+    assert _last(caplog, "/echo", "request")["body"] == expected
+    assert _last(caplog, "/echo")["body"] == expected
 
 
 def test_non_text_sse_and_attachments_have_no_body(mini_client, caplog):
@@ -110,14 +186,14 @@ def test_non_text_sse_and_attachments_have_no_body(mini_client, caplog):
         mini_client.get(path)
         rec = _last(caplog, path)
         assert rec["status"] == 200
-        assert "body" not in rec["response"]
-        assert "content-type" in rec["response"]["headers"]
+        assert "body" not in rec
+        assert "content-type" in rec["headers"]
 
 
 def test_large_body_is_truncated(mini_client, caplog):
     caplog.set_level(logging.INFO, logger="backend.http")
     mini_client.get("/big")
-    body = _last(caplog, "/big")["response"]["body"]
+    body = _last(caplog, "/big")["body"]
     assert isinstance(body, str)
     assert body.endswith("bytes]") and "truncated" in body
     assert len(body) < 600

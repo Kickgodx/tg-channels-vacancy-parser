@@ -113,11 +113,13 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 app.add_middleware(
     HttpLoggingMiddleware,
     log_bodies=settings.http_log_bodies,
     body_limit=settings.http_log_body_limit,
+    exclude_paths=settings.http_log_exclude_path_set,
 )
 
 app.include_router(auth.router, prefix="/api/v1")

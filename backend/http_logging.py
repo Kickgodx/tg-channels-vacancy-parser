@@ -1,15 +1,20 @@
 """HTTP-лог запросов/ответов: метод, путь, статус, заголовки и читаемые тела.
 
-Чистый ASGI-middleware (не ``BaseHTTPMiddleware``): приложение получает и
-отдаёт чанки как есть, копия копится только для лога — SSE и выгрузки файлов
-стримятся без буферизации. Тела пишутся только для текстовых типов (JSON,
-form, text/*, XML), кроме ``text/event-stream`` и ``Content-Disposition:
-attachment``. Секреты маскируются: заголовки авторизации и cookies,
-query-параметры и JSON/form-ключи вида password/token/secret/api_key.
+Чистый ASGI-middleware (не ``BaseHTTPMiddleware``). Каждому запросу —
+``request_id`` (UUID; валидный входящий ``X-Request-ID`` переиспользуется),
+он же уходит в заголовок ответа ``X-Request-ID`` и в contextvar
+``request_id_var`` — все логи внутри запроса получают префикс
+``request_id=… |``. Две записи на запрос:
 
-Одна строка на запрос: ``METHOD path status Nms {json}`` — JSON-хвост
-разбирается в Grafana через ``| regexp `(?P<http>\\{.*\\})$` | line_format
-"{{.http}}" | json``.
+- ``REQUEST METHOD path {json}`` — до обработки: заголовки и тело (текстовое
+  тело вычитывается заранее и отдаётся приложению повторно);
+- ``RESPONSE METHOD path status Nms {json}`` — после ответа: заголовки и тело.
+
+Тела ответа копятся только для лога — SSE и выгрузки файлов стримятся без
+буферизации. Тела пишутся только для текстовых типов (JSON, form, text/*,
+XML), кроме ``text/event-stream`` и ``Content-Disposition: attachment``.
+Секреты маскируются: заголовки авторизации и cookies, query-параметры и
+JSON/form-ключи вида password/token/secret/api_key.
 """
 
 from __future__ import annotations
@@ -18,14 +23,19 @@ import json
 import logging
 import re
 import time
+import uuid
+from collections import deque
 from typing import Any
 from urllib.parse import parse_qsl, urlencode
+
+from tg_jobs_parser.utils.logger import request_id_var
 
 _LOG = logging.getLogger("backend.http")
 
 MASK = "***"
+REQUEST_ID_HEADER = "x-request-id"
 
-_SKIP_PATHS = frozenset({"/metrics"})
+DEFAULT_EXCLUDE_PATHS = frozenset({"/metrics"})
 _SENSITIVE_HEADERS = frozenset(
     {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"}
 )
@@ -160,32 +170,80 @@ class _BodyCapture:
 
 
 class HttpLoggingMiddleware:
-    def __init__(self, app, *, log_bodies: bool = True, body_limit: int = 4096) -> None:
+    def __init__(
+        self,
+        app,
+        *,
+        log_bodies: bool = True,
+        body_limit: int = 4096,
+        exclude_paths: frozenset[str] = DEFAULT_EXCLUDE_PATHS,
+    ) -> None:
         self.app = app
         self.log_bodies = log_bodies
         self.body_limit = body_limit
+        self.exclude_paths = exclude_paths
+
+    def _is_noise(self, scope) -> bool:
+        """Probes/scrape/документация и CORS preflight — без HTTP-лога."""
+        if scope["path"] in self.exclude_paths:
+            return True
+        return scope["method"] == "OPTIONS" and any(
+            name.lower() == b"access-control-request-method" for name, _ in scope.get("headers") or []
+        )
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or scope["path"] in _SKIP_PATHS:
+        if scope["type"] != "http" or self._is_noise(scope):
             await self.app(scope, receive, send)
             return
 
         started = time.perf_counter()
+        request_id = resolve_request_id(scope.get("headers") or [])
+        token = request_id_var.set(request_id)
+        method = scope["method"]
+        query = redact_query(scope.get("query_string", b"").decode("latin-1"))
+        path = scope["path"] + (f"?{query}" if query else "")
         req_headers = render_headers(scope.get("headers") or [])
-        req_ct = req_headers.get("content-type")
-        req_body = _BodyCapture(self.log_bodies and is_loggable_type(req_ct))
+
+        pending: deque = deque()
+        if self.log_bodies and is_loggable_type(req_headers.get("content-type")):
+            pending, req_body, complete = await _read_request_body(receive)
+            content_length = req_headers.get("content-length", "")
+            total = req_body.total if complete else (
+                int(content_length) if content_length.isdigit() else req_body.total + 1
+            )
+        else:
+            req_body, total = _BodyCapture(False), 0
+
+        client = scope.get("client")
+        request: dict[str, Any] = {
+            "event": "request",
+            "request_id": request_id,
+            "method": method,
+            "path": path,
+            "client": f"{client[0]}:{client[1]}" if client else None,
+            "headers": req_headers,
+        }
+        body = render_body(
+            req_body.data, req_headers.get("content-type"), total_bytes=total, limit=self.body_limit
+        )
+        if body is not None:
+            request["body"] = body
+        _LOG.info("REQUEST %s %s %s", method, path, _dumps(request))
+
         resp_body = _BodyCapture(False)
         resp: dict[str, Any] = {"status": None, "headers": {}}
 
         async def receive_wrapper():
-            message = await receive()
-            if message["type"] == "http.request":
-                req_body.add(message.get("body", b""))
-            return message
+            return pending.popleft() if pending else await receive()
 
         async def send_wrapper(message) -> None:
             if message["type"] == "http.response.start":
-                headers = render_headers(message.get("headers") or [])
+                raw_headers = [
+                    *message.get("headers", []),
+                    (REQUEST_ID_HEADER.encode(), request_id.encode()),
+                ]
+                message = {**message, "headers": raw_headers}
+                headers = render_headers(raw_headers)
                 resp["status"] = message["status"]
                 resp["headers"] = headers
                 resp_body.enabled = (
@@ -200,45 +258,62 @@ class HttpLoggingMiddleware:
         try:
             await self.app(scope, receive_wrapper, send_wrapper)
         finally:
-            self._log(scope, started, req_headers, req_body, resp, resp_body)
+            self._log_response(request_id, method, path, started, resp, resp_body)
+            request_id_var.reset(token)
 
-    def _log(self, scope, started, req_headers, req_body, resp, resp_body) -> None:
+    def _log_response(self, request_id, method, path, started, resp, resp_body) -> None:
         status = resp["status"] or 500
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
-        query = redact_query(scope.get("query_string", b"").decode("latin-1"))
-        path = scope["path"] + (f"?{query}" if query else "")
-        client = scope.get("client")
-
-        request: dict[str, Any] = {"headers": req_headers}
-        response: dict[str, Any] = {"headers": resp["headers"]}
-        for target, capture, ct in (
-            (request, req_body, req_headers.get("content-type")),
-            (response, resp_body, resp["headers"].get("content-type")),
-        ):
-            body = render_body(
-                capture.data, ct, total_bytes=capture.total, limit=self.body_limit
-            )
-            if body is not None:
-                target["body"] = body
-
-        details = {
-            "method": scope["method"],
+        response: dict[str, Any] = {
+            "event": "response",
+            "request_id": request_id,
+            "method": method,
             "path": path,
             "status": status,
             "duration_ms": duration_ms,
-            "client": f"{client[0]}:{client[1]}" if client else None,
-            "request": request,
-            "response": response,
+            "headers": resp["headers"],
         }
+        body = render_body(
+            resp_body.data,
+            resp["headers"].get("content-type"),
+            total_bytes=resp_body.total,
+            limit=self.body_limit,
+        )
+        if body is not None:
+            response["body"] = body
         level = (
             logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO
         )
         _LOG.log(
-            level,
-            "%s %s %s %sms %s",
-            scope["method"],
-            path,
-            status,
-            duration_ms,
-            json.dumps(details, ensure_ascii=False, default=str),
+            level, "RESPONSE %s %s %s %sms %s", method, path, status, duration_ms, _dumps(response)
         )
+
+
+def resolve_request_id(raw_headers: list[tuple[bytes, bytes]]) -> str:
+    """Входящий ``X-Request-ID``, если это UUID, иначе новый uuid4."""
+    for name, value in raw_headers:
+        if name.lower() == REQUEST_ID_HEADER.encode():
+            try:
+                return str(uuid.UUID(value.decode("latin-1")))
+            except ValueError:
+                break
+    return str(uuid.uuid4())
+
+
+async def _read_request_body(receive) -> tuple[deque, _BodyCapture, bool]:
+    """Вычитать тело (до ``_CAPTURE_LIMIT``) для лога; сообщения потом отдаются приложению."""
+    capture = _BodyCapture(True)
+    pending: deque = deque()
+    more = True
+    while more and capture.size < _CAPTURE_LIMIT:
+        message = await receive()
+        pending.append(message)
+        if message["type"] != "http.request":
+            break
+        capture.add(message.get("body", b""))
+        more = message.get("more_body", False)
+    return pending, capture, not more
+
+
+def _dumps(data: dict[str, Any]) -> str:
+    return json.dumps(data, ensure_ascii=False, default=str)
