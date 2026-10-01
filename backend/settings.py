@@ -30,10 +30,18 @@ class Settings(BaseSettings):
     auth_registration_open: bool = Field(default=True, alias="AUTH_REGISTRATION_OPEN")
     http_log_bodies: bool = Field(default=True, alias="HTTP_LOG_BODIES")
     http_log_body_limit: int = Field(default=4096, alias="HTTP_LOG_BODY_LIMIT")
+    http_log_exclude_paths: str = Field(
+        default="/metrics,/api/v1/health,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico",
+        alias="HTTP_LOG_EXCLUDE_PATHS",
+    )
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def http_log_exclude_path_set(self) -> frozenset[str]:
+        return frozenset(p.strip() for p in self.http_log_exclude_paths.split(",") if p.strip())
 
 
 @lru_cache
