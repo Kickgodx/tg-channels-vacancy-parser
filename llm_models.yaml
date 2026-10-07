@@ -8,6 +8,7 @@ default_model: google/gemini-2.5-flash-lite
 default_fallbacks:
   - google/gemini-3.1-flash-lite
   - deepseek/deepseek-v4-flash
+  - anthropic/claude-haiku-5.5
   - google/gemini-2.5-flash-lite
   - mistralai/mistral-small-3.2-24b-instruct
   - mistralai/mistral-small-24b-instruct-2501
@@ -15,6 +16,9 @@ default_fallbacks:
   - microsoft/phi-4
 
 models:
+  - id: anthropic/claude-haiku-5.5
+    name: Claude Haiku 5.5
+    cost: "0.1/0.5"
   - id: meta/muse-spark-1.3
     name: Muse Spark 1.3
     cost: "1.25/4.25"
