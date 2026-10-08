@@ -25,7 +25,7 @@ LLM_TOKENS = Counter(
 
 LLM_ENRICH_EVENTS = Counter(
     "llm_enrich_events_total",
-    "AI enrichment pipeline events (cache, skips, errors)",
+    "AI enrichment pipeline events (cache, skips, errors, merged)",
     labelnames=("event",),
 )
 

@@ -77,7 +77,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
       "id": 3,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -107,7 +107,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
       "id": 4,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -132,20 +132,113 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
-      "id": 5,
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "id": 9,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
         "tooltip": { "mode": "single" }
       },
       "targets": [
         {
-          "expr": "sum(rate(llm_enrich_events_total[5m])) by (event)",
-          "legendFormat": "{{event}}",
+          "expr": "sum by (model, direction) (rate(llm_tokens_total[5m])) / on(model) group_left sum by (model) (rate(llm_requests_total[5m]))",
+          "legendFormat": "{{model}} {{direction}}",
           "refId": "A"
         }
       ],
-      "title": "Enrichment: события / сек (кэш, пропуски, ошибки)",
+      "title": "Токены на запрос (input / output)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "fillOpacity": 40,
+            "stacking": { "group": "A", "mode": "normal" }
+          },
+          "unit": "opm"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "кэш" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "пропуск: низкий score" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "пропуск: лимит прогона" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "пропуск: rate limit" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "отброшено: не вакансия" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "super-light-blue", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "ошибка LLM" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "успех: merged" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "dark-green", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(llm_enrich_events_total{event=\"cache_hit\"}[5m])) * 60",
+          "legendFormat": "кэш",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(llm_enrich_events_total{event=\"merged\"}[5m])) * 60",
+          "legendFormat": "успех: merged",
+          "refId": "G"
+        },
+        {
+          "expr": "sum(rate(llm_enrich_events_total{event=\"skipped_score\"}[5m])) * 60",
+          "legendFormat": "пропуск: низкий score",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(llm_enrich_events_total{event=\"skipped_limit\"}[5m])) * 60",
+          "legendFormat": "пропуск: лимит прогона",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(llm_enrich_events_total{event=\"rate_limit_skipped\"}[5m])) * 60",
+          "legendFormat": "пропуск: rate limit",
+          "refId": "D"
+        },
+        {
+          "expr": "sum(rate(llm_enrich_events_total{event=\"dropped_not_job\"}[5m])) * 60",
+          "legendFormat": "отброшено: не вакансия",
+          "refId": "E"
+        },
+        {
+          "expr": "sum(rate(llm_enrich_events_total{event=\"error\"}[5m])) * 60",
+          "legendFormat": "ошибка LLM",
+          "refId": "F"
+        }
+      ],
+      "title": "Enrichment: события / мин (кэш, пропуски, отсевы, merged)",
       "type": "timeseries"
     },
     {
@@ -224,9 +317,15 @@
           "color": { "mode": "thresholds" },
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "purple", "value": null }]
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 20 },
+              { "color": "green", "value": 50 }
+            ]
           },
-          "unit": "short"
+          "max": 100,
+          "min": 0,
+          "unit": "percent"
         },
         "overrides": []
       },
@@ -242,12 +341,12 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(llm_enrich_events_total{event=\"cache_hit\"}[1h]))",
-          "legendFormat": "cache",
+          "expr": "100 * sum(increase(llm_enrich_events_total{event=\"cache_hit\"}[1h])) / clamp_min(sum(increase(llm_enrich_events_total{event=~\"merged|dropped_not_job|error|rate_limit_skipped\"}[1h])), 1)",
+          "legendFormat": "cache hit %",
           "refId": "A"
         }
       ],
-      "title": "Попаданий в кэш за 1 ч",
+      "title": "Доля кэша за 1 ч",
       "type": "stat"
     }
   ],

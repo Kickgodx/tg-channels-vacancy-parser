@@ -19,7 +19,12 @@ from tg_jobs_parser.parse_runner import run_parse
 
 from backend.config_builder import config_snapshot_dict
 from backend.db import repository as repo
-from backend.observability import PARSE_RUNS_ACTIVE, record_parse_run_finished
+from backend.observability import (
+    PARSE_RUNS_ACTIVE,
+    mark_parse_run_started,
+    mark_parse_run_stopped,
+    record_parse_run_finished,
+)
 from backend.db.session import session_scope
 from backend.schemas import RunCreateRequest
 from backend.services.progress_bus import progress_bus
@@ -40,6 +45,7 @@ def start_parse_run(config: AppConfig, body: RunCreateRequest) -> uuid.UUID:
 
     active = run_registry.register(run_id)
     PARSE_RUNS_ACTIVE.inc()
+    mark_parse_run_started()
     with session_scope() as session:
         repo.set_run_status(session, run_id, "running")
 
@@ -215,5 +221,6 @@ def _run_worker_traced(run_id: uuid.UUID, config: AppConfig, cancel_token, span)
             duration_seconds=time.monotonic() - started,
         )
         PARSE_RUNS_ACTIVE.dec()
+        mark_parse_run_stopped()
         progress_bus.publish_done(run_id)
         run_registry.finish(run_id)

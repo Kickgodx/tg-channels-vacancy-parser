@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from prometheus_client import REGISTRY
 
-from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
+from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
 from tg_jobs_parser.ai.enricher import AIEnrichmentService
 from tg_jobs_parser.ai.schema import VacancyAIExtraction
 from tg_jobs_parser.ai.search_context import SearchContext
@@ -102,8 +102,27 @@ def test_llm_enrich_metrics_cache_hit(monkeypatch):
     cached = VacancyAIExtraction(is_job_post=True, confidence=0.9)
 
     before = _counter("llm_enrich_events_total", {"event": "cache_hit"})
+    before_merged = _counter("llm_enrich_events_total", {"event": "merged"})
     service.begin_batch(1)
     with patch.object(service._cache, "get", return_value=cached):
         assert service.enrich(_vacancy()) is not None
 
     assert _counter("llm_enrich_events_total", {"event": "cache_hit"}) == before + 1
+    assert _counter("llm_enrich_events_total", {"event": "merged"}) == before_merged + 1
+
+
+def test_llm_enrich_metrics_merged_on_llm_success(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    cfg = AppConfig()
+    cfg = cfg.model_copy(
+        update={"ai": cfg.ai.model_copy(update={"enabled": True, "use_cache": False})}
+    )
+    service = AIEnrichmentService(cfg)
+    fake = VacancyAIExtraction(is_job_post=True, confidence=0.9)
+    before = _counter("llm_enrich_events_total", {"event": "merged"})
+    service.begin_batch(1)
+    with patch.object(
+        service._client, "extract_with_fallback", return_value=(fake, LLMUsage())
+    ):
+        assert service.enrich(_vacancy()) is not None
+    assert _counter("llm_enrich_events_total", {"event": "merged"}) == before + 1

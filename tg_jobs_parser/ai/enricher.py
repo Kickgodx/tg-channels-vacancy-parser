@@ -259,6 +259,7 @@ class AIEnrichmentService:
         threshold = self._config.parser.vacancy_score_threshold
         if merged.vacancy_score < threshold:
             merged = merged.model_copy(update={"vacancy_score": threshold})
+        record_enrich_event("merged")
         return merged
 
     def log_batch_finished(self) -> None:

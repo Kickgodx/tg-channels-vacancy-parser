@@ -12,6 +12,7 @@ scrape ``/metrics``. При недоступной БД коллектор мо�
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 
 from prometheus_client import REGISTRY, Counter, Gauge, Histogram
@@ -32,16 +33,29 @@ PARSE_RUNS_ACTIVE = Gauge(
     "Прогоны парсинга, выполняющиеся прямо сейчас",
 )
 
+PARSE_RUN_STARTED_TIMESTAMP = Gauge(
+    "parse_run_started_timestamp_seconds",
+    "Unix-время старта активного прогона (0 если нет)",
+)
+
 PARSE_RUN_DURATION = Histogram(
     "parse_run_duration_seconds",
     "Длительность прогона парсинга (wall time)",
-    buckets=(60.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0, 7200.0, 14400.0),
+    buckets=(10.0, 30.0, 60.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0, 7200.0, 14400.0),
 )
 
 PARSE_POSTS = Counter(
     "parse_posts_fetched_total",
     "Постов Telegram загружено прогонами",
 )
+
+
+def mark_parse_run_started() -> None:
+    PARSE_RUN_STARTED_TIMESTAMP.set(time.time())
+
+
+def mark_parse_run_stopped() -> None:
+    PARSE_RUN_STARTED_TIMESTAMP.set(0.0)
 
 
 def record_parse_run_finished(
@@ -190,12 +204,23 @@ class _DBStatsCollector:
         yield GaugeMetricFamily("db_ai_cache_entries", "Записи LLM-кэша в БД")
         yield GaugeMetricFamily("db_parse_runs", "Прогоны в БД по статусу", labels=["status"])
         yield GaugeMetricFamily(
+            "db_parse_runs_finished_24h",
+            "Прогоны с finished_at за последние 24 ч",
+            labels=["status"],
+        )
+        yield GaugeMetricFamily(
+            "db_parse_posts_fetched_24h",
+            "Сумма posts_fetched у прогонов, завершённых за 24 ч",
+        )
+        yield GaugeMetricFamily(
             "fx_latest_rate_timestamp_seconds", "Дата последнего курса ЦБ (unix time)"
         )
 
     def collect(self):
         try:
-            counts, runs_by_status, fx_latest_ts = self._read_db()
+            counts, runs_by_status, runs_finished_24h, posts_fetched_24h, fx_latest_ts = (
+                self._read_db()
+            )
         except Exception as e:
             _LOG.debug("DBStatsCollector: БД недоступна: %s", e)
             return
@@ -226,6 +251,21 @@ class _DBStatsCollector:
             fam.add_metric([status], n)
         yield fam
 
+        fam = GaugeMetricFamily(
+            "db_parse_runs_finished_24h",
+            "Прогоны с finished_at за последние 24 ч",
+            labels=["status"],
+        )
+        for status, n in runs_finished_24h.items():
+            fam.add_metric([status], n)
+        yield fam
+
+        yield GaugeMetricFamily(
+            "db_parse_posts_fetched_24h",
+            "Сумма posts_fetched у прогонов, завершённых за 24 ч",
+            value=posts_fetched_24h,
+        )
+
         if fx_latest_ts is not None:
             yield GaugeMetricFamily(
                 "fx_latest_rate_timestamp_seconds",
@@ -234,7 +274,11 @@ class _DBStatsCollector:
             )
 
     @staticmethod
-    def _read_db() -> tuple[dict[str, int], dict[str, int], float | None]:
+    def _read_db() -> tuple[
+        dict[str, int], dict[str, int], dict[str, int], int, float | None
+    ]:
+        from datetime import timedelta
+
         from sqlalchemy import func, select
 
         from backend.db.models import (
@@ -251,7 +295,10 @@ class _DBStatsCollector:
 
         counts: dict[str, int] = {}
         runs_by_status: dict[str, int] = {}
+        runs_finished_24h: dict[str, int] = {}
+        posts_fetched_24h = 0
         fx_latest_ts: float | None = None
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
 
         with session_scope() as s:
             counts["vacancies_active"] = int(
@@ -291,13 +338,31 @@ class _DBStatsCollector:
             ):
                 runs_by_status[str(status)] = int(n)
 
+            for status, n in s.execute(
+                select(ParseRunRow.status, func.count())
+                .where(ParseRunRow.finished_at.is_not(None))
+                .where(ParseRunRow.finished_at >= since)
+                .group_by(ParseRunRow.status)
+            ):
+                runs_finished_24h[str(status)] = int(n)
+
+            posts_fetched_24h = int(
+                s.scalar(
+                    select(func.coalesce(func.sum(ParseRunRow.posts_fetched), 0)).where(
+                        ParseRunRow.finished_at.is_not(None),
+                        ParseRunRow.finished_at >= since,
+                    )
+                )
+                or 0
+            )
+
             latest = s.scalar(select(func.max(ExchangeRateRow.rate_date)))
             if latest is not None:
                 fx_latest_ts = datetime(
                     latest.year, latest.month, latest.day, tzinfo=timezone.utc
                 ).timestamp()
 
-        return counts, runs_by_status, fx_latest_ts
+        return counts, runs_by_status, runs_finished_24h, posts_fetched_24h, fx_latest_ts
 
 
 REGISTRY.register(_DBStatsCollector())

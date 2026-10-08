@@ -148,6 +148,7 @@ app.include_router(resumes.resumes_router, prefix="/api/v1")
 Instrumentator(
     should_group_status_codes=False,
     should_ignore_untemplated=True,
+    should_instrument_requests_inprogress=True,
     excluded_handlers=[
         "/metrics",
         "/api/v1/health",

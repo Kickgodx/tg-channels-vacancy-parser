@@ -41,7 +41,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "gridPos": { "h": 4, "w": 3, "x": 0, "y": 1 },
       "id": 1,
       "options": {
         "colorMode": "value",
@@ -64,13 +64,50 @@
           "color": { "mode": "thresholds" },
           "thresholds": {
             "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1800 },
+              { "color": "red", "value": 7200 }
+            ]
+          },
+          "unit": "dtdurations"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 3, "y": 1 },
+      "id": 25,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "(parse_runs_active > 0) * (time() - parse_run_started_timestamp_seconds)",
+          "legendFormat": "age",
+          "refId": "A"
+        }
+      ],
+      "title": "Возраст текущего прогона",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
             "steps": [{ "color": "green", "value": null }]
           },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 5, "x": 4, "y": 1 },
+      "gridPos": { "h": 4, "w": 4, "x": 7, "y": 1 },
       "id": 2,
       "options": {
         "colorMode": "value",
@@ -82,7 +119,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(parse_runs_total{status=\"completed\"}[24h]))",
+          "expr": "sum(db_parse_runs_finished_24h{status=\"completed\"})",
           "legendFormat": "completed",
           "refId": "A"
         }
@@ -106,7 +143,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 5, "x": 9, "y": 1 },
+      "gridPos": { "h": 4, "w": 4, "x": 11, "y": 1 },
       "id": 3,
       "options": {
         "colorMode": "value",
@@ -118,7 +155,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(parse_runs_total{status=\"failed\"}[24h]))",
+          "expr": "sum(db_parse_runs_finished_24h{status=\"failed\"})",
           "legendFormat": "failed",
           "refId": "A"
         }
@@ -139,7 +176,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 1 },
+      "gridPos": { "h": 4, "w": 4, "x": 15, "y": 1 },
       "id": 4,
       "options": {
         "colorMode": "value",
@@ -151,7 +188,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(parse_runs_total{status=\"cancelled\"}[24h]))",
+          "expr": "sum(db_parse_runs_finished_24h{status=\"cancelled\"})",
           "legendFormat": "cancelled",
           "refId": "A"
         }
@@ -184,7 +221,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(parse_posts_fetched_total[24h]))",
+          "expr": "sum(db_parse_posts_fetched_24h)",
           "legendFormat": "posts",
           "refId": "A"
         }
@@ -231,7 +268,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 5 },
       "id": 7,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -239,17 +276,37 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(vacancies_upserted_total[5m])) by (result) * 60",
-          "legendFormat": "vacancies {{result}}",
-          "refId": "A"
-        },
-        {
           "expr": "sum(rate(parse_posts_fetched_total[5m])) * 60",
           "legendFormat": "posts fetched",
-          "refId": "B"
+          "refId": "A"
         }
       ],
-      "title": "Посты и вакансии / мин",
+      "title": "Фаза fetch: посты / мин",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "opm"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 5 },
+      "id": 23,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(vacancies_upserted_total[5m])) by (result) * 60",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Фаза upsert: вакансии / мин",
       "type": "timeseries"
     },
     {
@@ -264,7 +321,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "unit": "ops"
+          "unit": "opm"
         },
         "overrides": []
       },
@@ -276,12 +333,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(vacancy_import_items_total[5m])) by (status)",
+          "expr": "sum(rate(vacancy_import_items_total[5m])) by (status) * 60",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
       ],
-      "title": "Ручной импорт: позиции / сек по статусу",
+      "title": "Ручной импорт: позиции / мин по статусу",
       "type": "timeseries"
     },
     {
@@ -627,8 +684,8 @@
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "yellow", "value": 172800 },
-              { "color": "red", "value": 604800 }
+              { "color": "yellow", "value": 129600 },
+              { "color": "red", "value": 259200 }
             ]
           },
           "unit": "dtdurations"
@@ -664,7 +721,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 43 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 43 },
       "id": 21,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -675,14 +732,9 @@
           "expr": "sum(rate(fx_cbr_requests_total[5m])) by (outcome) * 60",
           "legendFormat": "{{outcome}}",
           "refId": "A"
-        },
-        {
-          "expr": "sum(rate(vacancies_archived_total[5m])) * 60",
-          "legendFormat": "vacancies archived",
-          "refId": "B"
         }
       ],
-      "title": "ЦБ: запросы / мин + архивация по TTL",
+      "title": "ЦБ: запросы / мин",
       "type": "timeseries"
     },
     {
@@ -694,7 +746,32 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 43 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 43 },
+      "id": 24,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(vacancies_archived_total[5m])) * 60",
+          "legendFormat": "archived",
+          "refId": "A"
+        }
+      ],
+      "title": "Архивация по TTL / мин",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "opm"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 43 },
       "id": 22,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },

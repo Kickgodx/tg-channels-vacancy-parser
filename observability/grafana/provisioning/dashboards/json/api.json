@@ -35,12 +35,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total[5m])) by (handler) * 60",
+          "expr": "sum(rate(http_requests_total{handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) by (handler) * 60",
           "legendFormat": "{{handler}}",
           "refId": "A"
         }
       ],
-      "title": "Запросы / мин по эндпоинтам",
+      "title": "Запросы / мин по эндпоинтам (без UI-poll)",
       "type": "timeseries"
     },
     {
@@ -60,12 +60,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total[5m])) by (status) * 60",
+          "expr": "sum(rate(http_requests_total{handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) by (status) * 60",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
       ],
-      "title": "Запросы / мин по статус-кодам",
+      "title": "Запросы / мин по статус-кодам (без UI-poll)",
       "type": "timeseries"
     },
     {
@@ -85,17 +85,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler))",
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) by (le, handler))",
           "legendFormat": "p50 {{handler}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) by (le, handler))",
           "legendFormat": "p95 {{handler}}",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler))",
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) by (le, handler))",
           "legendFormat": "p99 {{handler}}",
           "refId": "C"
         }
@@ -153,7 +153,7 @@
               { "color": "red", "value": 5 }
             ]
           },
-          "unit": "reqps"
+          "unit": "suffix:req/min"
         },
         "overrides": []
       },
@@ -169,12 +169,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total[5m]))",
+          "expr": "sum(rate(http_requests_total{handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) * 60",
           "legendFormat": "total",
           "refId": "A"
         }
       ],
-      "title": "Общий RPS",
+      "title": "Общий RPM (без UI-poll)",
       "type": "stat"
     },
     {
@@ -208,7 +208,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m])) * 100",
+          "expr": "sum(rate(http_requests_total{status=~\"5..\", handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) / sum(rate(http_requests_total{handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) * 100",
           "legendFormat": "5xx",
           "refId": "A"
         }
@@ -247,7 +247,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{status=~\"4..\"}[5m])) / sum(rate(http_requests_total[5m])) * 100",
+          "expr": "sum(rate(http_requests_total{status=~\"4..\", handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) / sum(rate(http_requests_total{handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) * 100",
           "legendFormat": "4xx",
           "refId": "A"
         }
@@ -272,7 +272,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{status=~\"4..|5..\"}[5m])) by (handler, status) * 60",
+          "expr": "sum(rate(http_requests_total{status=~\"4..|5..\", handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) by (handler, status) * 60",
           "legendFormat": "{{handler}} {{status}}",
           "refId": "A"
         }
@@ -297,12 +297,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total[5m])) by (method) * 60",
+          "expr": "sum(rate(http_requests_total{handler!=\"/api/v1/runs/{run_id}\", method!=\"OPTIONS\"}[5m])) by (method) * 60",
           "legendFormat": "{{method}}",
           "refId": "A"
         }
       ],
-      "title": "Запросы / мин по HTTP-методам",
+      "title": "Запросы / мин по HTTP-методам (без UI-poll)",
       "type": "timeseries"
     },
     {
@@ -325,14 +325,9 @@
           "expr": "sum(rate(http_response_size_bytes_sum[5m])) / sum(rate(http_response_size_bytes_count[5m]))",
           "legendFormat": "средний ответ",
           "refId": "A"
-        },
-        {
-          "expr": "sum(rate(http_request_size_bytes_sum[5m])) / sum(rate(http_request_size_bytes_count[5m]))",
-          "legendFormat": "средний запрос",
-          "refId": "B"
         }
       ],
-      "title": "Средний размер запроса / ответа",
+      "title": "Средний размер ответа",
       "type": "timeseries"
     },
     {
@@ -457,7 +452,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "unit": "ops"
+          "unit": "opm"
         },
         "overrides": []
       },
@@ -469,12 +464,12 @@
       },
       "targets": [
         {
-          "expr": "rate(python_gc_collections_total{job=\"tg-jobs-backend\"}[5m])",
+          "expr": "rate(python_gc_collections_total{job=\"tg-jobs-backend\"}[5m]) * 60",
           "legendFormat": "gen {{generation}}",
           "refId": "A"
         }
       ],
-      "title": "Python GC (сборки / сек)",
+      "title": "Python GC (сборки / мин)",
       "type": "timeseries"
     }
   ],

@@ -196,6 +196,65 @@ def test_db_stats_collector_in_metrics(api_client):
         "db_vacancy_matches",
         "db_ai_cache_entries",
         "db_parse_runs",
+        "db_parse_runs_finished_24h",
+        "db_parse_posts_fetched_24h",
     ):
         assert name in body
     assert 'db_users} 1.0' in body or "db_users 1.0" in body
+
+
+def test_db_parse_runs_finished_24h_counts_recent(api_client):
+    factory = get_session_factory()
+    session = factory()
+    try:
+        from backend.db.models import ParseRunRow
+
+        now = datetime.now(timezone.utc)
+        session.add(
+            ParseRunRow(
+                status="completed",
+                started_at=now - timedelta(hours=1),
+                finished_at=now - timedelta(minutes=30),
+                posts_fetched=12,
+            )
+        )
+        session.add(
+            ParseRunRow(
+                status="failed",
+                started_at=now - timedelta(days=2),
+                finished_at=now - timedelta(days=2) + timedelta(minutes=5),
+                posts_fetched=3,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    r = api_client.get("/metrics")
+    assert r.status_code == 200
+    assert _sample("db_parse_runs_finished_24h", {"status": "completed"}) >= 1
+    assert _sample("db_parse_posts_fetched_24h", {}) >= 12
+
+
+def test_parse_run_duration_has_fine_buckets():
+    from backend.observability import PARSE_RUN_DURATION
+
+    edges = list(PARSE_RUN_DURATION._upper_bounds)  # noqa: SLF001
+    assert 10.0 in edges
+    assert 30.0 in edges
+    assert 60.0 in edges
+
+
+def test_parse_run_started_timestamp_gauge():
+    from backend.observability import (
+        PARSE_RUN_STARTED_TIMESTAMP,
+        mark_parse_run_started,
+        mark_parse_run_stopped,
+    )
+
+    mark_parse_run_stopped()
+    assert PARSE_RUN_STARTED_TIMESTAMP._value.get() == 0.0  # noqa: SLF001
+    mark_parse_run_started()
+    assert PARSE_RUN_STARTED_TIMESTAMP._value.get() > 0.0  # noqa: SLF001
+    mark_parse_run_stopped()
+    assert PARSE_RUN_STARTED_TIMESTAMP._value.get() == 0.0  # noqa: SLF001
