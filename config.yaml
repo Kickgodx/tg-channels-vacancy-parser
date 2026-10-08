@@ -81,7 +81,7 @@ ai:
   mode: primary
   provider: openrouter
   # id из llm_models.yaml; fallback — default_fallbacks из того же файла (в UI можно сменить)
-  model: google/gemini-2.5-flash-lite
+  model: anthropic/claude-haiku-5.5
   # Матчинг резюме ↔ вакансия идёт отдельной моделью: здесь уместна reasoning
   # (качество важнее скорости — вызовов на порядок меньше, чем при парсинге).
   # Пусто — берётся model выше. При смене на reasoning-модель включи match_reasoning_enabled.
