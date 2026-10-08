@@ -23,7 +23,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "unit": "reqps"
+          "unit": "suffix:req/min"
         },
         "overrides": []
       },
@@ -35,12 +35,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total[5m])) by (handler)",
+          "expr": "sum(rate(http_requests_total[5m])) by (handler) * 60",
           "legendFormat": "{{handler}}",
           "refId": "A"
         }
       ],
-      "title": "RPS по эндпоинтам",
+      "title": "Запросы / мин по эндпоинтам",
       "type": "timeseries"
     },
     {
@@ -48,7 +48,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "unit": "reqps"
+          "unit": "suffix:req/min"
         },
         "overrides": []
       },
@@ -60,12 +60,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total[5m])) by (status)",
+          "expr": "sum(rate(http_requests_total[5m])) by (status) * 60",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
       ],
-      "title": "RPS по статус-кодам",
+      "title": "Запросы / мин по статус-кодам",
       "type": "timeseries"
     },
     {
@@ -260,7 +260,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "unit": "reqps"
+          "unit": "suffix:req/min"
         },
         "overrides": []
       },
@@ -272,12 +272,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{status=~\"4..|5..\"}[5m])) by (handler, status)",
+          "expr": "sum(rate(http_requests_total{status=~\"4..|5..\"}[5m])) by (handler, status) * 60",
           "legendFormat": "{{handler}} {{status}}",
           "refId": "A"
         }
       ],
-      "title": "Ошибки 4xx / 5xx",
+      "title": "Ошибки 4xx / 5xx / мин",
       "type": "timeseries"
     },
     {
@@ -285,7 +285,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "unit": "reqps"
+          "unit": "suffix:req/min"
         },
         "overrides": []
       },
@@ -297,12 +297,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total[5m])) by (method)",
+          "expr": "sum(rate(http_requests_total[5m])) by (method) * 60",
           "legendFormat": "{{method}}",
           "refId": "A"
         }
       ],
-      "title": "RPS по HTTP-методам",
+      "title": "Запросы / мин по HTTP-методам",
       "type": "timeseries"
     },
     {

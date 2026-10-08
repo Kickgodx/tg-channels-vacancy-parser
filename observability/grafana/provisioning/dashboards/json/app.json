@@ -227,7 +227,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "unit": "ops"
+          "unit": "opm"
         },
         "overrides": []
       },
@@ -239,17 +239,17 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(vacancies_upserted_total[5m])) by (result)",
+          "expr": "sum(rate(vacancies_upserted_total[5m])) by (result) * 60",
           "legendFormat": "vacancies {{result}}",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(parse_posts_fetched_total[5m]))",
+          "expr": "sum(rate(parse_posts_fetched_total[5m])) * 60",
           "legendFormat": "posts fetched",
           "refId": "B"
         }
       ],
-      "title": "Посты и вакансии / сек",
+      "title": "Посты и вакансии / мин",
       "type": "timeseries"
     },
     {
@@ -289,7 +289,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "unit": "ops"
+          "unit": "opm"
         },
         "overrides": []
       },
@@ -301,12 +301,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(vacancy_match_calls_total[5m])) by (outcome)",
+          "expr": "sum(rate(vacancy_match_calls_total[5m])) by (outcome) * 60",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
       ],
-      "title": "Матчинг резюме↔вакансия: вызовы / сек",
+      "title": "Матчинг резюме↔вакансия: вызовы / мин",
       "type": "timeseries"
     },
     {
@@ -660,7 +660,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "unit": "ops"
+          "unit": "opm"
         },
         "overrides": []
       },
@@ -672,17 +672,17 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(fx_cbr_requests_total[5m])) by (outcome)",
+          "expr": "sum(rate(fx_cbr_requests_total[5m])) by (outcome) * 60",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(vacancies_archived_total[5m]))",
+          "expr": "sum(rate(vacancies_archived_total[5m])) * 60",
           "legendFormat": "vacancies archived",
           "refId": "B"
         }
       ],
-      "title": "ЦБ: запросы / сек + архивация по TTL",
+      "title": "ЦБ: запросы / мин + архивация по TTL",
       "type": "timeseries"
     },
     {
@@ -690,7 +690,7 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
-          "unit": "ops"
+          "unit": "opm"
         },
         "overrides": []
       },
@@ -702,12 +702,12 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(auth_events_total[1h])) by (event, outcome)",
+          "expr": "sum(rate(auth_events_total[5m])) by (event, outcome) * 60",
           "legendFormat": "{{event}} {{outcome}}",
           "refId": "A"
         }
       ],
-      "title": "Auth: события за час",
+      "title": "Auth: события / мин",
       "type": "timeseries"
     }
   ],
