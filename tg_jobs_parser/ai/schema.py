@@ -63,8 +63,11 @@ class VacancyAIExtraction(BaseModel):
     salary_currency: str | None = Field(
         default=None,
         description=(
-            "RUB, USD, EUR. /HOUR only for explicit hourly pay (₽/час, $/hour). "
-            "Monthly: «200 тр», «300к гросс» → RUB without /HOUR."
+            "ISO currency (RUB, USD, EUR, JPY, CAD, …). "
+            "salary_min/max are MONTHLY except /HOUR. "
+            "/HOUR only for explicit hourly pay — keep hourly amounts. "
+            "Annual (Annually, $125k TC, 26k EUR Annually): divide by 12, plain ISO (no /YEAR). "
+            "Monthly («200 тр», «300к гросс», /month) → plain ISO, do not divide."
         ),
     )
     work_format: str | None = None

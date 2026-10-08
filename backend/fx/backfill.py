@@ -15,6 +15,7 @@ from backend.fx.apply import apply_salary_rub_for_vacancy
 from backend.db.vacancy_mapper import row_to_vacancy, vacancy_to_row
 from tg_jobs_parser.extraction.salary_period import (
     apply_hourly_currency_from_text,
+    normalize_annual_salary_to_monthly,
     sanitize_salary_currency_period,
 )
 from tg_jobs_parser.config.schema import FxConfig
@@ -70,6 +71,7 @@ def backfill_vacancies_salary_rub(
         v = row_to_vacancy(row)
         apply_hourly_currency_from_text(v)
         sanitize_salary_currency_period(v)
+        normalize_annual_salary_to_monthly(v)
         apply_salary_rub_for_vacancy(
             v,
             session,
@@ -79,6 +81,9 @@ def backfill_vacancies_salary_rub(
             db_rates_only=db_rates_only,
         )
         fresh = vacancy_to_row(v, parse_run_id=row.last_parse_run_id)
+        row.detected_salary_min = fresh.detected_salary_min
+        row.detected_salary_max = fresh.detected_salary_max
+        row.detected_salary_avg = fresh.detected_salary_avg
         row.detected_salary_avg_rub = fresh.detected_salary_avg_rub
         row.salary_currency = fresh.salary_currency
         if row.detected_salary_avg_rub is not None:

@@ -27,6 +27,7 @@ from tg_jobs_parser.extraction.normalizer import clean_display_text, normalize_f
 from tg_jobs_parser.extraction.salary_extractor import extract_salary
 from tg_jobs_parser.extraction.salary_period import (
     apply_hourly_currency_from_text,
+    normalize_annual_salary_to_monthly,
     sanitize_salary_currency_period,
 )
 from tg_jobs_parser.extraction.specialization_extractor import extract_specializations
@@ -179,6 +180,7 @@ def raw_post_to_vacancy_rules(
     )
     apply_hourly_currency_from_text(vacancy)
     sanitize_salary_currency_period(vacancy)
+    normalize_annual_salary_to_monthly(vacancy)
     return vacancy
 
 

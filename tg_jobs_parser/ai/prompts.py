@@ -17,7 +17,7 @@ from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 
 # Источник истины для ключа кэша extraction. Меняете промпт → bump.
-EXTRACT_PROMPT_VERSION = "extract-v3"
+EXTRACT_PROMPT_VERSION = "extract-v6"
 
 _SPECIALIZATION_RULES = """
 - detected_specializations — ONLY the job role(s) this post is hiring for (usually ONE primary role).
@@ -52,11 +52,23 @@ Rules:
 - work_format: one of remote, hybrid, office, relocation, unknown (or null).
 - detected_grade: one of """ + ", ".join(GRADE_OPTIONS) + """ (use unknown if not stated).
   Title/role grade wins (e.g. "Senior QA" → senior). Do NOT treat verb "to staff" / "staffing" as grade staff.
-- salary_currency: ISO (RUB, USD, EUR) PLUS period when needed:
+- salary_min/max MUST be MONTHLY amounts (except hourly — see below). Never store annual
+  totals in salary_min/max. Prefer plain ISO currency (no /YEAR).
+- salary_currency: ISO (RUB, USD, EUR, JPY, CAD, …) PLUS period when needed:
   • Explicit hourly («₽/час», «$25/hour», «в час», «почасовая», «/hr») → MUST be
     «USD/HOUR» or «RUB/HOUR» (keep hourly amounts as stated; do NOT convert to monthly).
-  • Monthly («200 тр», «300к», «гросс», «вилка», monthly USD/EUR) → plain RUB/USD/EUR,
-    never …/HOUR.
+  • Annual pay → ALWAYS divide by 12, plain ISO (never …/YEAR):
+    – Explicit: «Annually», «per year», «/year», «в год», «годовая».
+    – Western total-comp without /month: «$125k–225k», «70k–100k CAD», «26k–39k EUR»
+      (k = thousands per year is the default for USD/EUR/GBP/CAD job posts).
+    – Ambiguity: the SAME number can be annual junior TC or monthly senior TC
+      (e.g. ~35k USD). Use TEXT period words and context, not magnitude alone.
+      If the post says Annually / $Nk TC / equity package → treat as annual → /12.
+    Examples: «6M–12M JPY Annually» → 500000–1000000 JPY;
+    «$125k–225k + equity» → ~10417–18750 USD; «26k–39k EUR Annually» → ~2167–3250 EUR;
+    «30k–47.5k USD Annually» → ~2500–3958 USD.
+  • Monthly («200 тр», «300к», «гросс», «вилка», «/month», monthly USD/EUR) → plain ISO,
+    never …/HOUR or …/YEAR. Do NOT divide again.
 - application_urls: external apply links (hh.ru, careers pages, forms). Exclude t.me channel links unless they are the apply form.
 - confidence: 0..1 how sure you are about the main fields.
 - notes: optional short clarifications (ambiguity, missing data, assumptions) — always in Russian, 1–3 sentences; null if nothing useful to add.
@@ -149,6 +161,70 @@ Example JSON:
     ensure_ascii=False,
 )
 
+_FEW_SHOT_ANNUAL = """Example annual pay (convert to monthly; plain ISO, no /YEAR):
+"Site Reliability Engineer | 6M - 12M JPY Annually | Japan | Tokyo Office. Apply https://jobs.example.com/sre"
+Example JSON:
+""" + json.dumps(
+    {
+        "is_job_post": True,
+        "rejection_reason": None,
+        "detected_specializations": ["DevOps"],
+        "detected_grade": "unknown",
+        "salary_min": 500000,
+        "salary_max": 1000000,
+        "salary_currency": "JPY",
+        "work_format": "office",
+        "country": "Japan",
+        "city": "Tokyo",
+        "application_urls": ["https://jobs.example.com/sre"],
+        "confidence": 0.9,
+        "notes": "Зарплата в тексте годовая — сохранена как месячная (/12).",
+    },
+    ensure_ascii=False,
+)
+
+_FEW_SHOT_ANNUAL_USD_K = """Example western $Nk annual (convert to monthly; no Annually word needed):
+"Hiring AI/frontend engineers. $125k–225k + equity, relocation to London. Apply https://jobs.example.com/ai"
+Example JSON:
+""" + json.dumps(
+    {
+        "is_job_post": True,
+        "rejection_reason": None,
+        "detected_specializations": ["Frontend"],
+        "detected_grade": "unknown",
+        "salary_min": 10417,
+        "salary_max": 18750,
+        "salary_currency": "USD",
+        "work_format": "relocation",
+        "city": "London",
+        "application_urls": ["https://jobs.example.com/ai"],
+        "confidence": 0.9,
+        "notes": "Вилка $125k–225k годовая — сохранена как месячная (/12).",
+    },
+    ensure_ascii=False,
+)
+
+_FEW_SHOT_ANNUAL_EUR_LOW = """Example low-band EUR annually (still convert to monthly — do not leave 26k as-is):
+"Quality Assurance Engineer II | 26k - 39k EUR Annually | Slovakia Remote. Apply https://jobs.example.com/qa"
+Example JSON:
+""" + json.dumps(
+    {
+        "is_job_post": True,
+        "rejection_reason": None,
+        "detected_specializations": ["QA"],
+        "detected_grade": "middle",
+        "salary_min": 2167,
+        "salary_max": 3250,
+        "salary_currency": "EUR",
+        "work_format": "remote",
+        "country": "Slovakia",
+        "application_urls": ["https://jobs.example.com/qa"],
+        "confidence": 0.9,
+        "notes": "Annually → месячные суммы (/12), даже если год выглядит «как месяц» директора.",
+    },
+    ensure_ascii=False,
+)
+
 
 def build_messages(
     *,
@@ -176,6 +252,12 @@ def build_messages(
             + _FEW_SHOT_RESUME_EN
             + "\n\n"
             + _FEW_SHOT_HOURLY
+            + "\n\n"
+            + _FEW_SHOT_ANNUAL
+            + "\n\n"
+            + _FEW_SHOT_ANNUAL_USD_K
+            + "\n\n"
+            + _FEW_SHOT_ANNUAL_EUR_LOW
             + "\n\n---\n\n",
         )
 

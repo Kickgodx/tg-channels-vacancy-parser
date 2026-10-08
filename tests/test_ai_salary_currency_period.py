@@ -30,3 +30,13 @@ def test_preserves_rub_hour_suffix():
 def test_monthly_rub_unchanged():
     e = VacancyAIExtraction(is_job_post=True, salary_currency="RUB")
     assert e.salary_currency == "RUB"
+
+
+def test_preserves_jpy_year_suffix():
+    e = VacancyAIExtraction(
+        is_job_post=True,
+        salary_min=6_000_000,
+        salary_max=12_000_000,
+        salary_currency="JPY/YEAR",
+    )
+    assert e.salary_currency == "JPY/YEAR"

@@ -8,6 +8,7 @@ from tg_jobs_parser.ai.schema import VacancyAIExtraction
 from tg_jobs_parser.config.schema import AiConfig, AppConfig
 from tg_jobs_parser.extraction.salary_period import (
     apply_hourly_currency_from_text,
+    normalize_annual_salary_to_monthly,
     sanitize_salary_currency_period,
 )
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -146,4 +147,5 @@ def merge_rules_and_ai(
     if ai_cfg.mode != "primary":
         apply_hourly_currency_from_text(out)
     sanitize_salary_currency_period(out)
+    normalize_annual_salary_to_monthly(out)
     return out

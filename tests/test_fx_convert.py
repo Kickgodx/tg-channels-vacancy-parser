@@ -31,6 +31,12 @@ def test_rub_hourly_monthly_conversion():
     assert salary_amount_to_rub(1000, "RUB/HOUR", {"RUB": 1.0}) == 1000 * HOURS_PER_MONTH
 
 
+def test_year_suffix_divides_by_12():
+    assert parse_salary_currency("JPY/YEAR") == ("JPY", "year")
+    assert monthly_salary_amount(9_000_000, "JPY/YEAR") == 750_000.0
+    assert salary_amount_to_rub(9_000_000, "JPY/YEAR", {"JPY": 0.5}) == 375_000.0
+
+
 def test_rub_per_hour_to_monthly_rub():
     assert parse_salary_currency("RUB/HOUR") == ("RUB", "hour")
     assert normalize_currency("RUB/HOUR") == "RUB"

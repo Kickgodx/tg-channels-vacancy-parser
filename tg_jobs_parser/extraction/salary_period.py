@@ -1,11 +1,11 @@
-"""Период зарплаты: почасовая / месячная (суффикс в ``salary_currency``)."""
+"""Период зарплаты: почасовая / годовая / месячная (суффикс в ``salary_currency``)."""
 
 from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING
 
-from tg_jobs_parser.fx.convert import normalize_currency
+from tg_jobs_parser.fx.convert import normalize_currency, parse_salary_currency
 
 if TYPE_CHECKING:
     from tg_jobs_parser.models.vacancy import Vacancy
@@ -52,9 +52,36 @@ _MONTHLY_IN_TEXT = re.compile(
     re.I,
 )
 
+# Явные годовые маркеры (не «6 year(s)» опыта, не голый $125k — это решает LLM).
+_ANNUAL_IN_TEXT = re.compile(
+    r"(?:"
+    r"\bannually\b|"
+    r"\bannual(?:\s+(?:salary|pay|compensation|package|base))\b|"
+    r"\bper\s+year\b|"
+    r"/\s*y(?:ea)?r\b|"
+    r"\byearly\b|"
+    r"\bв\s+год\b|"
+    r"\bгодов(?:ая|ой|ую|ые|ый)\b|"
+    r"\bза\s+год\b"
+    r")",
+    re.I,
+)
+
+# JPY: месячная никогда не бывает миллионами — безопасно делить по потолку.
+_JPY_MONTHLY_CEILING = 2_500_000.0
+
+# Западные валюты: делим только если сумма явно выше любого реалистичного месяца
+# (директор ~250–450k/год → ~20–37k/мес; 35k может быть и годом джуна, и месяцем директора).
+_WESTERN_ANNUAL_FLOOR = 80_000.0
+_WESTERN_ISO = frozenset({"USD", "EUR", "GBP", "CAD"})
+
 
 def monthly_salary_markers_in_text(text: str) -> bool:
     return bool(text and _MONTHLY_IN_TEXT.search(text.lower()))
+
+
+def annual_markers_in_text(text: str) -> bool:
+    return bool(text and _ANNUAL_IN_TEXT.search(text))
 
 
 def hourly_markers_in_text(text: str) -> bool:
@@ -113,3 +140,74 @@ def sanitize_salary_currency_period(vacancy: Vacancy) -> None:
     base = normalize_currency(cur, default_if_missing="")
     if base:
         vacancy.salary_currency = base
+
+
+def _salary_reference_amount(vacancy: Vacancy) -> float | None:
+    if vacancy.detected_salary_avg is not None:
+        return float(vacancy.detected_salary_avg)
+    if vacancy.detected_salary_min is not None and vacancy.detected_salary_max is not None:
+        return (float(vacancy.detected_salary_min) + float(vacancy.detected_salary_max)) / 2.0
+    if vacancy.detected_salary_min is not None:
+        return float(vacancy.detected_salary_min)
+    if vacancy.detected_salary_max is not None:
+        return float(vacancy.detected_salary_max)
+    return None
+
+
+def _safe_to_convert_annual_amount(amount: float, currency_iso: str | None) -> bool:
+    """
+    Консервативно: только суммы, которые не пересекаются с месячными после /12.
+
+    Низкие западные годы (26k–50k) и «уже месяц» после директора (~20–37k) —
+    зона LLM, код не трогает.
+    """
+    iso = (currency_iso or "").upper()
+    val = float(amount)
+    if iso == "JPY":
+        return val > _JPY_MONTHLY_CEILING
+    if iso in _WESTERN_ISO:
+        return val >= _WESTERN_ANNUAL_FLOOR
+    return False
+
+
+def normalize_annual_salary_to_monthly(vacancy: Vacancy) -> bool:
+    """
+    Годовые суммы → месячные (÷12), валюта без периода.
+
+    Безопасные триггеры:
+    - суффикс ``…/YEAR`` (явный период от LLM);
+    - явный annual-маркер в тексте + сумма вне зоны неоднозначности
+      (JPY ≫ месяца; USD/EUR/GBP/CAD ≥ 80k).
+
+    ``$125k`` без Annually и низкие годы (30k USD Annually) — только промпт.
+    """
+    cur = vacancy.salary_currency
+    if not cur:
+        return False
+    iso, period = parse_salary_currency(cur)
+    if period == "hour":
+        return False
+
+    text = vacancy.raw_text or vacancy.cleaned_text or ""
+    explicit_year = period == "year"
+    if not explicit_year and not annual_markers_in_text(text):
+        return False
+
+    amount = _salary_reference_amount(vacancy)
+    if amount is None:
+        return False
+    # /YEAR всегда означает «суммы годовые»; иначе — только безопасные пороги.
+    if not explicit_year and not _safe_to_convert_annual_amount(amount, iso):
+        return False
+
+    changed = False
+    for attr in ("detected_salary_min", "detected_salary_max", "detected_salary_avg"):
+        val = getattr(vacancy, attr)
+        if val is None:
+            continue
+        setattr(vacancy, attr, float(val) / 12.0)
+        changed = True
+    if iso and vacancy.salary_currency != iso:
+        vacancy.salary_currency = iso
+        changed = True
+    return changed

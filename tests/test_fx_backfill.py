@@ -72,3 +72,65 @@ def test_backfill_db_rates_only_uses_latest_in_db(db_session, monkeypatch):
     assert stats.updated == 1
     assert row is not None
     assert row.detected_salary_avg_rub == pytest.approx(80_000.0)
+
+
+def test_backfill_converts_annual_jpy_to_monthly(db_session, monkeypatch):
+    d = date(2026, 5, 19)
+    fx_cfg = FxConfig(enabled=True)
+    fx_repo.upsert_rates(db_session, d, {"RUB": 1.0, "JPY": 0.54})
+    db_session.commit()
+
+    text = "SRE | 6M - 12M JPY Annually | Tokyo"
+    v = Vacancy(
+        id=vacancy_content_id(text),
+        source_post_key="ch-jpy-1",
+        source_channel="ch",
+        source_url="https://t.me/s/ch",
+        raw_text=text,
+        cleaned_text=text,
+        detected_salary_min=6_000_000.0,
+        detected_salary_max=12_000_000.0,
+        detected_salary_avg=9_000_000.0,
+        salary_currency="JPY",
+        post_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        detected_salary_avg_rub=4_855_041.0,
+    )
+    monkeypatch.setattr(
+        fx_repo, "ensure_latest_rates", lambda *_a, **_k: (d, {"RUB": 1.0, "JPY": 0.54})
+    )
+    upsert_vacancies(db_session, [v], parse_run_id=uuid.uuid4(), fx_config=fx_cfg)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        fx_repo,
+        "ensure_latest_rates",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("ensure_latest_rates must not be called when db_rates_only=True")
+        ),
+    )
+    monkeypatch.setattr(
+        fx_repo,
+        "ensure_rates",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("ensure_rates must not be called")),
+    )
+
+    stats = backfill_vacancies_salary_rub(db_session, fx_cfg, db_rates_only=True)
+    db_session.commit()
+
+    row = db_session.scalar(select(VacancyRow).where(VacancyRow.id == v.id))
+    assert stats.updated == 1
+    assert row is not None
+    assert row.salary_currency == "JPY"
+    assert row.detected_salary_min == pytest.approx(500_000.0)
+    assert row.detected_salary_max == pytest.approx(1_000_000.0)
+    assert row.detected_salary_avg == pytest.approx(750_000.0)
+    assert row.detected_salary_avg_rub == pytest.approx(750_000.0 * 0.54)
+
+    # Идемпотентность: повторный backfill не делит ещё раз.
+    stats2 = backfill_vacancies_salary_rub(db_session, fx_cfg, db_rates_only=True)
+    db_session.commit()
+    row2 = db_session.scalar(select(VacancyRow).where(VacancyRow.id == v.id))
+    assert stats2.updated == 1
+    assert row2 is not None
+    assert row2.detected_salary_avg == pytest.approx(750_000.0)
+    assert row2.detected_salary_avg_rub == pytest.approx(750_000.0 * 0.54)
