@@ -1,4 +1,10 @@
-export type RunStatus = "pending" | "running" | "completed" | "cancelled" | "failed";
+export type RunStatus =
+  | "pending"
+  | "queued"
+  | "running"
+  | "completed"
+  | "cancelled"
+  | "failed";
 
 /** Полная вакансия (detail / import). */
 export interface Vacancy {
@@ -354,6 +360,9 @@ export interface RunDetail {
   metrics?: MetricsSummary | null;
   run_params?: Record<string, unknown> | null;
   error_message?: string | null;
+  progress?: ProgressEvent | null;
+  progress_updated_at?: string | null;
+  cancel_requested?: boolean;
 }
 
 export interface ProgressEvent {
