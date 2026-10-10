@@ -55,29 +55,39 @@ def start_parse_run(config: AppConfig, _body: RunCreateRequest) -> uuid.UUID:
             "messaging.destination": "parse",
         },
     ):
-        if backend == "rq":
-            from backend.queue.rq_conn import get_parse_queue
+        try:
+            if backend == "rq":
+                from backend.queue.rq_conn import get_parse_queue
 
-            q = get_parse_queue()
-            rq_job = q.enqueue(
-                run_parse_job,
-                str(run_id),
-                traceparent,
-                job_timeout=settings.parse_rq_job_timeout_seconds,
-                result_ttl=3600,
-                failure_ttl=86400,
-            )
+                q = get_parse_queue()
+                rq_job = q.enqueue(
+                    run_parse_job,
+                    str(run_id),
+                    traceparent,
+                    job_timeout=settings.parse_rq_job_timeout_seconds,
+                    result_ttl=3600,
+                    failure_ttl=86400,
+                )
+                with session_scope() as session:
+                    repo.set_parse_run_rq_job_id(session, run_id, str(rq_job.id))
+                _LOG.info("Прогон %s поставлен в RQ parse (job=%s)", run_id, rq_job.id)
+            else:
+                threading.Thread(
+                    target=run_parse_job,
+                    args=(str(run_id), traceparent),
+                    name=f"parse-run-{run_id}",
+                    daemon=True,
+                ).start()
+                _LOG.info("Прогон %s запущен inprocess", run_id)
+        except Exception:
             with session_scope() as session:
-                repo.set_parse_run_rq_job_id(session, run_id, str(rq_job.id))
-            _LOG.info("Прогон %s поставлен в RQ parse (job=%s)", run_id, rq_job.id)
-        else:
-            threading.Thread(
-                target=run_parse_job,
-                args=(str(run_id), traceparent),
-                name=f"parse-run-{run_id}",
-                daemon=True,
-            ).start()
-            _LOG.info("Прогон %s запущен inprocess", run_id)
+                repo.set_run_status(
+                    session,
+                    run_id,
+                    "failed",
+                    error_message="Failed to enqueue job",
+                )
+            raise
 
     return run_id
 

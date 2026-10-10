@@ -29,7 +29,7 @@ flowchart LR
 | Dedup | `deduplication.deduplicator` |
 | FX | `fx.vacancy_rub` |
 | DB | `backend.db.vacancy_repository` (facade: `repository`) |
-| SSE | `progress_bus` → RunPage |
+| SSE | durable `parse_runs.progress` + Redis pub/sub → RunPage |
 
 ### Shared ingestion и AI cache (ports)
 

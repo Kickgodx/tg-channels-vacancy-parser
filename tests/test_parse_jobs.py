@@ -195,6 +195,66 @@ def test_start_parse_run_inprocess_completes(api_client, monkeypatch):
     assert status == "completed"
 
 
+def test_second_post_runs_while_queued_returns_409(api_client, monkeypatch):
+    monkeypatch.setenv("PARSE_JOB_BACKEND", "inprocess")
+    get_settings.cache_clear()
+    with session_scope() as session:
+        pr.create_parse_run(session, config_snapshot={})
+        assert pr.has_active_parse_run(session) is True
+
+    r = api_client.post("/api/v1/runs", json={})
+    assert r.status_code == 409
+    assert "прогон" in r.json()["detail"].lower()
+
+
+def test_enqueue_failure_marks_run_failed(api_client, monkeypatch):
+    from backend.config_builder import build_config
+    from backend.schemas import RunCreateRequest
+    from backend.services import run_service
+
+    monkeypatch.setenv("PARSE_JOB_BACKEND", "rq")
+    get_settings.cache_clear()
+
+    class _BoomQueue:
+        def enqueue(self, *args, **kwargs):
+            raise RuntimeError("redis down")
+
+    monkeypatch.setattr("backend.queue.rq_conn.get_parse_queue", lambda: _BoomQueue())
+
+    settings = get_settings()
+    config = build_config(settings.config_path, RunCreateRequest())
+    with pytest.raises(RuntimeError, match="redis down"):
+        run_service.start_parse_run(config, RunCreateRequest())
+
+    with session_scope() as session:
+        rows = pr.list_parse_runs(session, limit=10)
+        assert len(rows) == 1
+        assert rows[0].status == "failed"
+        assert rows[0].error_message == "Failed to enqueue job"
+        assert pr.has_active_parse_run(session) is False
+
+    # Следующий POST не заблокирован «зависшим» queued.
+    monkeypatch.setenv("PARSE_JOB_BACKEND", "inprocess")
+    get_settings.cache_clear()
+
+    def fake_run_parse(config, **kwargs):
+        from tg_jobs_parser.models.metrics import MetricsSummary
+        from tg_jobs_parser.models.parse_result import ParseResult
+
+        return ParseResult(
+            run_params={},
+            posts_fetched=0,
+            vacancies_all=[],
+            vacancies_unique=[],
+            parse_warnings="",
+            metrics=MetricsSummary(),
+        )
+
+    monkeypatch.setattr("backend.workers.parse_tasks.run_parse", fake_run_parse)
+    r2 = api_client.post("/api/v1/runs", json={})
+    assert r2.status_code == 202
+
+
 def test_cancel_queued_run(api_client):
     with session_scope() as session:
         rid = pr.create_parse_run(session, config_snapshot={}).id
