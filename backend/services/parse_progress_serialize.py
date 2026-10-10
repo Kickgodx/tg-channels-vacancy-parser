@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.api.routes.runs import build_vacancies_preview
+from backend.services.vacancy_preview import build_vacancies_preview
 from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 
 

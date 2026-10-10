@@ -20,6 +20,8 @@ from backend.observability import (
     record_parse_run_finished,
 )
 from backend.schemas import RunCreateRequest
+from backend.services.parse_progress_serialize import snapshot_to_progress_dict
+from backend.services.parse_run_events import publish_parse_run_event
 from backend.services.progress_bus import progress_bus
 from backend.services.run_registry import run_registry
 from tg_jobs_parser.config.schema import AppConfig
@@ -102,9 +104,20 @@ def _run_worker_traced(run_id: uuid.UUID, config: AppConfig, cancel_token, span)
         config.ai.cache_backend if config.ai.enabled else "—",
     )
 
+    _last_db_progress = 0.0
+
     def on_progress(snap: ParseProgressSnapshot) -> None:
-        active.last_progress = snap
-        progress_bus.publish(run_id, snap)
+        nonlocal _last_db_progress
+        payload = snapshot_to_progress_dict(snap)
+        if active is not None:
+            active.last_progress = snap
+        progress_bus.publish(run_id, snap)  # keep until Task 7 removes thread path
+        now = time.monotonic()
+        if now - _last_db_progress >= 1.0:
+            _last_db_progress = now
+            with session_scope() as session:
+                repo.patch_run_progress(session, run_id, payload)
+            publish_parse_run_event(run_id, event="progress", payload=payload)
 
     # Промежуточные батчи, уже записанные в БД по ходу прогона (через vacancy_batch_sink).
     flushed_ids: set[str] = set()
@@ -221,5 +234,11 @@ def _run_worker_traced(run_id: uuid.UUID, config: AppConfig, cancel_token, span)
         )
         PARSE_RUNS_ACTIVE.dec()
         mark_parse_run_stopped()
+        if active.last_progress is not None:
+            final_payload = snapshot_to_progress_dict(active.last_progress)
+            with session_scope() as session:
+                repo.patch_run_progress(session, run_id, final_payload)
+            publish_parse_run_event(run_id, event="progress", payload=final_payload)
+        publish_parse_run_event(run_id, event="done", payload={})
         progress_bus.publish_done(run_id)
         run_registry.finish(run_id)

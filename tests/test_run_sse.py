@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import threading
+import time
 from datetime import UTC, datetime
 
-from backend.api.routes.runs import build_vacancies_preview
+import fakeredis
+
+from backend.db import parse_run_repository as pr
 from backend.db.models import ParseRunRow
-from backend.db.session import get_session_factory
+from backend.db.session import get_session_factory, session_scope
+from backend.services.parse_run_events import publish_parse_run_event
+from backend.services.vacancy_preview import build_vacancies_preview
 from tg_jobs_parser.models.vacancy import Vacancy
 
 
@@ -22,6 +28,26 @@ def _vac(vid: str, *, channel: str = "ch", post_id: str = "1") -> Vacancy:
         vacancy_score=5,
         vacancy_substantive_score=3,
     )
+
+
+def test_get_run_returns_patched_progress(api_client):
+    with session_scope() as session:
+        rid = pr.create_parse_run(session, config_snapshot={}, status="running").id
+    snap = {
+        "posts_processed": 7,
+        "posts_total": 20,
+        "vacancies_found": 2,
+        "phase": "processing",
+    }
+    with session_scope() as session:
+        pr.patch_run_progress(session, rid, snap)
+
+    r = api_client.get(f"/api/v1/runs/{rid}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["progress"] is not None
+    assert body["progress"]["posts_processed"] == 7
+    assert body["progress_updated_at"] is not None
 
 
 def test_run_events_terminal_emits_done_immediately(api_client):
@@ -47,6 +73,58 @@ def test_run_events_terminal_emits_done_immediately(api_client):
         body = b"".join(resp.iter_bytes()).decode("utf-8", errors="replace")
 
     assert "event: done" in body
+
+
+def test_run_events_emits_initial_progress_from_db(api_client, monkeypatch):
+    """Initial progress из БД; live-ветка Redis (TestClient буферит до конца стрима)."""
+    server = fakeredis.FakeStrictRedis()
+    monkeypatch.setenv("REDIS_URL", "redis://fake:6379/0")
+    from backend.queue import rq_conn
+    from backend.settings import get_settings
+
+    get_settings.cache_clear()
+    rq_conn.reset_redis_connection()
+    monkeypatch.setattr(rq_conn, "get_redis_connection", lambda force_new=False: server)
+
+    with session_scope() as session:
+        rid = pr.create_parse_run(session, config_snapshot={}, status="running").id
+    with session_scope() as session:
+        pr.patch_run_progress(
+            session,
+            rid,
+            {
+                "posts_processed": 3,
+                "posts_total": 10,
+                "vacancies_found": 1,
+                "phase": "processing",
+            },
+        )
+
+    ready = threading.Event()
+
+    def _finish() -> None:
+        ready.wait(timeout=5)
+        time.sleep(0.2)
+        publish_parse_run_event(rid, event="done", payload={})
+        # fallback: Redis SSE also exits on terminal DB status
+        with session_scope() as session:
+            row = pr.get_parse_run(session, rid)
+            if row is not None:
+                row.status = "completed"
+                session.flush()
+
+    threading.Thread(target=_finish, daemon=True).start()
+
+    with api_client.stream("GET", f"/api/v1/runs/{rid}/events") as resp:
+        assert resp.status_code == 200
+        ready.set()
+        body = b"".join(resp.iter_bytes()).decode("utf-8", errors="replace")
+
+    assert "event: progress" in body
+    assert '"posts_processed": 3' in body or '"posts_processed":3' in body
+    assert "event: done" in body
+    rq_conn.reset_redis_connection()
+    get_settings.cache_clear()
 
 
 def test_vacancies_preview_dedupes_by_id():
