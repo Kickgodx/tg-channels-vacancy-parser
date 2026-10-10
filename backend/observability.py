@@ -7,6 +7,9 @@ Instrumentator (HTTP): прогоны парсинга, UPSERT вакансий,
 Плюс ``_DBStatsCollector`` — COUNT-агрегаты по таблицам, собираемые на каждый
 scrape ``/metrics``. При недоступной БД коллектор молча отдаёт пустой набор,
 чтобы не ломать scrape.
+
+``_DBPoolCollector`` — состояние SQLAlchemy QueuePool (занято / свободно /
+overflow / лимит). Регистрируется и на backend, и на llm-worker.
 """
 
 from __future__ import annotations
@@ -327,6 +330,99 @@ def record_hh_listings_purged(count: int) -> None:
         HH_LISTINGS_PURGED.inc(count)
 
 
+# --- Пул соединений SQLAlchemy -----------------------------------------------
+
+
+class _DBPoolCollector:
+    """Состояние QueuePool на scrape ``/metrics``.
+
+    На SQLite (SingletonThreadPool в тестах) метрики не отдаются — не QueuePool.
+    Ошибки чтения пула глотаются: scrape не должен падать.
+    """
+
+    def describe(self):
+        yield GaugeMetricFamily("db_pool_checked_out", "Соединения, выданные из пула")
+        yield GaugeMetricFamily("db_pool_checked_in", "Простаивающие соединения в пуле")
+        yield GaugeMetricFamily("db_pool_size", "Настроенный размер постоянного пула")
+        yield GaugeMetricFamily("db_pool_overflow", "Текущий overflow сверх pool_size (≥0)")
+        yield GaugeMetricFamily("db_pool_max_overflow", "Максимальный overflow (настройка)")
+        yield GaugeMetricFamily(
+            "db_pool_max_connections",
+            "Верхняя граница соединений процесса (pool_size + max_overflow)",
+        )
+
+    def collect(self):
+        stats = self._read_pool()
+        if stats is None:
+            return
+        yield GaugeMetricFamily(
+            "db_pool_checked_out",
+            "Соединения, выданные из пула",
+            value=stats["checked_out"],
+        )
+        yield GaugeMetricFamily(
+            "db_pool_checked_in",
+            "Простаивающие соединения в пуле",
+            value=stats["checked_in"],
+        )
+        yield GaugeMetricFamily(
+            "db_pool_size",
+            "Настроенный размер постоянного пула",
+            value=stats["size"],
+        )
+        yield GaugeMetricFamily(
+            "db_pool_overflow",
+            "Текущий overflow сверх pool_size (≥0)",
+            value=stats["overflow"],
+        )
+        yield GaugeMetricFamily(
+            "db_pool_max_overflow",
+            "Максимальный overflow (настройка)",
+            value=stats["max_overflow"],
+        )
+        yield GaugeMetricFamily(
+            "db_pool_max_connections",
+            "Верхняя граница соединений процесса (pool_size + max_overflow)",
+            value=stats["max_connections"],
+        )
+
+    @staticmethod
+    def _read_pool() -> dict[str, float] | None:
+        try:
+            from sqlalchemy.pool import QueuePool
+
+            from backend.db.session import get_engine
+
+            pool = get_engine().pool
+            if not isinstance(pool, QueuePool):
+                return None
+            size = float(pool.size())
+            # QueuePool._max_overflow: -1 = без лимита (редко); иначе ≥0.
+            raw_max_overflow = getattr(pool, "_max_overflow", 0)
+            try:
+                max_overflow = float(raw_max_overflow)
+            except (TypeError, ValueError):
+                max_overflow = 0.0
+            if max_overflow < 0:
+                # unlimited overflow — capacity неизвестна; отдаём только size как floor
+                max_connections = size
+                max_overflow_metric = -1.0
+            else:
+                max_overflow_metric = max_overflow
+                max_connections = size + max_overflow
+            return {
+                "checked_out": float(pool.checkedout()),
+                "checked_in": float(pool.checkedin()),
+                "size": size,
+                "overflow": float(max(pool.overflow(), 0)),
+                "max_overflow": max_overflow_metric,
+                "max_connections": max_connections,
+            }
+        except Exception as e:
+            _LOG.debug("DBPoolCollector: пул недоступен: %s", e)
+            return None
+
+
 # --- Агрегаты БД на scrape ---------------------------------------------------
 
 
@@ -538,6 +634,9 @@ class _DBStatsCollector:
             llm_jobs_by_status,
         )
 
+
+# Пул — на каждом процессе (backend и llm-worker): у каждого свой QueuePool.
+REGISTRY.register(_DBPoolCollector())
 
 # На llm-worker COUNT по всем таблицам не нужен: лишний RAM/нагрузка на Postgres
 # при scale и дубли рядов в Prometheus. Счётчики LLM-джоб регистрируются выше всегда.

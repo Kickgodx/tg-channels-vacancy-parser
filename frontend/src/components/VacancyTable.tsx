@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Vacancy } from "../types/api";
+import type { VacancyListItem } from "../types/api";
 import type { VacancySortField, VacancySortOrder } from "../types/sort";
 import { SORTABLE_COLUMNS } from "../types/sort";
 import { cleanPostUrl } from "../utils/cleanPostUrl";
@@ -17,9 +17,8 @@ const ALL_COLUMNS = [
   { key: "detected_specializations", label: "Специализации", sortable: false },
   { key: "vacancy_score", label: "Score", sortable: true },
   { key: "match_score", label: "Match", sortable: true },
-  { key: "cleaned_text", label: "Текст", sortable: false },
+  { key: "preview", label: "Текст", sortable: false },
 ] as const;
-
 type ColKey = (typeof ALL_COLUMNS)[number]["key"];
 
 function compareValues(a: unknown, b: unknown, order: VacancySortOrder): number {
@@ -34,7 +33,11 @@ function compareValues(a: unknown, b: unknown, order: VacancySortOrder): number 
   return String(a).localeCompare(String(b), "ru") * mul;
 }
 
-function sortVacancies(items: Vacancy[], sortBy: VacancySortField, sortOrder: VacancySortOrder): Vacancy[] {
+function sortVacancies(
+  items: VacancyListItem[],
+  sortBy: VacancySortField,
+  sortOrder: VacancySortOrder,
+): VacancyListItem[] {
   return [...items].sort((a, b) => {
     const av = (a as unknown as Record<string, unknown>)[sortBy];
     const bv = (b as unknown as Record<string, unknown>)[sortBy];
@@ -43,7 +46,7 @@ function sortVacancies(items: Vacancy[], sortBy: VacancySortField, sortOrder: Va
 }
 
 interface Props {
-  items: Vacancy[];
+  items: VacancyListItem[];
   title?: string;
   sortBy?: VacancySortField;
   sortOrder?: VacancySortOrder;
@@ -51,7 +54,6 @@ interface Props {
   /** Выбранное резюме — включает матчинг в карточке вакансии. */
   resumeId?: number | null;
 }
-
 export default function VacancyTable({
   items,
   title,
@@ -77,9 +79,9 @@ export default function VacancyTable({
     "detected_grade",
     "detected_specializations",
     "vacancy_score",
-    "cleaned_text",
+    "preview",
   ]);
-  const [selected, setSelected] = useState<{ v: Vacancy; idx: number } | null>(null);
+  const [selected, setSelected] = useState<{ v: VacancyListItem; idx: number } | null>(null);
 
   useEffect(() => {
     if (items.some((v) => v.match_score != null)) {
@@ -110,7 +112,7 @@ export default function VacancyTable({
     }
   };
 
-  const renderCell = (v: Vacancy, key: ColKey) => {
+  const renderCell = (v: VacancyListItem, key: ColKey) => {
     switch (key) {
       case "post_url":
         return v.post_url ? (
@@ -147,8 +149,8 @@ export default function VacancyTable({
         );
       case "detected_specializations":
         return (v.detected_specializations || []).join(", ") || "—";
-      case "cleaned_text":
-        return (v.cleaned_text || "").slice(0, 120) + ((v.cleaned_text?.length ?? 0) > 120 ? "…" : "");
+      case "preview":
+        return v.preview || "—";
       default: {
         const val = (v as unknown as Record<string, unknown>)[key];
         return val != null ? String(val) : "—";

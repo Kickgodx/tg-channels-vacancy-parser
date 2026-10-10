@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from backend.db.models import HhListingRow, VacancyRow
-from backend.db.repository import VacancyUpsertStats
+from backend.db.repository import VacancyUpsertStats, invalidate_vacancy_count_cache
 from backend.db.vacancy_mapper import vacancy_to_row
 from backend.fx.apply import (
     apply_salary_rub_for_vacancy,
@@ -276,4 +276,6 @@ def upsert_hh_vacancies(
             inserted += 1
     session.flush()
     record_vacancy_upsert(inserted=inserted, updated_existing=updated_existing)
+    if inserted or updated_existing:
+        invalidate_vacancy_count_cache()
     return VacancyUpsertStats(inserted=inserted, updated_existing=updated_existing)

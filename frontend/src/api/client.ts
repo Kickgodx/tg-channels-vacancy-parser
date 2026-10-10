@@ -23,6 +23,7 @@ import type {
   TokenResponse,
   Vacancy,
   VacancyImportResponse,
+  VacancyListItem,
   VacancyMatch,
 } from "../types/api";
 
@@ -64,7 +65,7 @@ export interface RunSummary {
 }
 
 export interface VacancyListResponse {
-  items: Vacancy[];
+  items: VacancyListItem[];
   total: number;
   page: number;
   page_size: number;
@@ -295,6 +296,8 @@ export const api = {
     const qs = q.toString();
     return request<VacancyListResponse>(`/vacancies${qs ? `?${qs}` : ""}`);
   },
+
+  getVacancy: (id: string) => request<Vacancy>(`/vacancies/${encodeURIComponent(id)}`),
 
   /** Агрегаты для графиков (те же фильтры, что у listVacancies, без пагинации). */
   getFxRates: () =>

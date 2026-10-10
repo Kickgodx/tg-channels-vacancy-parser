@@ -37,7 +37,7 @@ def main() -> None:
 
     # Без fork (SimpleWorker): метрики в том же процессе, что :9101; меньше пик RAM
     # (Worker fork’ает work horse на каждую джобу — COW-копия + счётчики теряются).
-    # DB COUNT-collector только на backend — воркерам не нужен scrape Postgres.
+    # DB COUNT-collector только на backend; db_pool_* — и здесь (свой QueuePool).
     os.environ["TG_JOBS_METRICS_ROLE"] = "worker"
 
     metrics_port = settings.llm_worker_metrics_port

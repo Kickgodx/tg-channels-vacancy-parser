@@ -7,10 +7,11 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from threading import Lock
 
 from sqlalchemy import and_, func, literal_column, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from backend.db.models import (
     CoverLetterRow,
@@ -23,13 +24,18 @@ from backend.db.models import (
     VacancyRow,
 )
 from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
-from backend.db.vacancy_mapper import row_to_vacancy, vacancy_to_row
+from backend.db.vacancy_mapper import (
+    row_to_list_item,
+    row_to_vacancy,
+    vacancy_preview_expr,
+    vacancy_to_row,
+)
 from backend.fx.apply import (
     apply_salary_rub_for_vacancy,
     preload_fx_rates_for_vacancies,
 )
 from backend.observability import record_vacancies_archived, record_vacancy_upsert
-from backend.schemas import RunStatus, VacancyQuery, VacancySortField
+from backend.schemas import RunStatus, VacancyListItem, VacancyQuery, VacancySortField
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import FxConfig
@@ -51,6 +57,48 @@ class VacancyUpsertStats:
 _LOG = logging.getLogger(__name__)
 
 VACANCY_TTL_DAYS = 40  # fallback, если config.yaml не загружается
+
+# Короткий кэш COUNT(*) списка: при нагрузочном чтении без фильтров режет seq/index scan пополам.
+_COUNT_CACHE_TTL_S = 1.0
+_count_cache_lock = Lock()
+_count_cache: dict[str, tuple[float, int]] = {}
+
+
+def _vacancy_count_cache_key(query: VacancyQuery, dialect: str) -> str:
+    payload = query.model_dump(exclude={"page", "page_size", "sort_by", "sort_order"})
+    return f"{dialect}:{sorted(payload.items())!r}"
+
+
+def _get_cached_vacancy_count(key: str) -> int | None:
+    with _count_cache_lock:
+        hit = _count_cache.get(key)
+        if hit is None:
+            return None
+        ts, total = hit
+        if time.monotonic() - ts > _COUNT_CACHE_TTL_S:
+            _count_cache.pop(key, None)
+            return None
+        return total
+
+
+def _set_cached_vacancy_count(key: str, total: int) -> None:
+    with _count_cache_lock:
+        _count_cache[key] = (time.monotonic(), total)
+
+
+def invalidate_vacancy_count_cache() -> None:
+    with _count_cache_lock:
+        _count_cache.clear()
+
+
+def counted_vacancies(session: Session, query: VacancyQuery, *, dialect: str) -> int:
+    key = _vacancy_count_cache_key(query, dialect)
+    cached = _get_cached_vacancy_count(key)
+    if cached is not None:
+        return cached
+    total = int(session.scalar(vacancy_count_stmt(query, dialect=dialect)) or 0)
+    _set_cached_vacancy_count(key, total)
+    return total
 
 
 def _vacancy_ttl_days() -> int:
@@ -230,6 +278,8 @@ def upsert_vacancies(
         updated_existing,
     )
     record_vacancy_upsert(inserted=inserted, updated_existing=updated_existing)
+    if inserted or updated_existing:
+        invalidate_vacancy_count_cache()
     return VacancyUpsertStats(inserted=inserted, updated_existing=updated_existing)
 
 
@@ -265,6 +315,7 @@ def archive_expired_vacancies(
             cutoff.isoformat(),
         )
         record_vacancies_archived(archived)
+        invalidate_vacancy_count_cache()
     return archived
 
 
@@ -282,84 +333,131 @@ def patch_run_vacancy_upsert_stats(
     row.run_params = params
 
 
-def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[Vacancy], int]:
+def _list_text_defer():
+    return (defer(VacancyRow.raw_text), defer(VacancyRow.cleaned_text))
+
+
+def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[VacancyListItem], int]:
     dialect = session.get_bind().dialect.name
-    total = int(session.scalar(vacancy_count_stmt(query, dialect=dialect)) or 0)
     offset = (query.page - 1) * query.page_size
     order = [*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc()]
+    preview = vacancy_preview_expr()
     if query.resume_id is not None:
-        stmt = apply_vacancy_filters(select(VacancyRow, VacancyMatchRow), query, dialect=dialect).outerjoin(
-            VacancyMatchRow,
-            and_(
-                VacancyMatchRow.vacancy_id == VacancyRow.id,
-                VacancyMatchRow.resume_id == query.resume_id,
-            ),
+        stmt = (
+            apply_vacancy_filters(select(VacancyRow, VacancyMatchRow, preview), query, dialect=dialect)
+            .outerjoin(
+                VacancyMatchRow,
+                and_(
+                    VacancyMatchRow.vacancy_id == VacancyRow.id,
+                    VacancyMatchRow.resume_id == query.resume_id,
+                ),
+            )
+            .options(*_list_text_defer())
         )
-        pairs = session.execute(stmt.order_by(*order).offset(offset).limit(query.page_size)).all()
-        items: list[Vacancy] = []
-        for vrow, mrow in pairs:
-            v = row_to_vacancy(vrow)
-            if mrow is not None:
-                v.match_score = mrow.overall_score
-                v.match_explanation = mrow.explanation
-            items.append(v)
-        return items, total
-    stmt = apply_vacancy_filters(select(VacancyRow), query, dialect=dialect)
-    rows = session.scalars(stmt.order_by(*order).offset(offset).limit(query.page_size)).all()
-    return [row_to_vacancy(r) for r in rows], total
+        rows = session.execute(stmt.order_by(*order).offset(offset).limit(query.page_size)).all()
+        items: list[VacancyListItem] = []
+        for vrow, mrow, prev in rows:
+            items.append(
+                row_to_list_item(
+                    vrow,
+                    prev or "",
+                    match_score=mrow.overall_score if mrow is not None else None,
+                    match_explanation=mrow.explanation if mrow is not None else None,
+                )
+            )
+        # На первой неполной странице total = len (без отдельного COUNT).
+        if query.page == 1 and len(items) < query.page_size:
+            return items, len(items)
+        return items, counted_vacancies(session, query, dialect=dialect)
+    stmt = apply_vacancy_filters(select(VacancyRow, preview), query, dialect=dialect).options(*_list_text_defer())
+    rows = session.execute(stmt.order_by(*order).offset(offset).limit(query.page_size)).all()
+    items = [row_to_list_item(vrow, prev or "") for vrow, prev in rows]
+    if query.page == 1 and len(items) < query.page_size:
+        return items, len(items)
+    return items, counted_vacancies(session, query, dialect=dialect)
+
+
+def get_vacancy(session: Session, vacancy_id: str) -> Vacancy | None:
+    row = session.get(VacancyRow, vacancy_id)
+    if row is None:
+        return None
+    return row_to_vacancy(row)
 
 
 def list_run_vacancies(
     session: Session,
     run_id: uuid.UUID,
     query: VacancyQuery,
-) -> tuple[list[Vacancy], int]:
+) -> tuple[list[VacancyListItem], int]:
     conditions = [
         VacancyRow.last_parse_run_id == run_id,
         VacancyRow.is_duplicate.is_(False),
         VacancyRow.archived_at.is_(None),
     ]
-    stmt = select(VacancyRow).where(*conditions)
     total = int(session.scalar(select(func.count(VacancyRow.id)).where(*conditions)) or 0)
     dialect = session.get_bind().dialect.name
     offset = (query.page - 1) * query.page_size
-    rows = session.scalars(
-        stmt.order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
+    preview = vacancy_preview_expr()
+    stmt = (
+        select(VacancyRow, preview)
+        .where(*conditions)
+        .options(*_list_text_defer())
+        .order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
         .offset(offset)
         .limit(query.page_size)
-    ).all()
-    return [row_to_vacancy(r) for r in rows], total
+    )
+    rows = session.execute(stmt).all()
+    return [row_to_list_item(vrow, prev or "") for vrow, prev in rows], total
 
 
-def list_all_vacancies(session: Session, query: VacancyQuery) -> list[Vacancy]:
-    """Все вакансии по фильтрам (пагинация по 500 — лимит VacancyQuery)."""
+def _iter_full_vacancies(session: Session, query: VacancyQuery) -> list[Vacancy]:
+    """Полные Vacancy по фильтрам (для export) — с raw/cleaned_text."""
+    dialect = session.get_bind().dialect.name
     page_size = min(query.page_size, 500)
     page = 1
     out: list[Vacancy] = []
     while True:
-        batch, total = list_vacancies(
-            session,
-            query.model_copy(update={"page": page, "page_size": page_size}),
-        )
-        out.extend(batch)
-        if not batch or len(out) >= total:
+        offset = (page - 1) * page_size
+        order = [*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc()]
+        stmt = apply_vacancy_filters(select(VacancyRow), query, dialect=dialect)
+        rows = session.scalars(stmt.order_by(*order).offset(offset).limit(page_size)).all()
+        if not rows:
+            break
+        out.extend(row_to_vacancy(r) for r in rows)
+        if len(rows) < page_size:
             break
         page += 1
     return out
+
+
+def list_all_vacancies(session: Session, query: VacancyQuery) -> list[Vacancy]:
+    """Все вакансии по фильтрам (полные тексты — для Excel/JSON export)."""
+    return _iter_full_vacancies(session, query)
 
 
 def list_all_run_vacancies(session: Session, run_id: uuid.UUID, query: VacancyQuery) -> list[Vacancy]:
     page_size = min(query.page_size, 500)
     page = 1
     out: list[Vacancy] = []
+    dialect = session.get_bind().dialect.name
+    conditions = [
+        VacancyRow.last_parse_run_id == run_id,
+        VacancyRow.is_duplicate.is_(False),
+        VacancyRow.archived_at.is_(None),
+    ]
     while True:
-        batch, total = list_run_vacancies(
-            session,
-            run_id,
-            query.model_copy(update={"page": page, "page_size": page_size}),
-        )
-        out.extend(batch)
-        if not batch or len(out) >= total:
+        offset = (page - 1) * page_size
+        rows = session.scalars(
+            select(VacancyRow)
+            .where(*conditions)
+            .order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
+            .offset(offset)
+            .limit(page_size)
+        ).all()
+        if not rows:
+            break
+        out.extend(row_to_vacancy(r) for r in rows)
+        if len(rows) < page_size:
             break
         page += 1
     return out

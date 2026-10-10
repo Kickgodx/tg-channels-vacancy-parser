@@ -1,5 +1,6 @@
 export type RunStatus = "pending" | "running" | "completed" | "cancelled" | "failed";
 
+/** Полная вакансия (detail / import). */
 export interface Vacancy {
   id: string;
   source_channel: string;
@@ -8,6 +9,37 @@ export interface Vacancy {
   post_date?: string | null;
   raw_text?: string;
   cleaned_text: string;
+  detected_specializations: string[];
+  detected_grade: string;
+  detected_salary_min?: number | null;
+  detected_salary_max?: number | null;
+  detected_salary_avg?: number | null;
+  detected_salary_avg_rub?: number | null;
+  salary_currency?: string | null;
+  work_format?: string | null;
+  country?: string | null;
+  city?: string | null;
+  company?: string | null;
+  contact?: string | null;
+  technologies?: string[];
+  application_urls?: string[];
+  vacancy_score?: number;
+  extraction_source?: string;
+  ai_confidence?: number | null;
+  ai_notes?: string | null;
+  match_score?: number | null;
+  match_explanation?: string | null;
+}
+
+/** Элемент списка: без полных текстов, только preview. */
+export interface VacancyListItem {
+  id: string;
+  source_post_key?: string;
+  source_channel: string;
+  source_url?: string;
+  post_url?: string | null;
+  post_date?: string | null;
+  preview: string;
   detected_specializations: string[];
   detected_grade: string;
   detected_salary_min?: number | null;

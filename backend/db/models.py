@@ -12,10 +12,12 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -59,6 +61,17 @@ class VacancyRow(Base):
     """Уникальная вакансия по тексту (``id`` = sha256 normalize(cleaned_text))."""
 
     __tablename__ = "vacancies"
+    __table_args__ = (
+        # Список по умолчанию: WHERE NOT duplicate AND archived IS NULL ORDER BY post_date DESC.
+        # На Postgres миграция 013 создаёт (post_date DESC NULLS LAST, id); здесь — portable вариант для SQLite/create_all.
+        Index(
+            "ix_vacancies_active_post_date",
+            "post_date",
+            "id",
+            postgresql_where=text("is_duplicate IS false AND archived_at IS NULL"),
+            sqlite_where=text("is_duplicate = 0 AND archived_at IS NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     source_post_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)

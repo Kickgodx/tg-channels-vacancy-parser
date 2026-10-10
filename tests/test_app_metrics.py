@@ -180,6 +180,35 @@ def test_db_stats_collector_in_metrics(api_client):
     assert "db_users} 1.0" in body or "db_users 1.0" in body
 
 
+def test_db_pool_collector_queue_pool(monkeypatch):
+    """На QueuePool отдаём занято/свободно/лимит; не-QueuePool — пустой scrape."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import NullPool, QueuePool
+
+    from backend.observability import _DBPoolCollector
+
+    eng = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        poolclass=QueuePool,
+        pool_size=3,
+        max_overflow=2,
+        pool_pre_ping=True,
+    )
+    monkeypatch.setattr("backend.db.session.get_engine", lambda: eng)
+
+    by_name = {fam.name: fam for fam in _DBPoolCollector().collect()}
+    assert by_name["db_pool_size"].samples[0].value == 3.0
+    assert by_name["db_pool_max_overflow"].samples[0].value == 2.0
+    assert by_name["db_pool_max_connections"].samples[0].value == 5.0
+    assert by_name["db_pool_checked_out"].samples[0].value == 0.0
+    assert by_name["db_pool_checked_in"].samples[0].value == 0.0
+    assert by_name["db_pool_overflow"].samples[0].value == 0.0
+
+    null_eng = create_engine("sqlite+pysqlite:///:memory:", poolclass=NullPool)
+    monkeypatch.setattr("backend.db.session.get_engine", lambda: null_eng)
+    assert list(_DBPoolCollector().collect()) == []
+
+
 def test_db_parse_runs_finished_24h_counts_recent(api_client):
     factory = get_session_factory()
     session = factory()

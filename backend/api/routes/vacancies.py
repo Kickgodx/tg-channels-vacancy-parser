@@ -20,6 +20,7 @@ from backend.schemas import (
 from backend.services import import_service
 from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
 from tg_jobs_parser.models.metrics import MetricsSummary
+from tg_jobs_parser.models.vacancy import Vacancy
 
 router = APIRouter(prefix="/vacancies", tags=["vacancies"], dependencies=[Depends(verify_api_key)])
 
@@ -166,3 +167,12 @@ def list_vacancies(
     )
     items, total = repo.list_vacancies(db, query)
     return VacancyListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/{vacancy_id}", response_model=Vacancy)
+def get_vacancy(vacancy_id: str, db: Session = Depends(get_db)) -> Vacancy:
+    """Полная вакансия (с raw/cleaned_text) для карточки/модалки."""
+    vacancy = repo.get_vacancy(db, vacancy_id)
+    if vacancy is None:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+    return vacancy

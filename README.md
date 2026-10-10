@@ -107,6 +107,12 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 сортировка по `ts_rank`. Со стеммингом: «python разработчик» находит
 «python-разработку». На SQLite (тесты) откатывается на `ILIKE`.
 
+Список вакансий по умолчанию опирается на частичный индекс
+`ix_vacancies_active_post_date (post_date, id) WHERE NOT is_duplicate AND archived_at IS NULL`
+(ORDER BY + COUNT без seq scan). `GET /vacancies` отдаёт slim-карточки с
+`preview`; полный текст — `GET /vacancies/{id}`. COUNT кэшируется ~1 с в
+процессе API.
+
 Набор фильтров сохраняется как именованный пресет (`saved_filters`, JSON с
 полями `VacancyQuery`) и применяется одной кнопкой. Пресеты приватные —
 привязаны к пользователю.
@@ -229,7 +235,8 @@ uvicorn backend.main:app --reload --port 8000
 | `POST` | `/runs/{id}/cancel` | Отмена |
 | `GET` | `/runs/{id}/vacancies` | Вакансии прогона (`sort_by`, `sort_order`) |
 | `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта |
-| `GET` | `/vacancies` | Глобальный список вакансий (фильтры, сортировка, пагинация, `resume_id`) |
+| `GET` | `/vacancies` | Глобальный список (slim: `preview` без полных текстов; фильтры, сортировка, пагинация, `resume_id`) |
+| `GET` | `/vacancies/{id}` | Полная вакансия (`raw_text` / `cleaned_text`) для карточки |
 | `POST` | `/vacancies/import` | Импорт вакансий из текста: `{texts, source_url?}` → rules + LLM → запись в БД |
 | `GET` | `/hh/status` | Статус HH sync (admin): токен задан?, TTL listings, счётчики кэша |
 | `POST` | `/hh/sync` | Синхронный sync HH (admin): поиск → dedup → detail только для новых → БД |
@@ -515,16 +522,19 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 |-----------|------------|
 | **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
 | **`GET /metrics`** | Эндпоинт Prometheus (не путать с `/api/v1/vacancies/metrics`) |
-| **Prometheus** | Scrape backend каждые 15 с (`observability/prometheus.yml`) |
-| **Grafana** | Дашборды **API**, **LLM**, **LLM jobs / queue**, **Pipeline**, **HH.ru sync** |
+| **Prometheus** | Scrape backend и llm-worker каждые 15 с (`observability/prometheus.yml`) |
+| **Grafana** | Дашборды **API**, **LLM**, **LLM jobs / queue**, **Pipeline**, **HH.ru sync**, **DB pool** |
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
 | **Доменные метрики** | прогоны, UPSERT/TTL, импорт, матчинг, письма, LLM-джобы (`llm_job_enqueue_*`, `llm_worker_*`, `llm_rq_queue_jobs`, `llm_jobs_by_status`, recover), auth, ЦБ |
-
-**Затор очереди LLM:** смотреть дашборд **LLM jobs / queue** — растут `llm_rq_queue_jobs` и `llm_jobs_by_status{status="queued"}`; worker latency в `llm_worker_job_duration_seconds`. TraceQL: `{ name = "llm_job.run" }`, `{ name = "llm_job.enqueue" }`.
 | **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |
+| **`db_pool_*` gauges** | SQLAlchemy QueuePool: занято / свободно / overflow / лимит (`pool_size` + `max_overflow`); на backend и llm-worker |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
 | **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и отправляет в Tempo (`observability/alloy-config.alloy`) |
 | **Tempo** | Хранение трасс (local, retention 7 дней — `observability/tempo-config.yml`) |
+
+**Затор очереди LLM:** смотреть дашборд **LLM jobs / queue** — растут `llm_rq_queue_jobs` и `llm_jobs_by_status{status="queued"}`; worker latency в `llm_worker_job_duration_seconds`. TraceQL: `{ name = "llm_job.run" }`, `{ name = "llm_job.enqueue" }`.
+
+**Пул БД:** дашборд **DB pool** — `db_pool_checked_out` / `db_pool_checked_in` / `db_pool_overflow` / `db_pool_max_connections`. Утилизация ≈ `checked_out / max_connections` (по job).
 
 Конфигурация: `observability/prometheus.yml`, `observability/loki-config.yml`, `observability/tempo-config.yml`, `observability/alloy-config.alloy`, provisioning Grafana — `observability/grafana/provisioning/` (datasources Prometheus, Loki и Tempo с переходами лог ↔ трасса).
 

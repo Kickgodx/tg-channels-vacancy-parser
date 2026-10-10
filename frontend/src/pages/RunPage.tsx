@@ -12,6 +12,7 @@ import {
   parseSummaryFromRunParams,
 } from "../utils/formatDuration";
 import { filterActionableWarnings } from "../utils/runWarnings";
+import { toVacancyListItem } from "../utils/vacancyListItem";
 
 function formatUsd(v: number): string {
   if (v > 0 && v < 0.01) return `$${v.toFixed(4)}`;
@@ -187,8 +188,9 @@ export default function RunPage() {
       ? Math.round((100 * progress.posts_processed) / progress.posts_total)
       : 0;
 
-  const displayVacancies =
-    vacancies.data?.items?.length ? vacancies.data.items : liveVacancies;
+  const displayVacancies = vacancies.data?.items?.length
+    ? vacancies.data.items
+    : liveVacancies.map(toVacancyListItem);
   const vacancyTotal = vacancies.data?.total ?? progress?.vacancies_found ?? displayVacancies.length;
 
   const isActive = run.data?.status === "running" || run.data?.status === "pending";

@@ -7,12 +7,14 @@ import type {
   MatchImportance,
   SkillMatch,
   Vacancy,
+  VacancyListItem,
   VacancyMatch,
 } from "../types/api";
 import { cleanPostUrl } from "../utils/cleanPostUrl";
+import { toVacancyListItem } from "../utils/vacancyListItem";
 
 interface Props {
-  vacancy: Vacancy;
+  vacancy: VacancyListItem | Vacancy;
   index: number;
   onClose: () => void;
   /** Резюме, выбранное на странице вакансий; без него матчинг недоступен. */
@@ -59,16 +61,35 @@ const TONE_OPTIONS: { value: CoverLetterTone; label: string }[] = [
   { value: "formal", label: "Формальный" },
 ];
 
-export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: Props) {
+export default function VacancyModal({ vacancy: incoming, index, onClose, resumeId }: Props) {
   const queryClient = useQueryClient();
+  const hasFullText = "cleaned_text" in incoming;
+  const listItem = toVacancyListItem(incoming);
+  const detailQ = useQuery({
+    queryKey: ["vacancy", listItem.id],
+    queryFn: () => api.getVacancy(listItem.id),
+    enabled: !hasFullText,
+    staleTime: 60_000,
+    initialData: hasFullText ? (incoming as Vacancy) : undefined,
+  });
+  const detail = detailQ.data;
+  const v = detail
+    ? {
+        ...listItem,
+        ...detail,
+        match_score: listItem.match_score ?? detail.match_score,
+        match_explanation: listItem.match_explanation ?? detail.match_explanation,
+      }
+    : listItem;
+
   // Оценка из списка (join vacancy_matches) — стартовое состояние до пересчёта.
   const [match, setMatch] = useState<VacancyMatch | null>(
-    v.match_score != null
+    listItem.match_score != null
       ? {
           resume_id: resumeId ?? 0,
-          vacancy_id: v.id,
-          overall_score: v.match_score,
-          explanation: v.match_explanation,
+          vacancy_id: listItem.id,
+          overall_score: listItem.match_score,
+          explanation: listItem.match_explanation,
           matching_skills: [],
           missing_skills: [],
           model: "",
@@ -80,7 +101,7 @@ export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: P
 
   const matchM = useMutation({
     mutationFn: ({ force }: { force: boolean }) =>
-      api.matchVacancy(resumeId as number, v.id, force),
+      api.matchVacancy(resumeId as number, listItem.id, force),
     onSuccess: (data) => {
       setMatch(data);
       void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
@@ -99,9 +120,9 @@ export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: P
   const [letterCopied, setLetterCopied] = useState(false);
 
   const savedLetterQ = useQuery({
-    queryKey: ["cover-letter", resumeId, v.id],
+    queryKey: ["cover-letter", resumeId, listItem.id],
     queryFn: () =>
-      api.getCoverLetter(resumeId as number, v.id).catch(() => null),
+      api.getCoverLetter(resumeId as number, listItem.id).catch(() => null),
     enabled: resumeId != null,
     staleTime: Infinity,
     retry: false,
@@ -120,7 +141,7 @@ export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: P
 
   const letterM = useMutation({
     mutationFn: ({ force }: { force: boolean }) =>
-      api.generateCoverLetter(resumeId as number, v.id, letterTone, force),
+      api.generateCoverLetter(resumeId as number, listItem.id, letterTone, force),
     onSuccess: (data) => {
       setLetter(data);
       setLetterDraft(data.text);
@@ -331,18 +352,24 @@ export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: P
           </p>
         )}
         <hr />
-        <div className="vacancy-full-text">{v.cleaned_text || v.raw_text || "_(пусто)_"}</div>
-        {v.ai_notes && (
+        <div className="vacancy-full-text">
+          {!hasFullText && detailQ.isLoading
+            ? "Загрузка текста…"
+            : detailQ.isError && !hasFullText
+              ? listItem.preview || "Не удалось загрузить текст"
+              : detail?.cleaned_text || detail?.raw_text || "_(пусто)_"}
+        </div>
+        {(detail?.ai_notes ?? v.ai_notes) && (
           <aside className="vacancy-ai-notes">
             <div className="vacancy-ai-notes-header">
               <strong>Заметки AI</strong>
-              {v.ai_confidence != null && (
+              {(detail?.ai_confidence ?? v.ai_confidence) != null && (
                 <span className="vacancy-ai-notes-confidence">
-                  уверенность {(v.ai_confidence * 100).toFixed(0)}%
+                  уверенность {(((detail?.ai_confidence ?? v.ai_confidence) as number) * 100).toFixed(0)}%
                 </span>
               )}
             </div>
-            <p>{v.ai_notes}</p>
+            <p>{detail?.ai_notes ?? v.ai_notes}</p>
           </aside>
         )}
       </div>

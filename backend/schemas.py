@@ -53,8 +53,55 @@ class ProgressEvent(BaseModel):
     snapshot: ParseProgressSnapshot
 
 
+class VacancyListItem(BaseModel):
+    """Карточка в списке: без raw/cleaned_text, только короткий preview."""
+
+    id: str
+    source_post_key: str
+    source_channel: str
+    source_url: str
+    post_url: str | None = None
+    post_date: datetime | None = None
+    preview: str = Field(description="Укороченный cleaned_text для таблицы (~120 символов).")
+
+    detected_specializations: list[str] = Field(default_factory=list)
+    detected_grade: str = "unknown"
+    detected_salary_min: float | None = None
+    detected_salary_max: float | None = None
+    detected_salary_avg: float | None = None
+    detected_salary_avg_rub: float | None = None
+    salary_currency: str | None = None
+
+    work_format: str | None = None
+    country: str | None = None
+    city: str | None = None
+    company: str | None = None
+    contact: str | None = None
+
+    technologies: list[str] = Field(default_factory=list)
+    required_experience: str | None = None
+    employment_type: str | None = None
+    application_urls: list[str] = Field(default_factory=list)
+
+    extraction_source: str = "rules"
+    ai_confidence: float | None = None
+    ai_notes: str | None = None
+    vacancy_score: int = 0
+    vacancy_substantive_score: int = 0
+
+    is_duplicate: bool = False
+    duplicate_group_id: str | None = None
+    duplicate_reason: str | None = None
+
+    match_score: float | None = None
+    match_explanation: str | None = None
+
+    parsed_at: datetime
+    archived_at: datetime | None = None
+
+
 class VacancyListResponse(BaseModel):
-    items: list[Vacancy]
+    items: list[VacancyListItem]
     total: int
     page: int
     page_size: int
