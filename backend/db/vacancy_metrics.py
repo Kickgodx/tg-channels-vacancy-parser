@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import case, cast, func, lateral, literal, select, true
+from sqlalchemy import cast, func, lateral, select, true
 from sqlalchemy.orm import Session
 
 from backend.db import fx_repository as fx_repo
-from backend.db.models import ExchangeRateRow, VacancyRow
+from backend.db.models import VacancyRow
 from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
 from backend.schemas import VacancyQuery
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.fx.convert import HOURS_PER_MONTH
 from tg_jobs_parser.models.metrics import (
     MetricsSummary,
     SalaryDisplayMeta,
@@ -31,135 +30,25 @@ def _dialect_name(session: Session) -> str:
     return bind.dialect.name if bind is not None else "postgresql"
 
 
-def _hourly_to_monthly_factor(column=VacancyRow):
-    cur = func.upper(func.coalesce(column.salary_currency, literal("")))
-    return case(
-        (cur.like("%/HOUR%"), literal(float(HOURS_PER_MONTH))),
-        (cur.like("%/Ч%"), literal(float(HOURS_PER_MONTH))),
-        (cur.like("%/ЧАС%"), literal(float(HOURS_PER_MONTH))),
-        else_=literal(1.0),
-    )
-
-
-def _salary_native_expr(column=VacancyRow):
-    """Сумма зарплаты в исходной валюте (месячный эквивалент при RUB/HOUR и т.п.)."""
-    native = func.coalesce(
-        column.detected_salary_avg,
-        (column.detected_salary_min + column.detected_salary_max) / 2.0,
-        column.detected_salary_min,
-        column.detected_salary_max,
-    )
-    return native * _hourly_to_monthly_factor(column)
-
-
-def _salary_native_expr_table(table):
-    native = func.coalesce(
-        table.c.detected_salary_avg,
-        (table.c.detected_salary_min + table.c.detected_salary_max) / 2.0,
-        table.c.detected_salary_min,
-        table.c.detected_salary_max,
-    )
-    cur = func.upper(func.coalesce(table.c.salary_currency, literal("")))
-    factor = case(
-        (cur.like("%/HOUR%"), literal(float(HOURS_PER_MONTH))),
-        (cur.like("%/Ч%"), literal(float(HOURS_PER_MONTH))),
-        (cur.like("%/ЧАС%"), literal(float(HOURS_PER_MONTH))),
-        else_=literal(1.0),
-    )
-    return native * factor
-
-
-def _latest_rate_date_subquery():
-    return select(func.max(ExchangeRateRow.rate_date)).scalar_subquery()
-
-
-def _currency_expr(column=VacancyRow):
-    return func.upper(func.coalesce(column.salary_currency, literal("RUB")))
-
-
-def _currency_iso_expr(column=VacancyRow):
-    """ISO-код валюты без суффикса периода (RUB/HOUR → RUB)."""
-    u = _currency_expr(column)
-    return case(
-        (u.in_(["RUR", "RUB", "₽"]), literal("RUB")),
-        (u.like("RUR/%"), literal("RUB")),
-        (u.like("RUB/%"), literal("RUB")),
-        (u.like("₽/%"), literal("RUB")),
-        (u.in_(["$", "USD", "USDT", "USDC"]), literal("USD")),
-        (u.like("USD/%"), literal("USD")),
-        (u.like("USDT/%"), literal("USD")),
-        (u.like("USDC/%"), literal("USD")),
-        (u.like("$/%"), literal("USD")),
-        (u.in_(["€", "EUR"]), literal("EUR")),
-        (u.like("EUR/%"), literal("EUR")),
-        (u.like("€/%"), literal("EUR")),
-        else_=u,
-    )
-
-
-def _currency_for_fx_join(column=VacancyRow):
-    """Код валюты в exchange_rates (символы и алиасы → ISO)."""
-    return _currency_iso_expr(column)
-
-
-def _fx_rate_subquery(column=VacancyRow):
-    return (
-        select(ExchangeRateRow.rate_to_rub)
-        .where(
-            ExchangeRateRow.currency == _currency_for_fx_join(column),
-            ExchangeRateRow.rate_date == _latest_rate_date_subquery(),
-        )
-        .correlate(column)
-        .scalar_subquery()
-    )
-
-
 def _salary_rub_expr(column=VacancyRow):
+    """Колонка ``detected_salary_avg_rub`` (денормализация при upsert / FX backfill).
+
+    Без runtime-join к ``exchange_rates``: correlated subquery раздувал planner cost
+    и включал Postgres LLVM JIT (~1s) на каждом hit metrics/analytics.
     """
-    RUB: сохранённый ``detected_salary_avg_rub`` или fallback native × курс из exchange_rates.
-    """
-    native = _salary_native_expr(column)
-    return func.coalesce(
-        column.detected_salary_avg_rub,
-        native * _fx_rate_subquery(column),
-    )
+    return column.detected_salary_avg_rub
 
 
 def _salary_rub_expr_table(table):
-    native = _salary_native_expr_table(table)
-    u = func.upper(func.coalesce(table.c.salary_currency, literal("RUB")))
-    cur_for_fx = case(
-        (u.in_(["RUR", "RUB", "₽"]), literal("RUB")),
-        (u.like("RUR/%"), literal("RUB")),
-        (u.like("RUB/%"), literal("RUB")),
-        (u.like("₽/%"), literal("RUB")),
-        (u.in_(["$", "USD", "USDT", "USDC"]), literal("USD")),
-        (u.like("USD/%"), literal("USD")),
-        (u.like("USDT/%"), literal("USD")),
-        (u.like("USDC/%"), literal("USD")),
-        (u.like("$/%"), literal("USD")),
-        (u.in_(["€", "EUR"]), literal("EUR")),
-        (u.like("EUR/%"), literal("EUR")),
-        (u.like("€/%"), literal("EUR")),
-        else_=u,
-    )
-    rate_sq = (
-        select(ExchangeRateRow.rate_to_rub)
-        .where(
-            ExchangeRateRow.currency == cur_for_fx,
-            ExchangeRateRow.rate_date == _latest_rate_date_subquery(),
-        )
-        .correlate(table)
-        .scalar_subquery()
-    )
-    return func.coalesce(table.c.detected_salary_avg_rub, native * rate_sq)
+    """То же для Core-алиаса ``vacancies AS v``."""
+    return table.c.detected_salary_avg_rub
 
 
 def _prepare_fx(session: Session) -> SalaryDisplayMeta:
     """Метаданные курсов для UI: только последний снимок из БД, без HTTP к ЦБ.
 
     Синхронизация курсов — при старте API (`fx.sync_on_startup`) и явных FX-эндпоинтах.
-    Агрегаты зарплат опираются на ``detected_salary_avg_rub`` / курсы уже в БД.
+    Агрегаты зарплат читают уже посчитанный ``detected_salary_avg_rub``.
     """
     cfg = load_config(get_settings().config_path)
     rate_date = None
@@ -344,13 +233,14 @@ def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsS
         )
         or 0
     )
+    by_grade = _count_by_column(session, query, VacancyRow.detected_grade, dialect=dialect)
 
     return MetricsSummary(
         unique_vacancies=total,
         total_vacancies=total,
         duplicate_count=0,
         vacancies_by_specialization=by_spec,
-        vacancies_by_grade=_count_by_column(session, query, VacancyRow.detected_grade, dialect=dialect),
+        vacancies_by_grade=by_grade,
         vacancies_by_work_format=_count_by_column(
             session,
             query,
@@ -363,6 +253,6 @@ def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsS
         vacancies_without_salary=total - with_salary,
         salary_by_specialization=salary_spec,
         salary_by_grade=_salary_by_grade(session, query, dialect=dialect),
-        grade_distribution=_count_by_column(session, query, VacancyRow.detected_grade, dialect=dialect),
+        grade_distribution=by_grade,
         salary_display=salary_display,
     )

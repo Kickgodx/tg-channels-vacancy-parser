@@ -127,3 +127,35 @@ def test_metrics_avg_salary_in_rub(db_session, monkeypatch):
     metrics = aggregate_vacancy_metrics(db_session, VacancyQuery())
     # (200k + 500k) / 2 = 350k в одном грейде
     assert metrics.salary_by_grade["unknown"].mean == pytest.approx(350000.0, rel=0.01)
+
+
+def test_metrics_ignore_native_salary_without_stored_rub(db_session, monkeypatch):
+    """Без detected_salary_avg_rub строка не входит в salary_* (конвертация — upsert/backfill)."""
+    from backend.db.models import VacancyRow
+
+    monkeypatch.setattr(
+        "backend.db.vacancy_metrics._prepare_fx",
+        lambda _session: SalaryDisplayMeta(display_currency="RUB", rates_as_of="2026-05-10", rates_source="cbr"),
+    )
+    text = "Python 300k without rub column"
+    db_session.add(
+        VacancyRow(
+            id=vacancy_content_id(text),
+            source_post_key="b-1",
+            source_channel="b",
+            source_url="https://t.me/s/b",
+            raw_text=text,
+            cleaned_text=text,
+            detected_salary_avg=300000.0,
+            salary_currency="RUB",
+            post_date=datetime(2026, 5, 10, tzinfo=UTC),
+            detected_salary_avg_rub=None,
+            is_duplicate=False,
+        )
+    )
+    db_session.commit()
+
+    metrics = aggregate_vacancy_metrics(db_session, VacancyQuery())
+    assert metrics.unique_vacancies == 1
+    assert metrics.vacancies_with_salary == 0
+    assert metrics.salary_by_grade == {}
