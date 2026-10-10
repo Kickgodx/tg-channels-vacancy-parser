@@ -37,6 +37,8 @@ Alembic-цепочка инкрементальная, `upgrade head` приме
 (`backend/db/migrate.py`). Новые ревизии просто продолжают цепочку — без
 `down -v`. Колонки с FK добавлять через `op.batch_alter_table` с **именованным**
 constraint: SQLite (тесты) не умеет `ALTER TABLE ADD COLUMN` с FK.
+`revision` id — **не длиннее 32 символов** (дефолт `alembic_version.version_num`);
+`migrate.py` дополнительно расширяет колонку до VARCHAR(64) на Postgres.
 
 ## Зависимости
 

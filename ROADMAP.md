@@ -19,7 +19,7 @@
 | 5 | `feature/llm-evals-match` | Golden/evals для match + cover letter | нет |
 
 **Про миграции:** цепочка инкрементальная — head сейчас
-`013_vacancies_active_post_date_index`. Новые фичи просто продолжают её
+`013_vac_active_post_date_idx`. Новые фичи просто продолжают её
 (`alembic revision` → `upgrade head` на старте backend, без `down -v`).
 Колонки с FK добавлять через `op.batch_alter_table` с именованным
 constraint — SQLite (тесты) не умеет `ALTER TABLE ADD COLUMN` с FK.

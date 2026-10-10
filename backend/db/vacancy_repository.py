@@ -368,5 +368,3 @@ def list_all_run_vacancies(session: Session, run_id: uuid.UUID, query: VacancyQu
 
 def get_vacancy_row(session: Session, vacancy_id: str) -> VacancyRow | None:
     return session.get(VacancyRow, vacancy_id)
-
-

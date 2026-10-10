@@ -294,7 +294,7 @@ JWT обязателен для `/auth/me`, `/filters`, `/resumes` (включа
 ### Схема БД
 
 Миграции инкрементальные (`alembic/versions/001…013`, head —
-`013_vacancies_active_post_date_index`). При старте backend применяет `upgrade head`.
+`013_vac_active_post_date_idx`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|

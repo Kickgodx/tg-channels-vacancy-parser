@@ -199,5 +199,3 @@ def metrics_from_run(row: ParseRunRow) -> MetricsSummary | None:
     if not row.metrics:
         return None
     return MetricsSummary.model_validate(row.metrics)
-
-

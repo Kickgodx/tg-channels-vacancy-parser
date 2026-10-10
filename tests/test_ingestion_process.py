@@ -33,10 +33,7 @@ def _post(text: str, *, channel: str = "jobs") -> RawPost:
     )
 
 
-VACANCY_TEXT = (
-    "Вакансия: Python-разработчик. Remote. Зарплата 200000 руб. "
-    "Нужен опыт PostgreSQL. Полная занятость."
-)
+VACANCY_TEXT = "Вакансия: Python-разработчик. Remote. Зарплата 200000 руб. Нужен опыт PostgreSQL. Полная занятость."
 
 
 def test_rules_from_raw_post_sets_channel_and_score():

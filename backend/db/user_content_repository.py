@@ -215,5 +215,3 @@ def delete_cover_letter(session: Session, *, resume_id: int, vacancy_id: str) ->
     session.delete(row)
     session.flush()
     return True
-
-
