@@ -11,12 +11,15 @@ from typing import Any
 
 import httpx
 
+from tg_jobs_parser.hh.metrics import record_hh_api_request
 from tg_jobs_parser.hh.models import (
     VacancyDetail,
     VacancySearchParams,
     VacancySearchResponse,
     VacancyShort,
 )
+
+_RESPONSE_BODY_LOG_LIMIT = 2000
 
 _LOG = logging.getLogger(__name__)
 
@@ -87,13 +90,28 @@ class HHClient:
         params.setdefault("host", self.config.host)
 
         started = time.monotonic()
+        _LOG.info(
+            "HH REQUEST %s %s params=%s",
+            method,
+            path,
+            self._safe_params(params),
+        )
         response = self._http_request(method, path, headers=headers, params=params, **kwargs)
-        _LOG.debug(
-            "HH %s %s → %s in %.0fms",
+        elapsed = time.monotonic() - started
+        record_hh_api_request(
+            method=method,
+            path=path,
+            status_code=response.status_code,
+            duration_seconds=elapsed,
+        )
+        body_preview = self._response_preview(response)
+        _LOG.info(
+            "HH RESPONSE %s %s → %s in %.0fms body=%s",
             method,
             path,
             response.status_code,
-            (time.monotonic() - started) * 1000,
+            elapsed * 1000,
+            body_preview,
         )
         return self._parse(response, context=f"{method} {path}")
 
@@ -219,6 +237,56 @@ class HHClient:
         if overrides:
             return params.model_copy(update=overrides)
         return params
+
+    @staticmethod
+    def _safe_params(params: dict[str, Any]) -> dict[str, Any]:
+        """Копия query без секретов; длинный text обрезаем."""
+        out: dict[str, Any] = {}
+        for key, value in params.items():
+            kl = str(key).lower()
+            if kl in {"token", "access_token", "authorization"}:
+                out[key] = "***"
+                continue
+            if key == "text" and isinstance(value, str) and len(value) > 120:
+                out[key] = value[:117] + "..."
+                continue
+            out[key] = value
+        return out
+
+    @staticmethod
+    def _response_preview(response: httpx.Response) -> str:
+        """Краткое тело ответа для лога (без полного HTML/огромных JSON)."""
+        try:
+            payload: Any = response.json()
+        except ValueError:
+            text = (response.text or "").replace("\n", " ")
+            if len(text) > _RESPONSE_BODY_LOG_LIMIT:
+                return text[:_RESPONSE_BODY_LOG_LIMIT] + "…"
+            return text or "<empty>"
+
+        if isinstance(payload, dict):
+            if "items" in payload:
+                items = payload.get("items") or []
+                return (
+                    f"{{found={payload.get('found')}, pages={payload.get('pages')}, "
+                    f"page={payload.get('page')}, per_page={payload.get('per_page')}, "
+                    f"items={len(items) if isinstance(items, list) else '?'}}}"
+                )
+            if "id" in payload:
+                employer = payload.get("employer") or {}
+                employer_name = employer.get("name") if isinstance(employer, dict) else None
+                area = payload.get("area") or {}
+                area_name = area.get("name") if isinstance(area, dict) else None
+                return (
+                    f"{{id={payload.get('id')!r}, name={payload.get('name')!r}, "
+                    f"employer={employer_name!r}, area={area_name!r}}}"
+                )
+            keys = list(payload.keys())[:12]
+            return f"{{keys={keys}}}"
+        text = str(payload)
+        if len(text) > _RESPONSE_BODY_LOG_LIMIT:
+            return text[:_RESPONSE_BODY_LOG_LIMIT] + "…"
+        return text
 
     @staticmethod
     def _parse(response: httpx.Response, *, context: str) -> Any:

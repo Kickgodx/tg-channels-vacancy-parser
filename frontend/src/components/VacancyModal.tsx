@@ -9,6 +9,7 @@ import type {
   Vacancy,
   VacancyMatch,
 } from "../types/api";
+import { cleanPostUrl } from "../utils/cleanPostUrl";
 
 interface Props {
   vacancy: Vacancy;
@@ -149,7 +150,7 @@ export default function VacancyModal({ vacancy: v, index, onClose, resumeId }: P
         <h3>№{index} — @{v.source_channel}</h3>
         <div className="modal-actions">
           {v.post_url && (
-            <a href={v.post_url} target="_blank" rel="noreferrer" className="btn-link">
+            <a href={cleanPostUrl(v.post_url)} target="_blank" rel="noreferrer" className="btn-link">
               Открыть пост
             </a>
           )}

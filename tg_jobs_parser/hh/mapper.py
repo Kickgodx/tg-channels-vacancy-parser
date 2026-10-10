@@ -6,6 +6,7 @@ import hashlib
 import html
 import re
 from datetime import UTC, datetime
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from tg_jobs_parser.hh.models import (
     Contacts,
@@ -23,6 +24,8 @@ VACANCY_SCORE = 100
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
+# Служебные query от HH API / виджетов — не нужны в «Открыть пост».
+_HH_TRACKING_PARAMS = frozenset({"tech_source", "hhtmfrom", "hhtmfromlabel", "from"})
 
 _WORK_FORMAT_MAP = {
     "REMOTE": "remote",
@@ -38,6 +41,17 @@ def hh_source_post_key(hh_id: str) -> str:
 
 def stable_vacancy_id(hh_id: str) -> str:
     return hashlib.sha256(f"hh:{hh_id}".encode()).hexdigest()
+
+
+def clean_hh_url(url: str | None) -> str | None:
+    """Убирает tracking-query HH (``tech_source=api`` и т.п.)."""
+    if not url:
+        return None
+    parts = urlsplit(url.strip())
+    if not parts.query:
+        return url.strip()
+    kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k.lower() not in _HH_TRACKING_PARAMS]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept, doseq=True), parts.fragment)) or None
 
 
 def html_to_text(value: str | None) -> str:
@@ -142,14 +156,15 @@ def detail_to_vacancy(
         city = detail.address.city
     urls: list[str] = []
     for u in (detail.apply_alternate_url, detail.apply_url, detail.alternate_url):
-        if u and u not in urls:
-            urls.append(u)
+        cleaned = clean_hh_url(u)
+        if cleaned and cleaned not in urls:
+            urls.append(cleaned)
     return Vacancy(
         id=stable_vacancy_id(detail.id),
         source_post_key=hh_source_post_key(detail.id),
         source_channel=HH_CHANNEL,
         source_url=HH_SOURCE_URL,
-        post_url=detail.alternate_url,
+        post_url=clean_hh_url(detail.alternate_url),
         post_date=parse_hh_datetime(detail.published_at),
         raw_text=detail.description or body,
         cleaned_text=body,
@@ -194,13 +209,17 @@ def short_to_vacancy(
             parts.append(html_to_text(snippet.responsibility))
     body = "\n\n".join(p for p in parts if p)
     lo, hi, avg, currency = _salary_fields(short.salary_range or short.salary)
-    urls = [u for u in (short.apply_alternate_url, short.alternate_url) if u]
+    urls: list[str] = []
+    for u in (short.apply_alternate_url, short.alternate_url):
+        cleaned = clean_hh_url(u)
+        if cleaned and cleaned not in urls:
+            urls.append(cleaned)
     return Vacancy(
         id=stable_vacancy_id(short.id),
         source_post_key=hh_source_post_key(short.id),
         source_channel=HH_CHANNEL,
         source_url=HH_SOURCE_URL,
-        post_url=short.alternate_url,
+        post_url=clean_hh_url(short.alternate_url),
         post_date=parse_hh_datetime(short.published_at),
         raw_text=body,
         cleaned_text=body,

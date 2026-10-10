@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Vacancy } from "../types/api";
 import type { VacancySortField, VacancySortOrder } from "../types/sort";
 import { SORTABLE_COLUMNS } from "../types/sort";
+import { cleanPostUrl } from "../utils/cleanPostUrl";
 import VacancyModal from "./VacancyModal";
 
 const ALL_COLUMNS = [
@@ -113,7 +114,12 @@ export default function VacancyTable({
     switch (key) {
       case "post_url":
         return v.post_url ? (
-          <a href={v.post_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+          <a
+            href={cleanPostUrl(v.post_url)}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+          >
             Открыть
           </a>
         ) : (

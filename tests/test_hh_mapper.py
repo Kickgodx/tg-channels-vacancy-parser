@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from tg_jobs_parser.hh.mapper import (
+    clean_hh_url,
     detail_to_vacancy,
     html_to_text,
     map_work_format,
@@ -21,13 +22,19 @@ def test_map_work_format_priority():
     assert map_work_format(items) == "remote"
 
 
+def test_clean_hh_url_strips_tech_source():
+    assert clean_hh_url("https://hh.ru/vacancy/42?tech_source=api") == "https://hh.ru/vacancy/42"
+    assert clean_hh_url("https://hh.ru/vacancy/42?tech_source=api&foo=1") == "https://hh.ru/vacancy/42?foo=1"
+    assert clean_hh_url("https://hh.ru/vacancy/42") == "https://hh.ru/vacancy/42"
+
+
 def test_detail_to_vacancy_fields():
     detail = VacancyDetail.model_validate(
         {
             "id": "42",
             "name": "AQA Python",
             "description": "<p>Нужен pytest</p>",
-            "alternate_url": "https://hh.ru/vacancy/42",
+            "alternate_url": "https://hh.ru/vacancy/42?tech_source=api",
             "published_at": "2026-10-01T12:00:00+0300",
             "area": {"id": "1", "name": "Москва"},
             "employer": {"id": "9", "name": "ACME"},
@@ -50,6 +57,7 @@ def test_detail_to_vacancy_fields():
     assert v.work_format == "remote"
     assert "pytest" in v.technologies
     assert v.extraction_source == "hh_api"
+    assert v.post_url == "https://hh.ru/vacancy/42"
     assert "pytest" in v.cleaned_text.lower() or "AQA" in v.cleaned_text
 
 

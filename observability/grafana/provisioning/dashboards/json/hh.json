@@ -34,7 +34,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
       "id": 2,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -42,12 +42,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome) (increase(hh_syncs_total[1h]))",
+          "expr": "sum by (outcome) (increase(hh_syncs_total[6h]))",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
       ],
-      "title": "HH syncs (1h)",
+      "title": "HH syncs (6h)",
       "type": "timeseries"
     },
     {
@@ -59,7 +59,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
       "id": 3,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -67,12 +67,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(hh_sync_duration_seconds_bucket[15m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(hh_sync_duration_seconds_bucket[1h])) by (le))",
           "legendFormat": "p95",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.50, sum(rate(hh_sync_duration_seconds_bucket[15m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(hh_sync_duration_seconds_bucket[1h])) by (le))",
           "legendFormat": "p50",
           "refId": "B"
         }
@@ -89,7 +89,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
       "id": 4,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -97,12 +97,67 @@
       },
       "targets": [
         {
-          "expr": "sum by (result) (increase(hh_details_total[1h]))",
+          "expr": "sum by (result) (increase(hh_details_total[6h]))",
           "legendFormat": "{{result}}",
           "refId": "A"
         }
       ],
-      "title": "Detail fetch vs skip (1h)",
+      "title": "Detail fetch vs skip (6h)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 9 },
+      "id": 9,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (endpoint, status) (increase(hh_api_requests_total[6h]))",
+          "legendFormat": "{{endpoint}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HH API requests (6h)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 9 },
+      "id": 10,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, endpoint) (rate(hh_api_request_duration_seconds_bucket[1h])))",
+          "legendFormat": "p95 {{endpoint}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, endpoint) (rate(hh_api_request_duration_seconds_bucket[1h])))",
+          "legendFormat": "p50 {{endpoint}}",
+          "refId": "B"
+        }
+      ],
+      "title": "HH API latency",
       "type": "timeseries"
     },
     {
@@ -121,7 +176,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 9 },
+      "gridPos": { "h": 8, "w": 4, "x": 16, "y": 9 },
       "id": 5,
       "options": {
         "colorMode": "value",
@@ -133,12 +188,45 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(hh_api_errors_total[1h]))",
+          "expr": "sum(increase(hh_api_errors_total[6h])) or vector(0)",
           "legendFormat": "errors",
           "refId": "A"
         }
       ],
-      "title": "HH API errors (1h)",
+      "title": "HH API errors (6h)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 4, "x": 20, "y": 9 },
+      "id": 11,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(hh_vacancies_searched_total[6h])) or vector(0)",
+          "legendFormat": "searched",
+          "refId": "A"
+        }
+      ],
+      "title": "Searched (6h)",
       "type": "stat"
     },
     {
@@ -150,7 +238,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 9 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 17 },
       "id": 6,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -178,14 +266,14 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
       "id": 7,
       "title": "Logs",
       "type": "row"
     },
     {
       "datasource": { "type": "loki", "uid": "loki" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 18 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 26 },
       "id": 8,
       "options": {
         "dedupStrategy": "none",
@@ -199,11 +287,34 @@
       },
       "targets": [
         {
-          "expr": "{service_name=\"tg-jobs-parser-backend\"} |= \"HH\"",
+          "expr": "{service=\"backend\"} |= \"HH \"",
           "refId": "A"
         }
       ],
-      "title": "HH-related logs",
+      "title": "HH sync + API logs",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 36 },
+      "id": 12,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{service=\"backend\", logger=\"tg_jobs_parser.hh.client\"} |~ \"HH (REQUEST|RESPONSE)\"",
+          "refId": "A"
+        }
+      ],
+      "title": "HH API request/response",
       "type": "logs"
     }
   ],
