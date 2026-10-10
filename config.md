@@ -85,6 +85,8 @@
 
 Env (не yaml): `LLM_JOB_BACKEND=inprocess|rq`, `REDIS_URL`, `LLM_WORKER_METRICS_PORT`, `LLM_JOB_STUCK_MINUTES`, `LLM_RQ_JOB_TIMEOUT_SECONDS` — см. `.env.example`.
 
+Прогоны парсинга (не yaml): `PARSE_JOB_BACKEND=inprocess|rq`, `PARSE_JOB_STUCK_MINUTES`, `PARSE_RQ_JOB_TIMEOUT_SECONDS`, `PARSE_WORKER_METRICS_PORT` — в Docker Compose по умолчанию `rq` + сервис `parse-worker`; см. `.env.example` и README.
+
 ---
 
 ## `retention` — TTL хранения вакансий

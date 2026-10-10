@@ -27,7 +27,6 @@ from backend.schemas import (
 )
 from backend.services import run_service
 from backend.services.parse_run_events import channel_for
-from backend.services.run_registry import run_registry
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import ConfigLoadError
 from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
@@ -136,13 +135,13 @@ def _sse_progress_line(payload: dict) -> str:
 async def _sse_events(run_id: uuid.UUID) -> AsyncIterator[str]:
     with session_scope() as session:
         row = repo.get_parse_run(session, run_id)
-        if row is None and run_registry.get(run_id) is None:
+        if row is None:
             yield f"event: error\ndata: {json.dumps({'detail': 'Run not found'})}\n\n"
             return
-        if row is not None and row.status in _TERMINAL_RUN_STATUSES:
+        if row.status in _TERMINAL_RUN_STATUSES:
             yield "event: done\ndata: {}\n\n"
             return
-        initial = dict(row.progress) if row is not None and row.progress else None
+        initial = dict(row.progress) if row.progress else None
 
     if initial:
         yield _sse_progress_line(initial)
@@ -153,7 +152,7 @@ async def _sse_events(run_id: uuid.UUID) -> AsyncIterator[str]:
         async for chunk in _sse_events_redis(run_id):
             yield chunk
     else:
-        # Без Redis — durable DB poll (progress_bus alone is not enough across processes).
+        # Без Redis — durable DB poll (SoT = parse_runs.progress).
         async for chunk in _sse_events_db_poll(run_id):
             yield chunk
 
@@ -234,9 +233,9 @@ async def run_events(run_id: uuid.UUID) -> StreamingResponse:
     """SSE прогресса прогона. Auth: X-API-Key (router). Сессия БД не держится на время стрима."""
     with session_scope() as session:
         row = repo.get_parse_run(session, run_id)
-        if row is None and run_registry.get(run_id) is None:
+        if row is None:
             raise HTTPException(status_code=404, detail="Run not found")
-        terminal = row is not None and row.status in _TERMINAL_RUN_STATUSES
+        terminal = row.status in _TERMINAL_RUN_STATUSES
     headers = {
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",

@@ -2,7 +2,7 @@
 
 Локальное **Windows-first** приложение для парсинга Telegram-каналов с IT-вакансиями: **Telethon** (ваш аккаунт, MTProto), правиловое извлечение полей, опциональный **AI** (OpenRouter), фильтры, дедуп, метрики, экспорт **Excel/JSON**. Дополнительно — admin-sync вакансий с **HH.ru**, матчинг резюме и сопроводительные письма (фоновые LLM-джобы).
 
-**Основной способ работы** — веб-интерфейс на **React** + **FastAPI** backend + **PostgreSQL** + **Redis** / `llm-worker` (Docker Compose). Парсинг запускается из UI, прогресс идёт по SSE, вакансии сохраняются в БД.
+**Основной способ работы** — веб-интерфейс на **React** + **FastAPI** backend + **PostgreSQL** + **Redis** / `parse-worker` + `llm-worker` (Docker Compose). Парсинг ставится в очередь RQ, прогресс пишется в БД (SSE + poll), вакансии сохраняются в PostgreSQL.
 
 Дополнительно — **CLI (Typer)** для первой авторизации Telethon, дампа/импорта БД и отладки без UI.
 
@@ -34,9 +34,9 @@ docker compose up --build
 | **Alloy** | http://localhost:12345 (UI пайплайна сбора логов и трасс) |
 | **Tempo** | http://localhost:3200 (API; трассы смотрятся в Grafana → Explore → Tempo) |
 | **PostgreSQL** | `localhost:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
-| **Redis** | `localhost:6379` (очередь LLM-джобов для `llm-worker`) |
+| **Redis** | `localhost:6379` (очереди RQ: parse + LLM) |
 
-В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `llm-worker` (тот же образ, команда `tg-jobs-llm-worker`) обрабатывает матчинг и письма через RQ; метрики воркера — контейнерный `:9101` (на хост не публикуется, чтобы работал `--scale`).
+В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `parse-worker` (тот же образ, команда `tg-jobs-parse-worker`) выполняет прогоны парсинга через RQ (очередь `parse`, concurrency=1, volume `sessions/` для Telethon); метрики — контейнерный `:9102` (на хост не публикуется). Сервис `llm-worker` (`tg-jobs-llm-worker`) обрабатывает матчинг и письма; метрики — `:9101` (тоже без host mapping, чтобы работал `--scale`).
 
 Prometheus, Grafana, стек логов (Loki + Alloy) и трассировка (Tempo) поднимаются вместе с основным стеком. Backend отдаёт метрики HTTP на `http://localhost:9000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
 
@@ -69,7 +69,11 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # JWT_TTL_MINUTES=60              # TTL access-токена
 # AUTH_REGISTRATION_OPEN=true     # false — регистрация закрыта после первого пользователя
 # LLM_JOB_BACKEND=rq              # rq (Docker) или inprocess (локально без Redis)
-# REDIS_URL=redis://redis:6379/0  # очередь RQ; локально — redis://localhost:6379/0
+# PARSE_JOB_BACKEND=rq            # rq (Docker + parse-worker) или inprocess (ThreadPool в API)
+# PARSE_JOB_STUCK_MINUTES=30      # recover «залипших» running/queued прогонов
+# PARSE_RQ_JOB_TIMEOUT_SECONDS=43200  # таймаут RQ-джобы parse (сек; по умолчанию 12 ч)
+# PARSE_WORKER_METRICS_PORT=9102  # контейнерный порт метрик parse-worker
+# REDIS_URL=redis://redis:6379/0  # очереди RQ (parse + LLM); локально — redis://localhost:6379/0
 # HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе
 # HTTP_LOG_BODY_LIMIT=4096        # макс. символов тела в логе, дальше — «…[truncated, N bytes]»
 # HTTP_LOG_EXCLUDE_PATHS=/metrics,/api/v1/health,/api/v1/vacancies/metrics,/api/v1/analytics/salaries,/api/v1/analytics/sources,/api/v1/analytics/companies,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico
@@ -93,7 +97,7 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 |----------|----------|
 | **Вход** | `/login` — вход и регистрация; без токена остальные страницы недоступны |
 | **Парсинг** | Форма парсинга (каналы, даты, специализации, формат работы, AI, пороги score) |
-| **Прогон** | Прогресс (SSE), метрики, графики, блок AI (токены и стоимость input/output/total), таблица вакансий, экспорт Excel/JSON |
+| **Прогон** | Статус «В очереди» → running; прогресс (SSE / poll из БД, переживает F5 и рестарт API), метрики, графики, AI (токены), таблица, экспорт |
 | **Импорт** | `/import` — вставка текста вакансии вручную (например, с hh.ru): rules + LLM-разбор и запись в общую базу; ниже — последние импортированные |
 | **HH** | `/hh` — только для админа: sync вакансий с HH.ru (поиск AQA/Python), без LLM; кэш listings + skip detail |
 | **Вакансии** | Все уникальные вакансии из PostgreSQL: поиск, фильтры, пресеты, пагинация, сортировка по клику на заголовок; вкладка **Аналитика** |
@@ -215,14 +219,17 @@ npm install
 npm run dev
 ```
 
-Backend отдельно (без compose порт обычно `8000`; матчинг/письма — `LLM_JOB_BACKEND=inprocess` или свой Redis):
+Backend отдельно (без compose порт обычно `8000`; без Redis — `PARSE_JOB_BACKEND=inprocess` и `LLM_JOB_BACKEND=inprocess`):
 
 ```powershell
 poetry install
 # DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@localhost:5432/tgjobs
+# PARSE_JOB_BACKEND=inprocess
 # LLM_JOB_BACKEND=inprocess
 uvicorn backend.main:app --reload --port 8000
 ```
+
+Прогон парсинга: API создаёт строку `parse_runs` со статусом `queued` и ставит RQ-джобу (в Docker — `PARSE_JOB_BACKEND=rq`). `parse-worker` claim'ит прогон → `running`, пишет `progress` в БД (+ Redis pub/sub для SSE). Рестарт backend не обрывает воркер: прогресс продолжает обновляться, cancel идёт через `cancel_requested` в БД. Локально без Redis: `PARSE_JOB_BACKEND=inprocess` (ThreadPool в процессе API).
 
 ---
 
@@ -237,10 +244,10 @@ uvicorn backend.main:app --reload --port 8000
 | `GET` | `/auth/me` | Текущий пользователь |
 | `GET` | `/config/defaults` | Значения по умолчанию для формы |
 | `GET` | `/config/llm-models` | Каталог моделей из `llm_models.yaml` |
-| `POST` | `/runs` | Запуск парсинга (фоновый поток) |
-| `GET` | `/runs/{id}` | Статус и метрики прогона |
-| `GET` | `/runs/{id}/events` | SSE: прогресс в реальном времени |
-| `POST` | `/runs/{id}/cancel` | Отмена |
+| `POST` | `/runs` | Постановка прогона в очередь (`queued` → parse-worker / inprocess) |
+| `GET` | `/runs/{id}` | Статус, метрики и durable `progress` прогона |
+| `GET` | `/runs/{id}/events` | SSE: прогресс (Redis pub/sub или DB poll); после F5 — resume |
+| `POST` | `/runs/{id}/cancel` | Отмена (флаг в БД; работает после рестарта API) |
 | `GET` | `/runs/{id}/vacancies` | Вакансии прогона (`sort_by`, `sort_order`) |
 | `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта |
 | `GET` | `/vacancies` | Глобальный список (slim: `preview` без полных текстов; фильтры, сортировка, пагинация, `resume_id`) |
@@ -317,7 +324,8 @@ tg_jobs_parser/
   pyproject.toml
   config.yaml
   llm_models.yaml
-  docker-compose.yml       — postgres, redis, backend, llm-worker, frontend, observability
+  docker-compose.yml       — postgres, redis, backend, parse-worker, llm-worker,
+                             frontend, observability
   Dockerfile.backend
 
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
@@ -326,10 +334,10 @@ tg_jobs_parser/
     db/                    — модели, Alembic, bounded repos (+ repository facade),
                              кэш LLM (DbAIExtractionCache), UPSERT
     services/              — run/match/cover_letter/llm_job/interactive_llm,
-                             llm_job_events, auth, import, hh_sync, progress_bus
-    workers/               — llm_worker (RQ), llm_tasks, recover
-    queue/                 — RQ Redis connection
-  alembic/                 — миграции SQL (001…013)
+                             llm_job_events, parse_run_events, auth, import, hh_sync
+    workers/               — parse_worker / llm_worker (RQ), parse/llm_tasks, recover
+    queue/                 — RQ Redis connection (очереди parse + default)
+  alembic/                 — миграции SQL (001…014)
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes
@@ -546,12 +554,12 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 |-----------|------------|
 | **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
 | **`GET /metrics`** | Эндпоинт Prometheus (не путать с `/api/v1/vacancies/metrics`) |
-| **Prometheus** | Scrape backend и llm-worker каждые 15 с (`observability/prometheus.yml`) |
+| **Prometheus** | Scrape backend, llm-worker и parse-worker каждые 15 с (`observability/prometheus.yml`) |
 | **Grafana** | Дашборды **API**, **LLM**, **LLM jobs / queue**, **Pipeline**, **HH.ru sync**, **DB pool** |
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
-| **Доменные метрики** | прогоны, UPSERT/TTL, импорт, матчинг, письма, LLM-джобы (`llm_job_enqueue_*`, `llm_worker_*`, `llm_rq_queue_jobs`, `llm_jobs_by_status`, recover), auth, ЦБ |
+| **Доменные метрики** | прогоны, UPSERT/TTL, импорт, матчинг, письма, LLM-джобы (`llm_job_enqueue_*`, `llm_worker_*`, `llm_rq_queue_jobs`, `llm_jobs_by_status`, recover), parse recover (`parse_jobs_recover_total`), auth, ЦБ |
 | **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |
-| **`db_pool_*` gauges** | SQLAlchemy QueuePool: занято / свободно / overflow / лимит (`pool_size` + `max_overflow`); на backend и llm-worker |
+| **`db_pool_*` gauges** | SQLAlchemy QueuePool: занято / свободно / overflow / лимит (`pool_size` + `max_overflow`); на backend, llm-worker и parse-worker |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
 | **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и отправляет в Tempo (`observability/alloy-config.alloy`) |
 | **Tempo** | Хранение трасс (local, retention 7 дней — `observability/tempo-config.yml`) |
@@ -625,33 +633,30 @@ pytest -n 8     # параллельно (pytest-xdist)
 ## Архитектура
 
 ```text
-[React UI] ──REST/SSE──► [FastAPI backend] ──► parse_runner
-                              │                    │
-                              │                    ├── Telethon
-                              ▼                    ├── extraction/ (rules)
-                         PostgreSQL               ├── ai/ (OpenRouter)
-                              ▲                    ├── hh/ (admin sync)
-                              │                    ├── filters → dedup
-                         UPSERT vacancies          └── metrics → export
-                              │
-                         Redis (RQ) ◄── llm-worker (match / cover letter)
+[React UI] ──REST/SSE──► [FastAPI backend] ──enqueue──► Redis (RQ)
+                              │                              │
+                              ▼                              ├── parse-worker → parse_runner
+                         PostgreSQL (SoT: status/progress)   │     ├── Telethon
+                              ▲                              │     ├── extraction/ / ai/
+                         UPSERT vacancies                    │     └── filters → dedup → metrics
+                              │                              └── llm-worker (match / cover letter)
 ```
 
 - **`extraction/`** — быстрые эвристики (всегда).
 - **`ai/`** — опционально: OpenRouter, JSON-схема, кэш, `merge_rules_and_ai`.
 - **`hh/`** — sync вакансий HH.ru без LLM (admin).
-- **`backend/`** — API, фоновые прогоны, персистентность; интерактивный LLM —
-  через RQ + `llm-worker` (или `inprocess` без Redis).
+- **`backend/`** — API, durable прогоны и LLM-джобы через RQ (`parse-worker` /
+  `llm-worker`) или `inprocess` без Redis; прогресс прогона — колонка
+  `parse_runs.progress` + SSE.
 
 ---
 
 ## Roadmap
 
 Реализованное описано выше (аналитика, FTS и пресеты, матчинг резюме,
-сопроводительные письма, HH sync, фоновые LLM-джобы / RQ, JWT / multi-user,
-observability). Планы — в [ROADMAP.md](ROADMAP.md): трекер откликов, экспорт в
-Google Sheets / Notion, CMS-админка вакансий, WebAuthn, golden/evals для
-match и cover letter.
+сопроводительные письма, HH sync, фоновые LLM-джобы / RQ, durable parse
+через `parse-worker`, JWT / multi-user, observability). Планы — в
+[ROADMAP.md](ROADMAP.md): трекер откликов, экспорт в Google Sheets / Notion,
+CMS-админка вакансий, WebAuthn, golden/evals для match и cover letter.
 
-Вне списка фичей: восстановление прогресса прогона после рестарта backend,
-расширение Telethon (joinchat, rate-limit).
+Вне списка фичей: расширение Telethon (joinchat, rate-limit).
