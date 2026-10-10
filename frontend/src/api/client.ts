@@ -113,6 +113,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const LLM_JOB_POLL_MS = 1000;
 const LLM_JOB_POLL_MAX_MS = 5 * 60 * 1000;
 
+const RUN_SSE_MAX_MS = 5 * 60 * 1000;
+const RUN_POLL_MS = 2000;
+
+const RUN_TERMINAL: ReadonlySet<RunStatus> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+async function pollRunUntilTerminal(runId: string): Promise<RunDetail> {
+  const deadline = Date.now() + RUN_SSE_MAX_MS;
+  while (Date.now() < deadline) {
+    const run = await request<RunDetail>(`/runs/${runId}`);
+    if (RUN_TERMINAL.has(run.status)) return run;
+    await sleep(RUN_POLL_MS);
+  }
+  throw new Error("Прогон не завершился вовремя");
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
@@ -478,23 +497,77 @@ export const api = {
     onDone: () => void,
     onError: (err: Error) => void,
   ): () => void {
+    let settled = false;
+    let gotProgress = false;
+    let cancelled = false;
+
     const es = new EventSource(`${API_BASE}/runs/${runId}/events`);
-    es.addEventListener("progress", (ev) => {
-      try {
-        onProgress(JSON.parse((ev as MessageEvent).data) as ProgressEvent);
-      } catch (e) {
-        onError(e instanceof Error ? e : new Error(String(e)));
-      }
-    });
-    es.addEventListener("done", () => {
+
+    const finishDone = () => {
+      if (settled || cancelled) return;
+      settled = true;
+      window.clearTimeout(timer);
       es.close();
       onDone();
-    });
-    es.onerror = () => {
-      es.close();
-      onError(new Error("SSE connection failed"));
     };
-    return () => es.close();
+
+    const startFallbackPoll = () => {
+      if (settled || cancelled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      es.close();
+      void pollRunUntilTerminal(runId).then(
+        () => {
+          if (!cancelled) onDone();
+        },
+        (err: unknown) => {
+          if (!cancelled) {
+            onError(err instanceof Error ? err : new Error(String(err)));
+          }
+        },
+      );
+    };
+
+    const timer = window.setTimeout(() => {
+      startFallbackPoll();
+    }, RUN_SSE_MAX_MS);
+
+    es.addEventListener("progress", (ev) => {
+      try {
+        gotProgress = true;
+        onProgress(JSON.parse((ev as MessageEvent).data) as ProgressEvent);
+      } catch (e) {
+        if (!settled && !cancelled) {
+          settled = true;
+          window.clearTimeout(timer);
+          es.close();
+          onError(e instanceof Error ? e : new Error(String(e)));
+        }
+      }
+    });
+
+    es.addEventListener("done", () => {
+      finishDone();
+    });
+
+    es.onerror = () => {
+      if (settled || cancelled) return;
+      // Первый error часто при connect — ждём progress; иначе fallback poll
+      if (gotProgress) {
+        startFallbackPoll();
+        return;
+      }
+      window.setTimeout(() => {
+        if (settled || cancelled || gotProgress) return;
+        startFallbackPoll();
+      }, 1500);
+    };
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      es.close();
+    };
   },
 };
 

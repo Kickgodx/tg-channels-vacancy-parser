@@ -128,8 +128,6 @@ export default function RunPage() {
     queryKey: ["run", runId],
     queryFn: () => api.getRun(runId!),
     enabled: !!runId,
-    refetchInterval: (q) =>
-      q.state.data?.status === "running" || q.state.data?.status === "pending" ? 2000 : false,
   });
 
   const runFinished =
