@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import uuid
 from datetime import UTC, datetime
 
+import fakeredis
 import pytest
 
 from backend.db import parse_run_repository as pr
@@ -89,3 +92,51 @@ def test_request_cancel_queued_marks_cancelled():
         assert row is not None
         assert row.status == "cancelled"
         assert row.cancel_requested is True
+
+
+@pytest.fixture
+def fake_redis_for_parse(monkeypatch):
+    server = fakeredis.FakeStrictRedis()
+    monkeypatch.setenv("REDIS_URL", "redis://fake:6379/0")
+    from backend.queue import rq_conn
+    from backend.settings import get_settings
+
+    get_settings.cache_clear()
+    rq_conn.reset_redis_connection()
+    monkeypatch.setattr(rq_conn, "get_redis_connection", lambda force_new=False: server)
+    yield server
+    rq_conn.reset_redis_connection()
+    get_settings.cache_clear()
+
+
+def test_snapshot_to_progress_dict_slim():
+    from backend.services.parse_progress_serialize import snapshot_to_progress_dict
+    from tg_jobs_parser.parse_progress import ParseProgressSnapshot
+
+    snap = ParseProgressSnapshot(posts_processed=2, posts_total=9, vacancies_found=0, phase="ai")
+    d = snapshot_to_progress_dict(snap)
+    assert d["posts_processed"] == 2
+    assert d["phase"] == "ai"
+    assert "vacancies_preview" in d
+    assert d["vacancies_preview"] == []
+
+
+def test_publish_parse_run_event(fake_redis_for_parse, monkeypatch):
+    from backend.services.parse_run_events import channel_for, publish_parse_run_event
+
+    rid = uuid.uuid4()
+    pubsub = fake_redis_for_parse.pubsub()
+    pubsub.subscribe(channel_for(rid))
+    pubsub.get_message(timeout=1)
+
+    publish_parse_run_event(rid, event="progress", payload={"posts_processed": 1})
+
+    data = None
+    for _ in range(20):
+        msg = pubsub.get_message(timeout=1)
+        if msg and msg.get("type") == "message":
+            data = json.loads(msg["data"])
+            break
+    assert data is not None
+    assert data["event"] == "progress"
+    assert data["posts_processed"] == 1
