@@ -32,7 +32,6 @@ flowchart LR
     OR["OpenRouter"]
     HH["HH.ru API"]
     CBR["ЦБ FX"]
-    DDG["DuckDuckGo"]
   end
 
   FE -->|"REST / SSE"| BE
@@ -46,7 +45,6 @@ flowchart LR
   BE --> OR
   BE --> HH
   BE --> CBR
-  BE --> DDG
   BE -->|"/metrics"| PROM
   W -->|"/metrics :9101"| PROM
   BE -->|"OTLP :4318"| ALLOY

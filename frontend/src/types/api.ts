@@ -395,5 +395,4 @@ export interface ParseFormState {
   aiModel: string;
   aiFallbacks: string[];
   ignoreLlmCache: boolean;
-  channelSearchQuery: string;
 }

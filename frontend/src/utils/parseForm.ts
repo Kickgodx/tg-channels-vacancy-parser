@@ -71,7 +71,6 @@ export function formFromDefaults(d: ConfigDefaults): ParseFormState {
     aiModel: d.ai.model,
     aiFallbacks: [...d.ai.fallback_models],
     ignoreLlmCache: false,
-    channelSearchQuery: "python jobs telegram channel",
   };
 }
 
