@@ -127,6 +127,52 @@ def test_run_events_emits_initial_progress_from_db(api_client, monkeypatch):
     get_settings.cache_clear()
 
 
+def test_run_events_db_poll_without_redis(api_client, monkeypatch):
+    """Без REDIS_URL SSE поллит БД: progress при смене progress_updated_at, затем done."""
+    monkeypatch.setenv("REDIS_URL", "")
+    from backend.settings import get_settings
+
+    get_settings.cache_clear()
+
+    with session_scope() as session:
+        rid = pr.create_parse_run(session, config_snapshot={}, status="running").id
+
+    ready = threading.Event()
+
+    def _patch_then_complete() -> None:
+        ready.wait(timeout=5)
+        time.sleep(0.2)
+        with session_scope() as session:
+            pr.patch_run_progress(
+                session,
+                rid,
+                {
+                    "posts_processed": 5,
+                    "posts_total": 12,
+                    "vacancies_found": 2,
+                    "phase": "processing",
+                },
+            )
+        time.sleep(1.2)
+        with session_scope() as session:
+            row = pr.get_parse_run(session, rid)
+            if row is not None:
+                row.status = "completed"
+                session.flush()
+
+    threading.Thread(target=_patch_then_complete, daemon=True).start()
+
+    with api_client.stream("GET", f"/api/v1/runs/{rid}/events") as resp:
+        assert resp.status_code == 200
+        ready.set()
+        body = b"".join(resp.iter_bytes()).decode("utf-8", errors="replace")
+
+    assert "event: progress" in body
+    assert '"posts_processed": 5' in body or '"posts_processed":5' in body
+    assert "event: done" in body
+    get_settings.cache_clear()
+
+
 def test_vacancies_preview_dedupes_by_id():
     """Live-preview до дедупа может содержать одинаковые content-id — React key ломается."""
     items = [

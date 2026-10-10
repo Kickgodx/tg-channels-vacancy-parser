@@ -26,9 +26,7 @@ from backend.schemas import (
     VacancySortOrder,
 )
 from backend.services import run_service
-from backend.services.parse_progress_serialize import snapshot_to_progress_dict
 from backend.services.parse_run_events import channel_for
-from backend.services.progress_bus import progress_bus
 from backend.services.run_registry import run_registry
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import ConfigLoadError
@@ -155,23 +153,37 @@ async def _sse_events(run_id: uuid.UUID) -> AsyncIterator[str]:
         async for chunk in _sse_events_redis(run_id):
             yield chunk
     else:
-        async for chunk in _sse_events_progress_bus(run_id):
+        # Без Redis — durable DB poll (progress_bus alone is not enough across processes).
+        async for chunk in _sse_events_db_poll(run_id):
             yield chunk
 
 
-async def _sse_events_progress_bus(run_id: uuid.UUID) -> AsyncIterator[str]:
-    q = await progress_bus.subscribe(run_id)
-    try:
-        while True:
-            snap = await q.get()
-            if snap is None:
+async def _sse_events_db_poll(run_id: uuid.UUID) -> AsyncIterator[str]:
+    """Poll DB every ~1s when REDIS_URL is empty; emit progress on progress_updated_at change."""
+    last_updated = None
+    with session_scope() as session:
+        row = repo.get_parse_run(session, run_id)
+        if row is not None:
+            last_updated = row.progress_updated_at
+            if row.status in _TERMINAL_RUN_STATUSES:
                 yield "event: done\ndata: {}\n\n"
-                break
-            payload = snapshot_to_progress_dict(snap)
-            yield _sse_progress_line(payload)
-            await asyncio.sleep(0)
-    finally:
-        progress_bus.unsubscribe(run_id, q)
+                return
+
+    for _ in range(300):
+        await asyncio.sleep(1.0)
+        with session_scope() as session:
+            row = repo.get_parse_run(session, run_id)
+            if row is None:
+                return
+            updated = row.progress_updated_at
+            progress = dict(row.progress) if row.progress else None
+            status = row.status
+        if updated is not None and updated != last_updated and progress:
+            last_updated = updated
+            yield _sse_progress_line(progress)
+        if status in _TERMINAL_RUN_STATUSES:
+            yield "event: done\ndata: {}\n\n"
+            return
 
 
 async def _sse_events_redis(run_id: uuid.UUID) -> AsyncIterator[str]:
