@@ -30,8 +30,10 @@ def default_test_config(tmp_path_factory):
     cfg = tmp_path_factory.mktemp("config") / "config.yaml"
     cfg.write_text(_TEST_CONFIG, encoding="utf-8")
 
+    from backend.db.ai_cache import register_db_ai_cache
     from backend.settings import get_settings
 
+    register_db_ai_cache()
     mp = pytest.MonkeyPatch()
     mp.setenv("CONFIG_PATH", str(cfg))
     get_settings.cache_clear()

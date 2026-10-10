@@ -1,12 +1,11 @@
-"""Ручной импорт вакансий: текст → rules-извлечение → LLM → запись в БД.
+"""Ручной импорт вакансий: текст → shared ingestion → запись в БД.
 
-Тот же пайплайн, что у прогона по каналам (`raw_post_to_vacancy_rules` +
-`AIEnrichmentService.enrich` + `upsert_vacancies`), но источник — вставленный
-пользователем текст (например, скопированная вакансия с hh.ru), а не посты
-Telegram. Пост-фильтры прогона (exclude_keywords, форматы, локации) и порог
-vacancy_score здесь не применяются: вакансия добавляется по явному действию
-пользователя. При включённом AI решение «вакансия или нет» принимает LLM
-(is_job_post) — ``skip_if_vacancy_score_below`` принудительно обнуляется.
+Тот же pipeline, что у прогона по каналам (`rules_from_raw_post` +
+`apply_ingest_stages` + `upsert_vacancies`), но источник — вставленный
+пользователем текст. Пост-фильтры прогона (exclude_keywords, форматы, локации)
+и порог vacancy_score здесь не применяются: вакансия добавляется по явному
+действию пользователя. При включённом AI решение «вакансия или нет» принимает
+LLM (is_job_post) — ``skip_if_vacancy_score_below`` принудительно обнуляется.
 """
 
 from __future__ import annotations
@@ -18,15 +17,17 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from backend.db import repository as repo
+from backend.db import vacancy_repository as vacancy_repo
 from backend.db.models import VacancyRow
 from backend.db.vacancy_mapper import row_to_vacancy
 from backend.observability import record_import_item
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import AppConfig
+from tg_jobs_parser.ingestion.policy import MANUAL_POLICY
+from tg_jobs_parser.ingestion.process import apply_ingest_stages
+from tg_jobs_parser.ingestion.rules import rules_from_raw_post
 from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.parse_runner import raw_post_to_vacancy_rules
 from tg_jobs_parser.parsers.base import RawPost
 
 _LOG = logging.getLogger(__name__)
@@ -58,15 +59,20 @@ def _text_to_vacancy(text: str, config: AppConfig, *, source_url: str | None) ->
         post_date=datetime.now(UTC),
         post_url=source_url,
     )
-    v = raw_post_to_vacancy_rules(post, config)
+    v = rules_from_raw_post(post, config)
     # source_url по умолчанию — t.me/s/<channel>; для ручного ввода это мусор.
     return v.model_copy(update={"source_url": source_url or ""})
 
 
-def _enrich_one(ai_service, vacancy: Vacancy, *, skip_below: int) -> tuple[Vacancy | None, str | None, str | None]:
+def _enrich_status(
+    ai_service,
+    vacancy: Vacancy,
+    config: AppConfig,
+    *,
+    skip_below: int,
+) -> tuple[Vacancy | None, str | None, str | None]:
     """
-    Один LLM-разбор. Возвращает (vacancy|None, reject_status|None, save_warning|None):
-    reject_status — 'not_vacancy'/'error', если сохранять нечего.
+    AI + MANUAL policy. Возвращает (vacancy|None, reject_status|None, save_warning|None).
     """
     stats = ai_service.stats
     before = (
@@ -75,7 +81,12 @@ def _enrich_one(ai_service, vacancy: Vacancy, *, skip_below: int) -> tuple[Vacan
         stats.errors,
         stats.rate_limit_skipped,
     )
-    enriched = ai_service.enrich(vacancy)
+    enriched = apply_ingest_stages(
+        vacancy,
+        config,
+        policy=MANUAL_POLICY,
+        ai_service=ai_service,
+    )
     after = (
         stats.skipped_score,
         stats.dropped_not_job,
@@ -112,19 +123,23 @@ def import_vacancy_texts(
     result = ImportResult()
 
     ai_service = None
+    ingest_config = config
     if config.ai.enabled:
         from tg_jobs_parser.ai.enricher import AIEnrichmentService
 
         # Ручной импорт: score-гейт перед LLM отключён — реальные вакансии
         # с низким rules-score не должны отсекаться до модели.
-        ai_config = config.model_copy(update={"ai": config.ai.model_copy(update={"skip_if_vacancy_score_below": 0})})
+        ingest_config = config.model_copy(
+            update={"ai": config.ai.model_copy(update={"skip_if_vacancy_score_below": 0})}
+        )
         try:
-            ai_service = AIEnrichmentService(ai_config)
+            ai_service = AIEnrichmentService(ingest_config)
             ai_service.begin_batch(len(texts))
             result.ai_enabled = True
         except Exception as e:
             result.warning = f"AI не запущен ({e}); вакансии разобраны без LLM."
             _LOG.warning("Импорт: AI не инициализирован: %s", e)
+            ingest_config = config
 
     try:
         for i, raw in enumerate(texts):
@@ -150,16 +165,22 @@ def import_vacancy_texts(
 
             message = None
             if ai_service is not None:
-                enriched, reject_status, message = _enrich_one(
-                    ai_service, v, skip_below=config.ai.skip_if_vacancy_score_below
+                enriched, reject_status, message = _enrich_status(
+                    ai_service,
+                    v,
+                    ingest_config,
+                    skip_below=config.ai.skip_if_vacancy_score_below,
                 )
                 if reject_status is not None:
                     result.items.append(ImportItemResult(index=i, status=reject_status, message=message))
                     continue
                 if enriched is not None:
                     v = enriched
+            else:
+                # Без AI: rules as-is (MANUAL policy — без post-filters).
+                v = apply_ingest_stages(v, config, policy=MANUAL_POLICY) or v
 
-            repo.upsert_vacancies(session, [v], parse_run_id=None)
+            vacancy_repo.upsert_vacancies(session, [v], parse_run_id=None)
             result.items.append(ImportItemResult(index=i, status="created", message=message, vacancy=v))
             _LOG.info("Импорт: вакансия %s сохранена (AI=%s)", v.id, result.ai_enabled)
     finally:

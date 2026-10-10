@@ -11,8 +11,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from backend.db.models import HhListingRow, VacancyRow
-from backend.db.repository import VacancyUpsertStats, invalidate_vacancy_count_cache
 from backend.db.vacancy_mapper import vacancy_to_row
+from backend.db.vacancy_repository import VacancyUpsertStats, invalidate_vacancy_count_cache
 from backend.fx.apply import (
     apply_salary_rub_for_vacancy,
     preload_fx_rates_for_vacancies,

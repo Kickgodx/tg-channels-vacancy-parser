@@ -282,7 +282,7 @@ JWT обязателен для `/auth/me`, `/filters`, `/resumes` (включа
 Кэш короткой выдачи (`hh_listings`) живёт `hh.listing_ttl_days` и не даёт
 повторно дергать detail для уже загруженных id.
 
-Кэш ответов LLM хранится в PostgreSQL (`ai_extraction_cache`). Параметры в `config.yaml`: `ai.cache_backend: postgres`, `ai.cache_ttl_days` (0 — без срока, иначе дни). Очистка — кнопка на странице **Парсинг** или `POST /ai-cache/clear`.
+Кэш ответов LLM хранится в PostgreSQL (`ai_extraction_cache`). Параметры в `config.yaml`: `ai.cache_backend: postgres`, `ai.cache_ttl_days` (0 — без срока, иначе дни). Очистка — кнопка на странице **Парсинг** или `POST /ai-cache/clear`. Адаптер Postgres регистрируется при старте backend/CLI (порт `AIExtractionCacheBackend` в core, без зависимости `tg_jobs_parser` → `backend`).
 
 ### Схема БД
 
@@ -305,7 +305,7 @@ JWT обязателен для `/auth/me`, `/filters`, `/resumes` (включа
 
 **Если меняете колонки/таблицы** — добавьте новую миграцию (`alembic revision`) и обновите модели в `backend/db/models.py`; при следующем `docker compose up` она применится автоматически, данные сохранятся.
 
-Ядро парсинга (`tg_jobs_parser.parse_runner`) вызывается из `backend/services/run_service.py`; результаты пишутся в PostgreSQL (UPSERT по `id` вакансии).
+Ядро парсинга (`tg_jobs_parser.parse_runner` + общий `tg_jobs_parser.ingestion`) вызывается из `backend/services/run_service.py`; результаты пишутся в PostgreSQL (UPSERT по `id` вакансии). Ручной импорт использует тот же ingestion с `MANUAL_POLICY`.
 
 ---
 
@@ -323,7 +323,8 @@ tg_jobs_parser/
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
     api/routes/            — health, auth, config, runs, vacancies, hh,
                              analytics, filters, resumes, fx, ai-cache, llm-jobs
-    db/                    — модели, Alembic, репозиторий, кэш LLM, UPSERT
+    db/                    — модели, Alembic, bounded repos (+ repository facade),
+                             кэш LLM (DbAIExtractionCache), UPSERT
     services/              — run/match/cover_letter/llm_job/interactive_llm,
                              llm_job_events, auth, import, hh_sync, progress_bus
     workers/               — llm_worker (RQ), llm_tasks, recover
@@ -336,12 +337,13 @@ tg_jobs_parser/
                              MetricsCharts, AnalyticsPanel
 
   tg_jobs_parser/          — ядро парсинга (общее для API и CLI)
-    parse_runner.py
+    parse_runner.py        — Telethon fetch, dedup, progress; ingest через ingestion/
+    ingestion/             — shared RawPost → Vacancy (rules / AI / policy)
     cli/                   — Typer CLI (+ db dump/import)
     config/                — YAML + Pydantic
     parsers/               — Telethon
-    extraction/            — rules
-    ai/                    — OpenRouter, кэш, token cost
+    extraction/            — rules helpers
+    ai/                    — OpenRouter, cache port + registry, token cost
     hh/                    — клиент HH API, mapper → Vacancy
     evals/                 — scorer + live runner golden extraction
     filters/, deduplication/, analytics/, exporters/

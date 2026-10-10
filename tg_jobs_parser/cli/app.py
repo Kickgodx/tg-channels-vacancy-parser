@@ -129,6 +129,12 @@ def parse(
 ) -> None:
     """Запуск парсинга и экспорта Excel/JSON."""
     setup_logging()
+    try:
+        from backend.db.ai_cache import register_db_ai_cache
+
+        register_db_ai_cache()
+    except ImportError:
+        pass
     cfg = load_config(config_path)
 
     def split_csv(s: str | None) -> list[str] | None:

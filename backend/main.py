@@ -83,6 +83,9 @@ def _vacancy_retention_worker(stop_event: threading.Event) -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     log = logging.getLogger(__name__)
+    from backend.db.ai_cache import register_db_ai_cache
+
+    register_db_ai_cache()
     log.info("Инициализация БД…")
     init_db()
     _cleanup_expired_vacancies()

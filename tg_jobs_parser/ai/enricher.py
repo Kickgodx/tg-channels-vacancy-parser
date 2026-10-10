@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 
-from tg_jobs_parser.ai.cache import AIExtractionCache
+from tg_jobs_parser.ai.cache import AIExtractionCache, AIExtractionCacheBackend
 from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
 from tg_jobs_parser.ai.merger import merge_rules_and_ai
 from tg_jobs_parser.ai.models_catalog import LlmModelEntry
@@ -107,12 +107,17 @@ class RunAIStats:
 
 
 class AIEnrichmentService:
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        cache: AIExtractionCacheBackend | None = None,
+    ) -> None:
         self._config = config
         self._ai = config.ai
         self._context = build_search_context(config)
         self._client = OpenRouterClient(self._ai)
-        self._cache = AIExtractionCache(self._ai)
+        self._cache = AIExtractionCache(self._ai, backend=cache)
         self.stats = RunAIStats()
         self._progress_total: int = 0
         self._progress_done: int = 0
