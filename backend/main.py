@@ -17,7 +17,6 @@ from backend.api.routes import (
     ai_cache,
     analytics,
     auth,
-    channels,
     config,
     filters,
     fx,
@@ -150,7 +149,6 @@ setup_tracing(app, settings)
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(config.router, prefix="/api/v1")
-app.include_router(channels.router, prefix="/api/v1")
 app.include_router(runs.router, prefix="/api/v1")
 app.include_router(vacancies.router, prefix="/api/v1")
 app.include_router(hh.router, prefix="/api/v1")

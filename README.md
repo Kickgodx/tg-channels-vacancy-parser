@@ -87,7 +87,7 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 | Страница | Описание |
 |----------|----------|
 | **Вход** | `/login` — вход и регистрация; без токена остальные страницы недоступны |
-| **Парсинг** | Форма парсинга (каналы, даты, специализации, формат работы, AI, пороги score), поиск каналов (DuckDuckGo) |
+| **Парсинг** | Форма парсинга (каналы, даты, специализации, формат работы, AI, пороги score) |
 | **Прогон** | Прогресс (SSE), метрики, графики, блок AI (токены и стоимость input/output/total), таблица вакансий, экспорт Excel/JSON |
 | **Импорт** | `/import` — вставка текста вакансии вручную (например, с hh.ru): rules + LLM-разбор и запись в общую базу; ниже — последние импортированные |
 | **HH** | `/hh` — только для админа: sync вакансий с HH.ru (поиск AQA/Python), без LLM; кэш listings + skip detail |
@@ -228,7 +228,6 @@ uvicorn backend.main:app --reload --port 8000
 | `GET` | `/auth/me` | Текущий пользователь |
 | `GET` | `/config/defaults` | Значения по умолчанию для формы |
 | `GET` | `/config/llm-models` | Каталог моделей из `llm_models.yaml` |
-| `POST` | `/channels/search` | Поиск кандидатов каналов |
 | `POST` | `/runs` | Запуск парсинга (фоновый поток) |
 | `GET` | `/runs/{id}` | Статус и метрики прогона |
 | `GET` | `/runs/{id}/events` | SSE: прогресс в реальном времени |
@@ -308,7 +307,7 @@ tg_jobs_parser/
   Dockerfile.backend
 
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
-    api/routes/            — health, auth, config, channels, runs, vacancies,
+    api/routes/            — health, auth, config, runs, vacancies,
                              analytics, filters, resumes, fx, ai-cache, llm-jobs
     db/                    — модели, Alembic, репозиторий, кэш LLM, UPSERT
     services/              — run/match/cover_letter/llm_job/interactive_llm,

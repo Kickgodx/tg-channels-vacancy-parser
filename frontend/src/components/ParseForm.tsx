@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { ParseFormState } from "../types/api";
@@ -15,18 +15,12 @@ export default function ParseForm({ onSubmit, disabled, isSubmitting }: Props) {
   const llmQ = useQuery({ queryKey: ["llm-models"], queryFn: () => api.getLlmModels() });
 
   const [form, setForm] = useState<ParseFormState | null>(null);
-  const [channelResults, setChannelResults] = useState<{ found: string[]; backend: string } | null>(null);
 
   useEffect(() => {
     if (defaultsQ.data && !form) {
       setForm(formFromDefaults(defaultsQ.data));
     }
   }, [defaultsQ.data, form]);
-
-  const channelSearch = useMutation({
-    mutationFn: (q: string) => api.searchChannels(q),
-    onSuccess: (data) => setChannelResults({ found: data.found, backend: data.backend }),
-  });
 
   if (defaultsQ.isError) {
     const msg =
@@ -77,31 +71,6 @@ export default function ParseForm({ onSubmit, disabled, isSubmitting }: Props) {
             placeholder="qa_jobs&#10;python_django_jobs"
           />
         </label>
-        <div className="row">
-          <input
-            type="text"
-            value={form.channelSearchQuery}
-            onChange={(e) => patch({ channelSearchQuery: e.target.value })}
-            placeholder="Поиск каналов (DuckDuckGo)"
-            style={{ flex: 1 }}
-          />
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => channelSearch.mutate(form.channelSearchQuery)}
-            disabled={channelSearch.isPending}
-          >
-            Найти
-          </button>
-        </div>
-        {channelResults && (
-          <p className="caption">
-            Бэкенд: {channelResults.backend}.{" "}
-            {channelResults.found.length
-              ? channelResults.found.join(", ")
-              : "Ссылки t.me не найдены — укажите каналы вручную."}
-          </p>
-        )}
         <label className="field">
           Файл сессии Telethon
           <input

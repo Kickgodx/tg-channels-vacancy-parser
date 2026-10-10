@@ -286,12 +286,6 @@ export const api = {
 
   getLlmModels: () => request<LlmModelsCatalog>("/config/llm-models"),
 
-  searchChannels: (query: string) =>
-    request<{ found: string[]; backend: string; query: string }>("/channels/search", {
-      method: "POST",
-      body: JSON.stringify({ query }),
-    }),
-
   listRuns: () => request<RunSummary[]>("/runs"),
 
   getRun: (id: string) => request<RunDetail>(`/runs/${id}`),
