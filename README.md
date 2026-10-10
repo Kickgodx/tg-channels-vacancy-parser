@@ -147,6 +147,9 @@ confidence оценки, пояснение и списки совпадающи
   (`force=true`) запускает LLM заново.
 - Посчитанные скоры видны в колонке **Match**, по ним же работает сортировка
   (`sort_by=match_score` при выбранном резюме).
+- Мэтчинг и письма идут фоновыми джобами (`llm_jobs`): кэш → сразу 200,
+  иначе 202 + poll `GET /llm-jobs/{id}` (UI делает poll сам). Параллелизм —
+  `ai.interactive_concurrency` / `interactive_per_user_limit`.
 - Модель матчинга задаётся отдельно от модели парсинга: `ai.match_model`
   (+ `ai.match_reasoning_enabled` для reasoning-моделей) — качество здесь
   важнее скорости, вызовов на порядок меньше. Глубина рассуждений —
@@ -229,8 +232,9 @@ uvicorn backend.main:app --reload --port 8000
 | `GET` | `/analytics/salaries` \| `/sources` \| `/companies` | Зарплатные квантили, качество каналов, топ компаний |
 | `GET` `POST` `DELETE` | `/filters` | Пресеты фильтров (приватные) |
 | `GET` `POST` `PUT` `DELETE` | `/resumes` | Резюме пользователя |
-| `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Оценка соответствия одной вакансии (`force=true` — пересчёт) |
-| `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Сопроводительное письмо (`force=true` — перегенерация, `tone`/`extra_notes` в теле) |
+| `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Оценка: кэш → 200; иначе фоновая джоба → 202 `{job_id}` (`force=true` — пересчёт) |
+| `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Письмо: кэш → 200; иначе 202 `{job_id}` (`force`, `tone`/`extra_notes`) |
+| `GET` | `/llm-jobs/{job_id}` | Статус фоновой LLM-задачи; при `done` — payload match/letter |
 | `GET` | `/fx/rates`, `POST` `/fx/refresh` \| `/fx/recalculate-rub` | Курсы ЦБ и пересчёт зарплат в ₽ |
 | `GET` | `/ai-cache/stats` | Число записей в кэше LLM |
 | `POST` | `/ai-cache/clear` | Полная очистка кэша LLM |
@@ -268,6 +272,7 @@ uvicorn backend.main:app --reload --port 8000
 | `saved_filters` | Пресеты фильтров (`user_id`) |
 | `resumes` | Резюме пользователя (`user_id`) |
 | `vacancy_matches` | Оценки соответствия, PK `(resume_id, vacancy_id)` — он же кэш матчинга |
+| `llm_jobs` | Фоновые LLM-задачи мэтчинга/писем (`queued`/`running`/`done`/`error`) |
 | `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 
@@ -294,6 +299,7 @@ tg_jobs_parser/
     db/                    — модели, Alembic, репозиторий, кэш LLM, UPSERT
   alembic/                 — миграции SQL
     services/              — run_service, match_service, cover_letter_service,
+                             llm_job_service, interactive_llm,
                              auth_service, import_service, progress_bus
 
   frontend/                — React UI (Vite)
@@ -405,7 +411,8 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 | `match_reasoning_effort` | Уровень рассуждений матчинга и писем: `max` / `xhigh` / `high` / `medium` / `low` / `minimal` / `none`. Только при `match_reasoning_enabled: true`; пусто — дефолт модели. Неподдерживаемый уровень OpenRouter сводит к ближайшему (напр. Gemini 3: `xhigh` → `high`); модели без выбора уровня его игнорируют. Рассуждения расходуют `max_completion_tokens` — на `xhigh`/`max` лимит стоит поднять |
 | `cover_letter_model` | Модель генерации сопроводительных писем. Пусто — `match_model`, затем `model` |
 | `fallback_models` | Запасные модели |
-| `concurrency`, `requests_per_minute` | Темп и параллелизм |
+| `concurrency`, `requests_per_minute` | Темп и параллелизм парсинга |
+| `interactive_concurrency`, `interactive_per_user_limit` | Пул и лимит на пользователя для фоновых мэтч/письмо (in-process; несколько реплик backend → нужна внешняя очередь) |
 | `stop_llm_when_rate_limited` | Отключить LLM при 429 до конца прогона |
 | `max_completion_tokens` | Лимит выходных токенов |
 | `use_cache` | Дисковый/Postgres кэш LLM |
@@ -503,7 +510,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **Prometheus** | Scrape backend каждые 15 с (`observability/prometheus.yml`) |
 | **Grafana** | Дашборды **tg-jobs-parser API**, **LLM**, **Pipeline** и **HH.ru sync** (папка `tg-jobs-parser`) |
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
-| **Доменные метрики** | `backend/observability.py`: прогоны (`parse_runs_*`), UPSERT и TTL-архивация вакансий, ручной импорт, матчинг резюме↔вакансия (`vacancy_match_*`), письма (`cover_letter_*`), auth-события, запросы к ЦБ |
+| **Доменные метрики** | `backend/observability.py`: прогоны (`parse_runs_*`), UPSERT и TTL-архивация вакансий, ручной импорт, матчинг (`vacancy_match_*`), письма (`cover_letter_*`), фоновые LLM-джобы (`llm_jobs_*`), auth-события, запросы к ЦБ |
 | **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
 | **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и отправляет в Tempo (`observability/alloy-config.alloy`) |
@@ -561,7 +568,7 @@ pytest -n 8     # параллельно (pytest-xdist)
 ```
 
 В том числе: `tests/test_api_health.py`, `tests/test_auth.py`,
-`tests/test_solo_match.py`, `tests/test_cover_letter.py`,
+`tests/test_solo_match.py`, `tests/test_cover_letter.py`, `tests/test_llm_jobs.py`,
 `tests/test_upsert_vacancies.py`, `tests/test_db_transfer.py`, тесты ядра
 extraction/AI.
 

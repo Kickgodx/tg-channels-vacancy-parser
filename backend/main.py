@@ -23,6 +23,7 @@ from backend.api.routes import (
     fx,
     health,
     hh,
+    llm_jobs,
     resumes,
     runs,
     vacancies,
@@ -105,6 +106,11 @@ async def lifespan(_app: FastAPI):
     finally:
         retention_stop.set()
         retention_thread.join(timeout=1)
+        from backend.services.interactive_llm import reset_interactive_client
+        from backend.services.llm_job_service import llm_job_runner
+
+        llm_job_runner.reset()
+        reset_interactive_client()
         shutdown_tracing()
 
 
@@ -153,6 +159,7 @@ app.include_router(fx.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(filters.router, prefix="/api/v1")
 app.include_router(resumes.resumes_router, prefix="/api/v1")
+app.include_router(llm_jobs.router, prefix="/api/v1")
 
 Instrumentator(
     should_group_status_codes=False,

@@ -45,11 +45,18 @@ flowchart TB
   end
 
   subgraph Match
-    M1["Резюме + вакансия"] --> M2["OpenRouter match"] --> M3["vacancy_matches"]
+    M1["POST match"] --> M2["кэш? → 200"]
+    M1 --> M3["llm_jobs 202"]
+    M3 --> M4["worker pool"]
+    M4 --> M5["OpenRouter"]
+    M5 --> M6["vacancy_matches"]
+    M3 --> M7["GET /llm-jobs poll"]
   end
 
   subgraph Letter["Cover letter"]
-    L1["Резюме + контекст"] --> L2["OpenRouter"] --> L3["cover_letters"]
+    L1["POST letter"] --> L2["кэш? / llm_jobs"]
+    L2 --> L3["worker → OpenRouter"]
+    L3 --> L4["cover_letters"]
   end
 
   subgraph Analytics
@@ -60,5 +67,6 @@ flowchart TB
 ### Auth и данные
 
 - **JWT** — login/register; API Bearer, SSE через `access_token`
-- **Per-user** — resumes, saved_filters, matches, cover_letters
+- **Per-user** — resumes, saved_filters, matches, cover_letters, llm_jobs
 - **Shared** — vacancies, parse_runs, analytics, FX, AI cache
+- **Interactive LLM** — фоновые джобы in-process (`ai.interactive_concurrency`); сессия БД не держится на время вызова OpenRouter; несколько реплик backend потребуют внешней очереди

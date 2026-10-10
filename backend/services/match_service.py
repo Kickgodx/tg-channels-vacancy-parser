@@ -8,9 +8,10 @@ import time
 from opentelemetry import trace
 
 from backend.db import repository as repo
+from backend.db.session import session_scope
 from backend.observability import record_match
+from backend.services.interactive_llm import get_interactive_client
 from backend.settings import get_settings
-from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
 from tg_jobs_parser.ai.schema import calculate_overall_score
 from tg_jobs_parser.config.loader import load_config
 
@@ -18,8 +19,8 @@ _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)
 
 
-def match_single(session, *, resume_text: str, vacancy_id: str, vacancy_text: str, resume_id: int):
-    """Синхронная оценка одной пары: вызов LLM + запись в ``vacancy_matches``.
+def match_single(*, resume_text: str, vacancy_id: str, vacancy_text: str, resume_id: int):
+    """Оценка одной пары: LLM без удержания DB-сессии, затем upsert.
 
     ``overall_score`` считается здесь (детерминированно), LLM отдаёт только
     breakdown-оценки и объяснение.
@@ -31,14 +32,11 @@ def match_single(session, *, resume_text: str, vacancy_id: str, vacancy_text: st
         max_chars = cfg.ai.max_input_chars
         started = time.perf_counter()
         try:
-            client = OpenRouterClient(cfg.ai)
-            try:
-                extraction, usage = client.match_with_fallback(
-                    resume_text=resume_text[:max_chars],
-                    vacancy_text=vacancy_text[:max_chars],
-                )
-            finally:
-                client.close()
+            client = get_interactive_client()
+            extraction, usage = client.match_with_fallback(
+                resume_text=resume_text[:max_chars],
+                vacancy_text=vacancy_text[:max_chars],
+            )
         except Exception:
             record_match(outcome="error", duration_seconds=time.perf_counter() - started)
             raise
@@ -58,17 +56,18 @@ def match_single(session, *, resume_text: str, vacancy_id: str, vacancy_text: st
         extraction.confidence,
         usage.model,
     )
-    return repo.upsert_vacancy_match(
-        session,
-        resume_id=resume_id,
-        vacancy_id=vacancy_id,
-        overall_score=overall_score,
-        confidence=extraction.confidence,
-        breakdown=extraction.breakdown.model_dump(),
-        explanation=extraction.explanation,
-        matching_skills=[s.model_dump() for s in extraction.matching_skills],
-        missing_skills=[s.model_dump() for s in extraction.missing_skills],
-        strengths=extraction.strengths,
-        risks=extraction.risks,
-        model=usage.model,
-    )
+    with session_scope() as session:
+        return repo.upsert_vacancy_match(
+            session,
+            resume_id=resume_id,
+            vacancy_id=vacancy_id,
+            overall_score=overall_score,
+            confidence=extraction.confidence,
+            breakdown=extraction.breakdown.model_dump(),
+            explanation=extraction.explanation,
+            matching_skills=[s.model_dump() for s in extraction.matching_skills],
+            missing_skills=[s.model_dump() for s in extraction.missing_skills],
+            strengths=extraction.strengths,
+            risks=extraction.risks,
+            model=usage.model,
+        )

@@ -256,6 +256,29 @@ class CoverLetterOut(BaseModel):
     )
 
 
+class LlmJobAccepted(BaseModel):
+    """Ответ 202: LLM-задача поставлена в очередь."""
+
+    job_id: uuid.UUID
+    status: str = "queued"
+
+
+class LlmJobOut(BaseModel):
+    """Статус фоновой LLM-задачи; при done — готовый match или cover_letter."""
+
+    id: uuid.UUID
+    kind: str
+    status: str
+    resume_id: int
+    vacancy_id: str
+    error_message: str | None = None
+    match: VacancyMatchOut | None = None
+    cover_letter: CoverLetterOut | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class VacancyImportRequest(BaseModel):
     """Ручной импорт: тексты вакансий (например, скопированные с HH) + опциональная ссылка."""
 

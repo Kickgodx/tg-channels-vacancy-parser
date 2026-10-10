@@ -78,6 +78,10 @@
 | Поле | Назначение |
 |------|------------|
 | **`prompt_version`** | Должен совпадать с `EXTRACT_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py`. Кэш LLM ключуется константой; при расхождении — warning. Смысловое изменение extraction-промпта → bump константы. |
+| **`concurrency`** | Параллелизм LLM при **парсинге** постов. |
+| **`interactive_concurrency`** | Размер in-process пула фоновых джоб мэтчинга и писем (по умолчанию 4). |
+| **`interactive_per_user_limit`** | Сколько LLM-джоб (`queued`+`running`) одновременно на одного пользователя (по умолчанию 2); сверх лимита — HTTP 429. |
+| **`requests_per_minute`** | Целевой темп к OpenRouter; для interactive LLM — общий process-wide limiter. |
 
 ---
 

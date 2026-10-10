@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from prometheus_client import REGISTRY
+from tests.llm_job_helpers import await_llm_job
 
 from backend.db import repository as repo
 from backend.db.session import get_session_factory
@@ -90,9 +91,6 @@ def test_match_metrics(api_client, monkeypatch):
     from tg_jobs_parser.ai.schema import MatchBreakdown, VacancyMatchExtraction
 
     class _FakeClient:
-        def __init__(self, ai):
-            pass
-
         def match_with_fallback(self, *, resume_text, vacancy_text):
             return (
                 VacancyMatchExtraction(
@@ -108,10 +106,7 @@ def test_match_metrics(api_client, monkeypatch):
                 LLMUsage(model="m1"),
             )
 
-        def close(self):
-            pass
-
-    monkeypatch.setattr(match_service, "OpenRouterClient", _FakeClient)
+    monkeypatch.setattr(match_service, "get_interactive_client", lambda: _FakeClient())
 
     token = _register(api_client, "mm@example.com")
     v = _vacancy(VACANCY_TEXT, post_date=datetime(2026, 9, 1, tzinfo=UTC))
@@ -126,13 +121,17 @@ def test_match_metrics(api_client, monkeypatch):
 
     before_ok = _sample("vacancy_match_calls_total", {"outcome": "success"})
     before_score = _sample("vacancy_match_score_count", {})
+    before_jobs_done = _sample("llm_jobs_total", {"outcome": "done", "kind": "match"})
     r = api_client.post(f"/api/v1/resumes/{rid}/match/{v.id}", headers=_auth(token))
-    assert r.status_code == 200, r.text
+    job = await_llm_job(api_client, token, r)
+    assert job["status"] == "done", job
     assert _sample("vacancy_match_calls_total", {"outcome": "success"}) == before_ok + 1
     assert _sample("vacancy_match_score_count", {}) == before_score + 1
+    assert _sample("llm_jobs_total", {"outcome": "done", "kind": "match"}) == before_jobs_done + 1
 
     before_cached = _sample("vacancy_match_calls_total", {"outcome": "cached"})
     r = api_client.post(f"/api/v1/resumes/{rid}/match/{v.id}", headers=_auth(token))
+    assert r.status_code == 200
     assert r.json()["cached"] is True
     assert _sample("vacancy_match_calls_total", {"outcome": "cached"}) == before_cached + 1
 

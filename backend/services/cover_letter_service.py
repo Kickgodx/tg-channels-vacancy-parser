@@ -8,31 +8,32 @@ import time
 from opentelemetry import trace
 
 from backend.db import repository as repo
+from backend.db.session import session_scope
 from backend.observability import record_cover_letter
+from backend.services.interactive_llm import get_interactive_client
 from backend.settings import get_settings
-from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
 from tg_jobs_parser.config.loader import load_config
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)
 
 
-def _match_summary(session, *, resume_id: int, vacancy_id: str) -> dict | None:
+def _match_summary(*, resume_id: int, vacancy_id: str) -> dict | None:
     """Контекст из сохранённой оценки матчинга (если уже считалась)."""
-    row = repo.get_vacancy_match(session, resume_id=resume_id, vacancy_id=vacancy_id)
-    if row is None:
-        return None
-    skills = [s.get("skill", "") for s in row.matching_skills or [] if isinstance(s, dict)]
-    return {
-        "score": row.overall_score,
-        "strengths": row.strengths or [],
-        "matching_skills": [s for s in skills if s],
-        "explanation": row.explanation or "",
-    }
+    with session_scope() as session:
+        row = repo.get_vacancy_match(session, resume_id=resume_id, vacancy_id=vacancy_id)
+        if row is None:
+            return None
+        skills = [s.get("skill", "") for s in row.matching_skills or [] if isinstance(s, dict)]
+        return {
+            "score": row.overall_score,
+            "strengths": list(row.strengths or []),
+            "matching_skills": [s for s in skills if s],
+            "explanation": row.explanation or "",
+        }
 
 
 def generate_single(
-    session,
     *,
     resume_id: int,
     resume_text: str,
@@ -41,7 +42,7 @@ def generate_single(
     tone: str = "neutral",
     extra_notes: str | None = None,
 ):
-    """Синхронная генерация одного письма: вызов LLM + запись в ``cover_letters``."""
+    """Генерация письма: LLM без удержания DB-сессии, затем upsert."""
     with _TRACER.start_as_current_span(
         "cover_letter.generate",
         attributes={
@@ -52,21 +53,18 @@ def generate_single(
     ) as span:
         cfg = load_config(get_settings().config_path)
         max_chars = cfg.ai.max_input_chars
-        match_summary = _match_summary(session, resume_id=resume_id, vacancy_id=vacancy_id)
+        match_summary = _match_summary(resume_id=resume_id, vacancy_id=vacancy_id)
         span.set_attribute("cover_letter.has_match_summary", match_summary is not None)
         started = time.perf_counter()
         try:
-            client = OpenRouterClient(cfg.ai)
-            try:
-                text, usage = client.cover_letter_with_fallback(
-                    resume_text=resume_text[:max_chars],
-                    vacancy_text=vacancy_text[:max_chars],
-                    tone=tone,
-                    extra_notes=extra_notes,
-                    match_summary=match_summary,
-                )
-            finally:
-                client.close()
+            client = get_interactive_client()
+            text, usage = client.cover_letter_with_fallback(
+                resume_text=resume_text[:max_chars],
+                vacancy_text=vacancy_text[:max_chars],
+                tone=tone,
+                extra_notes=extra_notes,
+                match_summary=match_summary,
+            )
         except Exception:
             record_cover_letter(outcome="error", duration_seconds=time.perf_counter() - started)
             raise
@@ -81,11 +79,12 @@ def generate_single(
         tone,
         usage.model,
     )
-    return repo.upsert_cover_letter(
-        session,
-        resume_id=resume_id,
-        vacancy_id=vacancy_id,
-        text=text,
-        tone=tone,
-        model=usage.model,
-    )
+    with session_scope() as session:
+        return repo.upsert_cover_letter(
+            session,
+            resume_id=resume_id,
+            vacancy_id=vacancy_id,
+            text=text,
+            tone=tone,
+            model=usage.model,
+        )

@@ -213,6 +213,27 @@ class HhListingRow(Base):
     )
 
 
+class LlmJobRow(Base):
+    """Фоновая LLM-задача (мэтчинг / сопроводительное письмо)."""
+
+    __tablename__ = "llm_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # match | cover_letter
+    resume_id: Mapped[int] = mapped_column(Integer, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
+    vacancy_id: Mapped[str] = mapped_column(String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    force: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    params: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AIExtractionCacheRow(Base):
     """Кэш ответов LLM (ключ = sha256 текста + model + prompt_version + mode)."""
 

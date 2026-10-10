@@ -97,6 +97,9 @@ ai:
   max_posts_per_run: 0
   skip_if_vacancy_score_below: 1
   concurrency: 8
+  # Фоновые джобы мэтчинга / писем (in-process ThreadPool); не путать с concurrency парсинга.
+  interactive_concurrency: 4
+  interactive_per_user_limit: 2
   requests_per_minute: 480
   max_retries_on_429: 0
   retry_base_delay_seconds: 5

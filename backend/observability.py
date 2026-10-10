@@ -154,6 +154,28 @@ def record_cover_letter(*, outcome: str, duration_seconds: float | None = None) 
         COVER_LETTER_DURATION.observe(max(duration_seconds, 0.0))
 
 
+# --- Фоновые LLM-джобы (мэтч / письмо) --------------------------------------
+
+LLM_JOB_CALLS = Counter(
+    "llm_jobs_total",
+    "Фоновые LLM-задачи мэтчинга и писем",
+    labelnames=("outcome", "kind"),  # queued|done|error × match|cover_letter
+)
+
+LLM_JOB_DURATION = Histogram(
+    "llm_job_duration_seconds",
+    "Длительность фоновой LLM-задачи (очередь + выполнение)",
+    labelnames=("kind",),
+    buckets=(1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 120.0, 300.0),
+)
+
+
+def record_llm_job(*, outcome: str, kind: str, duration_seconds: float | None = None) -> None:
+    LLM_JOB_CALLS.labels(outcome=outcome, kind=kind or "unknown").inc()
+    if duration_seconds is not None:
+        LLM_JOB_DURATION.labels(kind=kind or "unknown").observe(max(duration_seconds, 0.0))
+
+
 # --- Auth -------------------------------------------------------------------
 
 AUTH_EVENTS = Counter(

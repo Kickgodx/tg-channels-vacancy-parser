@@ -7,6 +7,8 @@ import type {
   HhStatus,
   HhSyncRequest,
   HhSyncResult,
+  LlmJob,
+  LlmJobAccepted,
   LlmModelsCatalog,
   MetricsSummary,
   ProgressEvent,
@@ -105,6 +107,59 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
   }
   return res.json() as Promise<T>;
+}
+
+const LLM_JOB_POLL_MS = 1000;
+const LLM_JOB_POLL_MAX_MS = 5 * 60 * 1000;
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+async function pollLlmJob(jobId: string): Promise<LlmJob> {
+  const deadline = Date.now() + LLM_JOB_POLL_MAX_MS;
+  while (Date.now() < deadline) {
+    const job = await request<LlmJob>(`/llm-jobs/${jobId}`);
+    if (job.status === "done" || job.status === "error") return job;
+    await sleep(LLM_JOB_POLL_MS);
+  }
+  throw new Error("LLM-задача не завершилась вовремя");
+}
+
+/** POST мэтч/письмо: 200 кэш или 202 job → poll до результата. */
+async function postInteractiveLlm<T>(
+  path: string,
+  init: RequestInit,
+  pick: (job: LlmJob) => T | null | undefined,
+): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...init.headers,
+    },
+  });
+  if (res.status === 401) handleUnauthorized(path);
+  if (res.status === 200) return (await res.json()) as T;
+  if (res.status === 202) {
+    const accepted = (await res.json()) as LlmJobAccepted;
+    const job = await pollLlmJob(accepted.job_id);
+    if (job.status === "error") {
+      throw new Error(job.error_message || "LLM: ошибка задачи");
+    }
+    const value = pick(job);
+    if (value == null) throw new Error("LLM: пустой результат задачи");
+    return value;
+  }
+  let detail = res.statusText;
+  try {
+    const j = await res.json();
+    detail = j.detail ?? JSON.stringify(j);
+  } catch {
+    detail = await res.text();
+  }
+  throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
 }
 
 export const api = {
@@ -296,26 +351,30 @@ export const api = {
     if (!res.ok) throw new Error(`Удаление резюме: ${res.status} ${res.statusText}`);
   },
 
-  /** Матчинг одной вакансии: без force отдаёт сохранённую оценку, с force — новый вызов LLM. */
+  /** Матчинг: кэш → сразу; иначе 202 job + poll. */
   matchVacancy: (resumeId: number, vacancyId: string, force = false) =>
-    request<VacancyMatch>(
+    postInteractiveLlm<VacancyMatch>(
       `/resumes/${resumeId}/match/${vacancyId}${force ? "?force=true" : ""}`,
       { method: "POST" },
+      (job) => job.match,
     ),
 
   getVacancyMatch: (resumeId: number, vacancyId: string) =>
     request<VacancyMatch>(`/resumes/${resumeId}/match/${vacancyId}`),
 
-  /** Сопроводительное письмо: без force отдаёт сохранённое, с force — новый вызов LLM. */
+  getLlmJob: (jobId: string) => request<LlmJob>(`/llm-jobs/${jobId}`),
+
+  /** Письмо: кэш → сразу; иначе 202 job + poll. */
   generateCoverLetter: (
     resumeId: number,
     vacancyId: string,
     tone: CoverLetterTone,
     force = false,
   ) =>
-    request<CoverLetter>(
+    postInteractiveLlm<CoverLetter>(
       `/resumes/${resumeId}/cover-letter/${vacancyId}${force ? "?force=true" : ""}`,
       { method: "POST", body: JSON.stringify({ tone }) },
+      (job) => job.cover_letter,
     ),
 
   getCoverLetter: (resumeId: number, vacancyId: string) =>

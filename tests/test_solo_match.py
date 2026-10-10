@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from tests.llm_job_helpers import await_llm_job
 
 from backend.db.models import VacancyRow
-from backend.db.session import get_session_factory
+from backend.db.session import get_session_factory, session_scope
 from backend.services import match_service
 from tg_jobs_parser.config.schema import AiConfig
 
@@ -48,42 +49,43 @@ def stub_llm(monkeypatch):
     """Подменяет LLM-вызов: считает обращения, возвращает фиксированную оценку."""
     calls: list[dict] = []
 
-    def _fake(session, *, resume_id, resume_text, vacancy_id, vacancy_text):
+    def _fake(*, resume_id, resume_text, vacancy_id, vacancy_text):
         calls.append({"resume_id": resume_id, "vacancy_id": vacancy_id})
         from backend.db import repository as repo
 
-        return repo.upsert_vacancy_match(
-            session,
-            resume_id=resume_id,
-            vacancy_id=vacancy_id,
-            overall_score=77 + len(calls),
-            confidence=90,
-            breakdown={
-                "role_match": 90,
-                "skills_match": 75,
-                "seniority_match": 85,
-                "domain_match": 100,
-                "work_format_match": 100,
-            },
-            explanation="Подходит по стеку, не хватает k8s",
-            matching_skills=[
-                {
-                    "skill": "python",
-                    "importance": "critical",
-                    "evidence": "В резюме есть Python.",
-                }
-            ],
-            missing_skills=[
-                {
-                    "skill": "k8s",
-                    "importance": "important",
-                    "evidence": "В резюме не указан.",
-                }
-            ],
-            strengths=["Совпадает основной стек."],
-            risks=["Опыт с Kubernetes в резюме не указан."],
-            model="reasoning/model",
-        )
+        with session_scope() as session:
+            return repo.upsert_vacancy_match(
+                session,
+                resume_id=resume_id,
+                vacancy_id=vacancy_id,
+                overall_score=77 + len(calls),
+                confidence=90,
+                breakdown={
+                    "role_match": 90,
+                    "skills_match": 75,
+                    "seniority_match": 85,
+                    "domain_match": 100,
+                    "work_format_match": 100,
+                },
+                explanation="Подходит по стеку, не хватает k8s",
+                matching_skills=[
+                    {
+                        "skill": "python",
+                        "importance": "critical",
+                        "evidence": "В резюме есть Python.",
+                    }
+                ],
+                missing_skills=[
+                    {
+                        "skill": "k8s",
+                        "importance": "important",
+                        "evidence": "В резюме не указан.",
+                    }
+                ],
+                strengths=["Совпадает основной стек."],
+                risks=["Опыт с Kubernetes в резюме не указан."],
+                model="reasoning/model",
+            )
 
     monkeypatch.setattr(match_service, "match_single", _fake)
     return calls
@@ -99,8 +101,9 @@ def test_solo_match_runs_llm_then_serves_cache(api_client, stub_llm):
     ).json()["id"]
 
     r = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
-    assert r.status_code == 200, r.text
-    body = r.json()
+    job = await_llm_job(api_client, token, r)
+    assert job["status"] == "done"
+    body = job["match"]
     assert body["overall_score"] == 78
     assert body["confidence"] == 90
     assert body["breakdown"]["role_match"] == 90
@@ -114,14 +117,16 @@ def test_solo_match_runs_llm_then_serves_cache(api_client, stub_llm):
 
     # повторный POST без force — из БД, без вызова LLM
     again = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
+    assert again.status_code == 200
     assert again.json()["cached"] is True
     assert again.json()["overall_score"] == 78
     assert len(stub_llm) == 1
 
     # force=true — новый вызов и новая оценка
     forced = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}?force=true", headers=_auth(token))
-    assert forced.json()["overall_score"] == 79
-    assert forced.json()["cached"] is False
+    forced_job = await_llm_job(api_client, token, forced)
+    assert forced_job["match"]["overall_score"] == 79
+    assert forced_job["match"]["cached"] is False
     assert len(stub_llm) == 2
 
     # GET отдаёт сохранённую оценку
@@ -148,8 +153,7 @@ def test_solo_match_404_and_auth(api_client, stub_llm):
 
 
 def test_match_single_end_to_end(api_client, monkeypatch):
-    """Реальный match_service.match_single со stubbed OpenRouterClient:
-    extraction → calculate_overall_score → vacancy_matches → API response."""
+    """Реальный match_service.match_single со stubbed interactive client."""
     from tg_jobs_parser.ai.clients.openrouter import LLMUsage
     from tg_jobs_parser.ai.schema import (
         MatchBreakdown,
@@ -158,9 +162,6 @@ def test_match_single_end_to_end(api_client, monkeypatch):
     )
 
     class _FakeClient:
-        def __init__(self, ai):
-            pass
-
         def match_with_fallback(self, *, resume_text, vacancy_text):
             extraction = VacancyMatchExtraction(
                 confidence=88,
@@ -191,18 +192,16 @@ def test_match_single_end_to_end(api_client, monkeypatch):
             )
             return extraction, LLMUsage(model="m1")
 
-        def close(self):
-            pass
-
-    monkeypatch.setattr(match_service, "OpenRouterClient", _FakeClient)
+    monkeypatch.setattr(match_service, "get_interactive_client", lambda: _FakeClient())
 
     token = _register(api_client, "a@example.com")
     vid = _add_vacancy()
     rid = api_client.post("/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}).json()["id"]
 
     r = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
-    assert r.status_code == 200, r.text
-    body = r.json()
+    job = await_llm_job(api_client, token, r)
+    assert job["status"] == "done", job
+    body = job["match"]
     # 90*0.3 + 70*0.35 + 80*0.2 + 100*0.1 + 100*0.05 = 82.5 → 82 (banker's round)
     assert body["overall_score"] == 82
     assert body["confidence"] == 88
@@ -221,8 +220,9 @@ def test_solo_match_reports_llm_failure(api_client, monkeypatch):
     rid = api_client.post("/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}).json()["id"]
 
     r = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
-    assert r.status_code == 502
-    assert "OpenRouter" in r.json()["detail"]
+    job = await_llm_job(api_client, token, r)
+    assert job["status"] == "error"
+    assert "OpenRouter" in (job.get("error_message") or "")
 
 
 def test_match_model_falls_back_to_parse_model():

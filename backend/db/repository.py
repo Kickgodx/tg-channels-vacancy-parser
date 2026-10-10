@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.models import (
     CoverLetterRow,
+    LlmJobRow,
     ParseRunRow,
     ResumeRow,
     SavedFilterRow,
@@ -573,3 +574,92 @@ def delete_cover_letter(session: Session, *, resume_id: int, vacancy_id: str) ->
     session.delete(row)
     session.flush()
     return True
+
+
+_ACTIVE_LLM_STATUSES = ("queued", "running")
+
+
+def create_llm_job(
+    session: Session,
+    *,
+    user_id: int,
+    kind: str,
+    resume_id: int,
+    vacancy_id: str,
+    force: bool = False,
+    params: dict | None = None,
+) -> LlmJobRow:
+    row = LlmJobRow(
+        user_id=user_id,
+        kind=kind,
+        resume_id=resume_id,
+        vacancy_id=vacancy_id,
+        status="queued",
+        force=force,
+        params=params,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def get_llm_job(session: Session, job_id: uuid.UUID) -> LlmJobRow | None:
+    return session.get(LlmJobRow, job_id)
+
+
+def find_active_llm_job(
+    session: Session,
+    *,
+    user_id: int,
+    kind: str,
+    resume_id: int,
+    vacancy_id: str,
+) -> LlmJobRow | None:
+    return session.scalar(
+        select(LlmJobRow)
+        .where(
+            LlmJobRow.user_id == user_id,
+            LlmJobRow.kind == kind,
+            LlmJobRow.resume_id == resume_id,
+            LlmJobRow.vacancy_id == vacancy_id,
+            LlmJobRow.status.in_(_ACTIVE_LLM_STATUSES),
+        )
+        .order_by(LlmJobRow.created_at.desc())
+        .limit(1)
+    )
+
+
+def count_active_llm_jobs(session: Session, *, user_id: int) -> int:
+    return int(
+        session.scalar(
+            select(func.count())
+            .select_from(LlmJobRow)
+            .where(
+                LlmJobRow.user_id == user_id,
+                LlmJobRow.status.in_(_ACTIVE_LLM_STATUSES),
+            )
+        )
+        or 0
+    )
+
+
+def set_llm_job_status(
+    session: Session,
+    job_id: uuid.UUID,
+    status: str,
+    *,
+    error_message: str | None = None,
+) -> LlmJobRow | None:
+    row = session.get(LlmJobRow, job_id)
+    if row is None:
+        return None
+    now = datetime.now(UTC)
+    row.status = status
+    if status == "running" and row.started_at is None:
+        row.started_at = now
+    if status in ("done", "error"):
+        row.finished_at = now
+        if error_message is not None:
+            row.error_message = error_message
+    session.flush()
+    return row

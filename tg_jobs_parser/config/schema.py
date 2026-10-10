@@ -212,7 +212,19 @@ class AiConfig(BaseModel):
         default=1,
         ge=1,
         le=16,
-        description="Параллельные LLM-запросы к OpenRouter.",
+        description="Параллельные LLM-запросы к OpenRouter (парсинг).",
+    )
+    interactive_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=16,
+        description="Параллельные фоновые джобы мэтчинга и сопроводительных писем.",
+    )
+    interactive_per_user_limit: int = Field(
+        default=2,
+        ge=1,
+        le=16,
+        description="Сколько LLM-джоб (queued+running) одновременно на одного пользователя.",
     )
     requests_per_minute: float = Field(
         default=12.0,

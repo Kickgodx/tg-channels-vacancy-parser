@@ -270,6 +270,28 @@ export interface CoverLetter {
   cached: boolean;
 }
 
+export type LlmJobKind = "match" | "cover_letter";
+export type LlmJobStatus = "queued" | "running" | "done" | "error";
+
+export interface LlmJobAccepted {
+  job_id: string;
+  status: string;
+}
+
+export interface LlmJob {
+  id: string;
+  kind: LlmJobKind;
+  status: LlmJobStatus;
+  resume_id: number;
+  vacancy_id: string;
+  error_message?: string | null;
+  match?: VacancyMatch | null;
+  cover_letter?: CoverLetter | null;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
+
 export type VacancyImportStatus = "created" | "exists" | "not_vacancy" | "error";
 
 export interface VacancyImportItem {

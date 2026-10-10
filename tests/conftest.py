@@ -57,9 +57,13 @@ def api_client(monkeypatch, tmp_path, default_test_config):
     reset_engine()
 
     from backend.main import app
+    from backend.services.interactive_llm import reset_interactive_client
+    from backend.services.llm_job_service import llm_job_runner
 
     init_db()
     with TestClient(app) as c:
         yield c
+    llm_job_runner.reset()
+    reset_interactive_client()
     reset_engine()
     get_settings.cache_clear()

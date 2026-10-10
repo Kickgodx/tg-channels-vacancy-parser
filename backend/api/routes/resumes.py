@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db
@@ -12,13 +13,19 @@ from backend.observability import record_cover_letter, record_match
 from backend.schemas import (
     CoverLetterOut,
     CoverLetterRequest,
+    LlmJobAccepted,
     ResumeCreate,
     ResumeListResponse,
     ResumeOut,
     ResumeUpdate,
     VacancyMatchOut,
 )
-from backend.services import cover_letter_service, match_service
+from backend.services.llm_job_service import (
+    KIND_COVER_LETTER,
+    KIND_MATCH,
+    LlmJobUserLimitError,
+    llm_job_runner,
+)
 from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
 
 _LOG = logging.getLogger(__name__)
@@ -122,16 +129,23 @@ def get_vacancy_match(
     return _match_to_out(row, cached=True)
 
 
-@resumes_router.post("/{resume_id}/match/{vacancy_id}", response_model=VacancyMatchOut)
+@resumes_router.post(
+    "/{resume_id}/match/{vacancy_id}",
+    response_model=None,
+    responses={
+        200: {"model": VacancyMatchOut},
+        202: {"model": LlmJobAccepted},
+    },
+)
 def match_single_vacancy(
     resume_id: int,
     vacancy_id: str,
     force: bool = False,
     db: Session = Depends(get_db),
     user: UserRow = Depends(get_current_user),
-) -> VacancyMatchOut:
-    """Оценить одну вакансию синхронно. Без ``force`` возвращает сохранённую оценку."""
-    resume = _get_own_resume(db, resume_id, user)
+):
+    """Кэш без force → 200; иначе фоновая джоба → 202 ``{job_id}``."""
+    _get_own_resume(db, resume_id, user)
     vacancy = repo.get_vacancy_row(db, vacancy_id)
     if vacancy is None:
         raise HTTPException(status_code=404, detail="Vacancy not found")
@@ -141,17 +155,17 @@ def match_single_vacancy(
             record_match(outcome="cached")
             return _match_to_out(existing, cached=True)
     try:
-        row = match_service.match_single(
-            db,
+        result = llm_job_runner.enqueue(
+            user_id=user.id,
+            kind=KIND_MATCH,
             resume_id=resume_id,
-            resume_text=resume.text,
             vacancy_id=vacancy_id,
-            vacancy_text=vacancy.cleaned_text or vacancy.raw_text or "",
+            force=force,
         )
-    except Exception as e:
-        _LOG.warning("Матчинг резюме %s ↔ вакансия %s не удался: %s", resume_id, vacancy_id, e)
-        raise HTTPException(status_code=502, detail=f"LLM: {e}") from e
-    return _match_to_out(row, cached=False)
+    except LlmJobUserLimitError as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
+    body = LlmJobAccepted(job_id=result.job_id, status="queued")
+    return JSONResponse(status_code=202, content=body.model_dump(mode="json"))
 
 
 def _letter_to_out(row: CoverLetterRow, *, cached: bool) -> CoverLetterOut:
@@ -181,7 +195,14 @@ def get_cover_letter(
     return _letter_to_out(row, cached=True)
 
 
-@resumes_router.post("/{resume_id}/cover-letter/{vacancy_id}", response_model=CoverLetterOut)
+@resumes_router.post(
+    "/{resume_id}/cover-letter/{vacancy_id}",
+    response_model=None,
+    responses={
+        200: {"model": CoverLetterOut},
+        202: {"model": LlmJobAccepted},
+    },
+)
 def generate_cover_letter(
     resume_id: int,
     vacancy_id: str,
@@ -189,9 +210,9 @@ def generate_cover_letter(
     force: bool = False,
     db: Session = Depends(get_db),
     user: UserRow = Depends(get_current_user),
-) -> CoverLetterOut:
-    """Сгенерировать письмо синхронно. Без ``force`` возвращает сохранённый текст."""
-    resume = _get_own_resume(db, resume_id, user)
+):
+    """Кэш без force → 200; иначе фоновая джоба → 202 ``{job_id}``."""
+    _get_own_resume(db, resume_id, user)
     vacancy = repo.get_vacancy_row(db, vacancy_id)
     if vacancy is None:
         raise HTTPException(status_code=404, detail="Vacancy not found")
@@ -203,19 +224,18 @@ def generate_cover_letter(
     tone = body.tone if body else "neutral"
     extra_notes = body.extra_notes if body else None
     try:
-        row = cover_letter_service.generate_single(
-            db,
+        result = llm_job_runner.enqueue(
+            user_id=user.id,
+            kind=KIND_COVER_LETTER,
             resume_id=resume_id,
-            resume_text=resume.text,
             vacancy_id=vacancy_id,
-            vacancy_text=vacancy.cleaned_text or vacancy.raw_text or "",
-            tone=tone,
-            extra_notes=extra_notes,
+            force=force,
+            params={"tone": tone, "extra_notes": extra_notes},
         )
-    except Exception as e:
-        _LOG.warning("Письмо резюме %s ↔ вакансия %s не удалось: %s", resume_id, vacancy_id, e)
-        raise HTTPException(status_code=502, detail=f"LLM: {e}") from e
-    return _letter_to_out(row, cached=False)
+    except LlmJobUserLimitError as e:
+        raise HTTPException(status_code=429, detail=str(e)) from e
+    accepted = LlmJobAccepted(job_id=result.job_id, status="queued")
+    return JSONResponse(status_code=202, content=accepted.model_dump(mode="json"))
 
 
 @resumes_router.delete("/{resume_id}/cover-letter/{vacancy_id}", status_code=204)
