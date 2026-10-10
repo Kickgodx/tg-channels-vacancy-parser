@@ -20,3 +20,10 @@ def test_extract_ai_russian():
     text = "Инженер ИИ, искусственный интеллект, Москва"
     specs = extract_specializations(text, DEFAULT_SPECIALIZATIONS)
     assert "AI" in specs
+
+
+def test_extract_hh_role_names():
+    assert "Тестировщик" in extract_specializations("Ищем тестировщика", DEFAULT_SPECIALIZATIONS)
+    assert "Программист, разработчик" in extract_specializations(
+        "Вакансия: программист, удалёнка", DEFAULT_SPECIALIZATIONS
+    )

@@ -14,6 +14,7 @@ REASONING_EFFORTS = ("max", "xhigh", "high", "medium", "low", "minimal", "none")
 
 DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
     "QA": ["qa", "quality assurance", "тестировщик", "тестирование"],
+    "Тестировщик": ["тестировщик", "tester"],
     "Manual QA": ["manual qa", "ручной тестировщик"],
     "AQA": [
         "aqa",
@@ -56,6 +57,7 @@ DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
         "software developer",
         "инженер-программист",
     ],
+    "Программист, разработчик": ["программист, разработчик", "программист"],
     "Go": ["go", "golang", "go developer", "golang developer"],
     "Golang": ["golang", "go lang"],
     "Frontend": ["frontend", "front-end", "front end", "фронтенд", "react developer"],

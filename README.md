@@ -265,6 +265,9 @@ uvicorn backend.main:app --reload --port 8000
 Вакансии с HH (`source_channel = "hh"`) появляются после admin-sync
 (`/hh` или `POST /hh/sync`): поля берутся из API без LLM, дедуп мультигорода
 как в MVP hhparser, TTL вакансий — общий `retention.vacancy_ttl_days`.
+Роли HH (`Тестировщик`, `Программист, разработчик`) пишутся в
+`detected_specializations` как есть и дополнительно как `QA` /
+`Software Engineer` — оба варианта доступны в фильтрах UI.
 На вкладке `/hh` окно sync задаётся в интерфейсе: All, 7 / 14 / 30 дней или диапазон дат.
 Кэш короткой выдачи (`hh_listings`) живёт `hh.listing_ttl_days` и не даёт
 повторно дергать detail для уже загруженных id.

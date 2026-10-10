@@ -59,6 +59,24 @@ def test_detail_to_vacancy_fields():
     assert v.extraction_source == "hh_api"
     assert v.post_url == "https://hh.ru/vacancy/42"
     assert "pytest" in v.cleaned_text.lower() or "AQA" in v.cleaned_text
+    assert "Тестировщик" in v.detected_specializations
+    assert "QA" in v.detected_specializations
+
+
+def test_detail_to_vacancy_developer_role_dual_tag():
+    detail = VacancyDetail.model_validate(
+        {
+            "id": "96",
+            "name": "Python developer",
+            "description": "<p>Backend</p>",
+            "alternate_url": "https://hh.ru/vacancy/96",
+            "published_at": "2026-10-01T12:00:00+0300",
+            "professional_roles": [{"id": "96", "name": "Программист, разработчик"}],
+        }
+    )
+    v = detail_to_vacancy(detail)
+    assert "Программист, разработчик" in v.detected_specializations
+    assert "Software Engineer" in v.detected_specializations
 
 
 def test_short_to_vacancy_duplicate_flags():

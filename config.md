@@ -109,7 +109,7 @@ Env (не yaml): `LLM_JOB_BACKEND=inprocess|rq`, `REDIS_URL`, `LLM_WORKER_METRIC
 | **`api_base` / `host`** | Базовый URL API и query `host`. |
 | **`app_name` / `app_version`** | Часть `User-Agent` / `HH-User-Agent`. |
 | **`search.text`** | Текст поиска (дефолт — AQA/Python как в MVP hhparser). |
-| **`search.professional_role`** | Роли HH (124 = тестировщик, 96 = разработчик). |
+| **`search.professional_role`** | Роли HH (124 = тестировщик, 96 = разработчик). Имена ролей попадают в `detected_specializations` и дублируются в `QA` / `Software Engineer`; оба набора есть в `DEFAULT_SPECIALIZATIONS` для фильтров UI. |
 | **`search.per_page`** | Размер страницы (макс. 100). |
 
 ---

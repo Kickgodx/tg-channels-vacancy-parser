@@ -130,11 +130,21 @@ def _contact_from(contacts: Contacts | None) -> str | None:
     return "; ".join(parts) if parts else None
 
 
+# HH professional_role name → доп. каноническая специализация для фильтров UI.
+_HH_ROLE_ALIASES: dict[str, str] = {
+    "Тестировщик": "QA",
+    "Программист, разработчик": "Software Engineer",
+}
+
+
 def _specializations(detail: VacancyDetail | VacancyShort) -> list[str]:
     names: list[str] = []
     for role in detail.professional_roles or []:
         if role.name and role.name not in names:
             names.append(role.name)
+        alias = _HH_ROLE_ALIASES.get(role.name or "")
+        if alias and alias not in names:
+            names.append(alias)
     if not names:
         names = ["AQA", "Python"]
     return names
