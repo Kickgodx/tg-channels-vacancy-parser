@@ -20,3 +20,14 @@ scrape_configs:
     relabel_configs:
       - source_labels: [__meta_dns_name]
         target_label: dns_name
+
+  - job_name: tg-jobs-parse-worker
+    dns_sd_configs:
+      - names:
+          - parse-worker
+        type: A
+        port: 9102
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__meta_dns_name]
+        target_label: dns_name

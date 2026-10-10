@@ -1,4 +1,4 @@
-"""Подключение к Redis и очередь RQ ``llm``."""
+"""Подключение к Redis и очереди RQ ``llm`` / ``parse``."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any
 from backend.settings import get_settings
 
 LLM_QUEUE_NAME = "llm"
+PARSE_QUEUE_NAME = "parse"
 
 _connection: Any | None = None
 
@@ -48,5 +49,22 @@ def llm_queue_length() -> int | None:
         if settings.llm_job_backend_normalized != "rq" or not (settings.redis_url or "").strip():
             return None
         return int(get_llm_queue().count)
+    except Exception:
+        return None
+
+
+def get_parse_queue():
+    from rq import Queue
+
+    return Queue(PARSE_QUEUE_NAME, connection=get_redis_connection())
+
+
+def parse_queue_depth() -> int | None:
+    """Число jobs в очереди parse RQ; ``None`` если Redis недоступен / не rq-режим."""
+    try:
+        settings = get_settings()
+        if settings.parse_job_backend_normalized != "rq" or not (settings.redis_url or "").strip():
+            return None
+        return int(get_parse_queue().count)
     except Exception:
         return None

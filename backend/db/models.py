@@ -43,6 +43,10 @@ class ParseRunRow(Base):
     parse_warnings: Mapped[str | None] = mapped_column(Text, nullable=True)
     metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rq_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    progress_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class ExchangeRateRow(Base):

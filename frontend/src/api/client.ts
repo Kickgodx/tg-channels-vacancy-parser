@@ -122,10 +122,14 @@ const RUN_TERMINAL: ReadonlySet<RunStatus> = new Set([
   "cancelled",
 ]);
 
-async function pollRunUntilTerminal(runId: string): Promise<RunDetail> {
+async function pollRunUntilTerminal(
+  runId: string,
+  onProgress?: (data: ProgressEvent) => void,
+): Promise<RunDetail> {
   const deadline = Date.now() + RUN_SSE_MAX_MS;
   while (Date.now() < deadline) {
     const run = await request<RunDetail>(`/runs/${runId}`);
+    if (run.progress) onProgress?.(run.progress);
     if (RUN_TERMINAL.has(run.status)) return run;
     await sleep(RUN_POLL_MS);
   }
@@ -510,7 +514,7 @@ export const api = {
       settled = true;
       window.clearTimeout(timer);
       es.close();
-      void pollRunUntilTerminal(runId).then(
+      void pollRunUntilTerminal(runId, onProgress).then(
         () => {
           if (!cancelled) onDone();
         },

@@ -52,9 +52,20 @@ class Settings(BaseSettings):
     llm_job_stuck_minutes: int = Field(default=15, alias="LLM_JOB_STUCK_MINUTES")
     llm_rq_job_timeout_seconds: int = Field(default=600, alias="LLM_RQ_JOB_TIMEOUT_SECONDS")
 
+    # Parse jobs: inprocess (ThreadPool в API) или rq (Redis Queue + parse-worker).
+    parse_job_backend: str = Field(default="inprocess", alias="PARSE_JOB_BACKEND")
+    parse_worker_metrics_port: int = Field(default=9102, alias="PARSE_WORKER_METRICS_PORT")
+    parse_job_stuck_minutes: int = Field(default=30, alias="PARSE_JOB_STUCK_MINUTES")
+    parse_rq_job_timeout_seconds: int = Field(default=43200, alias="PARSE_RQ_JOB_TIMEOUT_SECONDS")
+
     @property
     def llm_job_backend_normalized(self) -> str:
         v = (self.llm_job_backend or "inprocess").strip().lower()
+        return v if v in ("inprocess", "rq") else "inprocess"
+
+    @property
+    def parse_job_backend_normalized(self) -> str:
+        v = (self.parse_job_backend or "inprocess").strip().lower()
         return v if v in ("inprocess", "rq") else "inprocess"
 
     @property

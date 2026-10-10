@@ -130,6 +130,15 @@ export default function RunPage() {
     enabled: !!runId,
   });
 
+  useEffect(() => {
+    const snap = run.data?.progress;
+    if (!snap) return;
+    setProgress(snap);
+    if (snap.vacancies_preview?.length) {
+      setLiveVacancies(snap.vacancies_preview as Vacancy[]);
+    }
+  }, [run.data?.id, run.data?.progress_updated_at, run.data?.progress]);
+
   const runFinished =
     run.data?.status === "completed" ||
     run.data?.status === "failed" ||
@@ -162,7 +171,13 @@ export default function RunPage() {
   }, [run.data?.started_at, run.data?.status]);
 
   useEffect(() => {
-    if (!runId || (run.data?.status !== "running" && run.data?.status !== "pending")) return;
+    const status = run.data?.status;
+    if (
+      !runId ||
+      (status !== "queued" && status !== "pending" && status !== "running")
+    ) {
+      return;
+    }
     return api.subscribeRunEvents(
       runId,
       (snap) => {
@@ -191,7 +206,10 @@ export default function RunPage() {
     : liveVacancies.map(toVacancyListItem);
   const vacancyTotal = vacancies.data?.total ?? progress?.vacancies_found ?? displayVacancies.length;
 
-  const isActive = run.data?.status === "running" || run.data?.status === "pending";
+  const isActive =
+    run.data?.status === "queued" ||
+    run.data?.status === "running" ||
+    run.data?.status === "pending";
   const actionableWarnings = filterActionableWarnings(run.data?.parse_warnings);
 
   return (
@@ -226,6 +244,7 @@ export default function RunPage() {
 
             {isActive && (
               <>
+                {run.data.status === "queued" && <p>В очереди…</p>}
                 <div className="progress-bar">
                   <span style={{ width: `${pct}%` }} />
                 </div>
@@ -244,7 +263,8 @@ export default function RunPage() {
                 {progress?.phase === "post_processing_done" && run.data.status === "running" && (
                   <p>Сохранение в базу…</p>
                 )}
-                {run.data.status === "running" && progress?.phase !== "post_processing_done" && (
+                {(run.data.status === "queued" || run.data.status === "pending" ||
+                  (run.data.status === "running" && progress?.phase !== "post_processing_done")) && (
                   <>
                     <button className="secondary" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
                       {cancel.isPending ? "Отмена…" : "Отменить"}
