@@ -32,7 +32,7 @@
       },
       "targets": [
         {
-          "expr": "llm_rq_queue_jobs{queue=\"llm\"}",
+          "expr": "llm_rq_queue_jobs{queue=\"llm\", job=\"tg-jobs-backend\"}",
           "legendFormat": "RQ depth",
           "refId": "A"
         }
@@ -54,7 +54,7 @@
       },
       "targets": [
         {
-          "expr": "llm_jobs_by_status",
+          "expr": "llm_jobs_by_status{job=\"tg-jobs-backend\"}",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -169,7 +169,7 @@
       },
       "targets": [
         {
-          "expr": "llm_job_sse_connections",
+          "expr": "llm_job_sse_connections{job=\"tg-jobs-backend\"}",
           "legendFormat": "SSE connections",
           "refId": "A"
         }

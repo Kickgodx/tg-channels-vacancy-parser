@@ -12,6 +12,7 @@ scrape ``/metrics``. При недоступной БД коллектор мо�
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import UTC, datetime
 
@@ -538,4 +539,7 @@ class _DBStatsCollector:
         )
 
 
-REGISTRY.register(_DBStatsCollector())
+# На llm-worker COUNT по всем таблицам не нужен: лишний RAM/нагрузка на Postgres
+# при scale и дубли рядов в Prometheus. Счётчики LLM-джоб регистрируются выше всегда.
+if os.environ.get("TG_JOBS_METRICS_ROLE", "backend").strip().lower() != "worker":
+    REGISTRY.register(_DBStatsCollector())

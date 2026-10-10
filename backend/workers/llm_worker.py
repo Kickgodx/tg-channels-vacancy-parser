@@ -35,6 +35,11 @@ def main() -> None:
     except Exception as e:
         log.warning("OTel для llm-worker не включён: %s", e)
 
+    # Без fork (SimpleWorker): метрики в том же процессе, что :9101; меньше пик RAM
+    # (Worker fork’ает work horse на каждую джобу — COW-копия + счётчики теряются).
+    # DB COUNT-collector только на backend — воркерам не нужен scrape Postgres.
+    os.environ["TG_JOBS_METRICS_ROLE"] = "worker"
+
     metrics_port = settings.llm_worker_metrics_port
     try:
         from prometheus_client import start_http_server
@@ -64,13 +69,13 @@ def main() -> None:
     except Exception as e:
         log.warning("Recover on start failed: %s", e)
 
-    from rq import Worker
+    from rq import SimpleWorker
 
     conn = get_redis_connection()
-    log.info("llm-worker listening queue=%s", LLM_QUEUE_NAME)
+    log.info("llm-worker listening queue=%s (SimpleWorker)", LLM_QUEUE_NAME)
     name = _worker_name()
     log.info("RQ worker name=%s", name)
-    worker = Worker([LLM_QUEUE_NAME], connection=conn, name=name)
+    worker = SimpleWorker([LLM_QUEUE_NAME], connection=conn, name=name)
     try:
         worker.work(with_scheduler=False)
     finally:

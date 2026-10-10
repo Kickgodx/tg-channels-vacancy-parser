@@ -152,9 +152,10 @@ confidence оценки, пояснение и списки совпадающи
   `tg-jobs-llm-worker`). UI ждёт через SSE `GET /llm-jobs/{id}/events`
   (fallback — poll). Параллелизм: `--scale llm-worker=N` и
   `ai.interactive_per_user_limit`; `ai.interactive_concurrency` — для
-  inprocess / ориентир scale. Метрики воркера — контейнерный порт 9101
-  (Prometheus: `llm-worker:9101` в Docker-сети; на хост не пробрасывается,
-  чтобы `--scale` не конфликтовал). Локально без Redis: `LLM_JOB_BACKEND=inprocess`.
+  inprocess / ориентир scale. Воркер — RQ ``SimpleWorker`` (без fork: меньше
+  пик RAM, метрики в том же процессе). Метрики — контейнерный порт 9101
+  (Prometheus `dns_sd` по имени `llm-worker`, все реплики; на хост не
+  пробрасывается). Локально без Redis: `LLM_JOB_BACKEND=inprocess`.
 - Модель матчинга задаётся отдельно от модели парсинга: `ai.match_model`
   (+ `ai.match_reasoning_enabled` для reasoning-моделей) — качество здесь
   важнее скорости, вызовов на порядок меньше. Глубина рассуждений —

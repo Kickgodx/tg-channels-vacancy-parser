@@ -8,7 +8,15 @@ scrape_configs:
       - targets: ["backend:8000"]
     metrics_path: /metrics
 
+  # Все реплики llm-worker (compose DNS отдаёт A-записи по имени сервиса).
+  # static_configs на llm-worker:9101 при --scale скрейпит только один контейнер.
   - job_name: tg-jobs-llm-worker
-    static_configs:
-      - targets: ["llm-worker:9101"]
+    dns_sd_configs:
+      - names:
+          - llm-worker
+        type: A
+        port: 9101
     metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__meta_dns_name]
+        target_label: dns_name

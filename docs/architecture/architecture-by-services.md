@@ -62,10 +62,10 @@ flowchart LR
 |--------|------|------|
 | frontend | 5173 | Web UI |
 | backend | 9000→8000 | API, парсинг, JWT, `/metrics`, enqueue LLM jobs |
-| llm-worker | 9101 (только Docker-сеть) | RQ worker: мэтч/письма; `/metrics` для Prometheus |
+| llm-worker | 9101 (только Docker-сеть) | RQ `SimpleWorker`: мэтч/письма; `/metrics` без DB COUNT-collector |
 | redis | 6379 | Очередь RQ `llm` + pub/sub статуса SSE |
 | postgres | 5432 | Вакансии, runs, users, FX, cache, `llm_jobs` |
-| prometheus | 9090 | Scrape backend + llm-worker |
+| prometheus | 9090 | Scrape backend + все реплики llm-worker (`dns_sd`) |
 | grafana | 3000 | Дашборды / Explore (в т.ч. **LLM jobs / queue**) |
 | alloy | 12345 | Логи Docker + OTLP → Loki/Tempo |
 | loki | 3100 | Логи |

@@ -69,8 +69,9 @@ services:
         condition: service_healthy
 
   # Параллелизм LLM = число реплик: docker compose up --scale llm-worker=4
-  # Метрики :9101 только в Docker-сети (Prometheus scrape llm-worker:9101);
+  # Метрики :9101 только в Docker-сети (Prometheus dns_sd → все реплики);
   # host port mapping убран — иначе --scale конфликтует по 9101 на хосте.
+  # Entrypoint: SimpleWorker (без fork) — метрики и экономия RAM.
   llm-worker:
     build:
       context: .
