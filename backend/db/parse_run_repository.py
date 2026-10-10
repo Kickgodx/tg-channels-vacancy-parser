@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from backend.db.models import ParseRunRow
@@ -18,12 +18,99 @@ from backend.schemas import RunStatus
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.parse_result import ParseResult
 
+_ACTIVE_PARSE_STATUSES = frozenset({"queued", "running"})
 
-def create_parse_run(session: Session, *, config_snapshot: dict) -> ParseRunRow:
-    row = ParseRunRow(status="pending", config_snapshot=config_snapshot)
+
+def create_parse_run(session: Session, *, config_snapshot: dict, status: str = "queued") -> ParseRunRow:
+    row = ParseRunRow(status=status, config_snapshot=config_snapshot)
     session.add(row)
     session.flush()
     return row
+
+
+def has_active_parse_run(session: Session) -> bool:
+    n = session.scalar(
+        select(func.count()).select_from(ParseRunRow).where(ParseRunRow.status.in_(_ACTIVE_PARSE_STATUSES))
+    )
+    return int(n or 0) > 0
+
+
+def claim_parse_run(session: Session, run_id: uuid.UUID) -> ParseRunRow | None:
+    now = datetime.now(UTC)
+    result = session.execute(
+        update(ParseRunRow)
+        .where(ParseRunRow.id == run_id, ParseRunRow.status == "queued")
+        .values(status="running", started_at=now)
+    )
+    if (result.rowcount or 0) != 1:
+        return None
+    session.flush()
+    return session.get(ParseRunRow, run_id)
+
+
+def patch_run_progress(session: Session, run_id: uuid.UUID, progress: dict) -> None:
+    row = session.get(ParseRunRow, run_id)
+    if row is None:
+        return
+    row.progress = progress
+    row.progress_updated_at = datetime.now(UTC)
+    session.flush()
+
+
+def request_parse_run_cancel(session: Session, run_id: uuid.UUID) -> ParseRunRow | None:
+    row = session.get(ParseRunRow, run_id)
+    if row is None:
+        return None
+    if row.status in ("completed", "failed", "cancelled"):
+        return None
+    row.cancel_requested = True
+    if row.status == "queued":
+        row.status = "cancelled"
+        row.finished_at = datetime.now(UTC)
+    session.flush()
+    return row
+
+
+def is_parse_run_cancel_requested(session: Session, run_id: uuid.UUID) -> bool:
+    row = session.get(ParseRunRow, run_id)
+    return bool(row and row.cancel_requested)
+
+
+def set_parse_run_rq_job_id(session: Session, run_id: uuid.UUID, rq_job_id: str | None) -> None:
+    row = session.get(ParseRunRow, run_id)
+    if row is None:
+        return
+    row.rq_job_id = rq_job_id
+    session.flush()
+
+
+def reset_parse_run_to_queued(session: Session, run_id: uuid.UUID) -> None:
+    row = session.get(ParseRunRow, run_id)
+    if row is None:
+        return
+    row.status = "queued"
+    row.started_at = None
+    row.finished_at = None
+    row.rq_job_id = None
+    row.error_message = None
+    if row.cancel_requested:
+        row.status = "cancelled"
+        row.finished_at = datetime.now(UTC)
+        return
+    session.flush()
+
+
+def list_parse_runs_by_status(
+    session: Session, status: str, *, older_than: datetime | None = None
+) -> list[ParseRunRow]:
+    stmt = select(ParseRunRow).where(ParseRunRow.status == status)
+    if older_than is not None:
+        if status == "running":
+            heartbeat = func.coalesce(ParseRunRow.progress_updated_at, ParseRunRow.started_at, ParseRunRow.created_at)
+            stmt = stmt.where(heartbeat < older_than)
+        else:
+            stmt = stmt.where(ParseRunRow.created_at < older_than)
+    return list(session.scalars(stmt))
 
 
 def get_parse_run(session: Session, run_id: uuid.UUID) -> ParseRunRow | None:
