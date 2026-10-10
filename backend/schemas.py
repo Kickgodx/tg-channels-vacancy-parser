@@ -13,7 +13,7 @@ from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 
-RunStatus = Literal["pending", "running", "completed", "cancelled", "failed"]
+RunStatus = Literal["pending", "queued", "running", "completed", "cancelled", "failed"]
 
 
 class RunCreateRequest(BaseModel):
@@ -46,6 +46,9 @@ class RunDetail(RunSummary):
     run_params: dict[str, Any] | None = None
     metrics: MetricsSummary | None = None
     error_message: str | None = None
+    progress: dict[str, Any] | None = None
+    progress_updated_at: datetime | None = None
+    cancel_requested: bool = False
 
 
 class ProgressEvent(BaseModel):

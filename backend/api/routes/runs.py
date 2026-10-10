@@ -96,6 +96,9 @@ def get_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> RunDetail:
         run_params=row.run_params,
         metrics=metrics_from_run(row),
         error_message=row.error_message,
+        progress=row.progress,
+        progress_updated_at=row.progress_updated_at,
+        cancel_requested=row.cancel_requested,
     )
 
 
