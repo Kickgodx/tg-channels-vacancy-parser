@@ -148,3 +148,45 @@ def test_parse_job_backend_normalized(monkeypatch):
     get_settings.cache_clear()
     assert get_settings().parse_job_backend_normalized == "rq"
     get_settings.cache_clear()
+
+
+def test_start_parse_run_inprocess_completes(api_client, monkeypatch):
+    import time
+
+    def fake_run_parse(config, **kwargs):
+        from tg_jobs_parser.models.metrics import MetricsSummary
+        from tg_jobs_parser.models.parse_result import ParseResult
+        from tg_jobs_parser.parse_progress import ParseProgressSnapshot
+
+        cb = kwargs.get("progress_callback")
+        if cb:
+            cb(ParseProgressSnapshot(1, 1, 0))
+        return ParseResult(
+            run_params={},
+            posts_fetched=1,
+            vacancies_all=[],
+            vacancies_unique=[],
+            parse_warnings="",
+            metrics=MetricsSummary(),
+        )
+
+    monkeypatch.setenv("PARSE_JOB_BACKEND", "inprocess")
+    get_settings.cache_clear()
+    monkeypatch.setattr("backend.workers.parse_tasks.run_parse", fake_run_parse)
+
+    r = api_client.post("/api/v1/runs", json={})
+    assert r.status_code == 202
+    body = r.json()
+    assert body["status"] == "queued"
+    run_id = body["run_id"]
+
+    deadline = time.monotonic() + 10.0
+    status = None
+    while time.monotonic() < deadline:
+        got = api_client.get(f"/api/v1/runs/{run_id}")
+        assert got.status_code == 200
+        status = got.json()["status"]
+        if status in ("completed", "failed", "cancelled"):
+            break
+        time.sleep(0.05)
+    assert status == "completed"

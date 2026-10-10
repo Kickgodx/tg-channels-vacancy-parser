@@ -71,7 +71,7 @@ def create_run(body: RunCreateRequest, db: Session = Depends(get_db)) -> RunCrea
         len(body.channels) if body.channels else len(config.sources.channels),
         config.ai.enabled,
     )
-    return RunCreateResponse(run_id=run_id, status="running")
+    return RunCreateResponse(run_id=run_id, status="queued")
 
 
 @router.get("", response_model=list[RunSummary])
