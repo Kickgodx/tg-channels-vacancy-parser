@@ -54,6 +54,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_SERVICE_NAME: tg-jobs-parser-backend
       LLM_JOB_BACKEND: rq
+      PARSE_JOB_BACKEND: rq
       REDIS_URL: redis://redis:6379/0
     env_file:
       - .env
@@ -94,6 +95,37 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Parse: один active run на БД; concurrency=1 (не scale). sessions/ — Telethon.
+  # Метрики :9102 в Docker-сети (Prometheus dns_sd).
+  parse-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    logging: *default-logging
+    command: ["tg-jobs-parse-worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
+      CONFIG_PATH: /app/config.yaml
+      PYTHONUNBUFFERED: "1"
+      LOG_DIR: ""
+      PARSE_JOB_BACKEND: rq
+      REDIS_URL: redis://redis:6379/0
+      PARSE_WORKER_METRICS_PORT: "9102"
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      OTEL_SERVICE_NAME: tg-jobs-parser-parse-worker
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./llm_models.yaml:/app/llm_models.yaml:ro
+      - ./sessions:/app/sessions
     depends_on:
       postgres:
         condition: service_healthy

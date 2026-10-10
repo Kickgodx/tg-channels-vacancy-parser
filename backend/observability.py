@@ -235,6 +235,17 @@ def record_llm_jobs_recover(*, from_status: str) -> None:
     LLM_JOBS_RECOVER.labels(from_status=from_status or "unknown").inc()
 
 
+PARSE_JOBS_RECOVER = Counter(
+    "parse_jobs_recover_total",
+    "Recover зависших parse-прогонов при старте worker",
+    labelnames=("from_status",),
+)
+
+
+def record_parse_jobs_recover(*, from_status: str) -> None:
+    PARSE_JOBS_RECOVER.labels(from_status=from_status or "unknown").inc()
+
+
 def set_llm_rq_queue_depth(count: int | None, *, queue: str = "llm") -> None:
     if count is None:
         return

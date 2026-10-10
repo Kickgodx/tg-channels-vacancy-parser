@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import fakeredis
 import pytest
+from rq import Queue
 
 from backend.db import parse_run_repository as pr
 from backend.db.models import ParseRunRow
 from backend.db.session import init_db, reset_engine, session_scope
 from backend.settings import get_settings
+from backend.workers.parse_tasks import run_parse_job
+from backend.workers.recover_parse import recover_stuck_parse_runs
 
 
 @pytest.fixture(autouse=True)
@@ -219,3 +222,109 @@ def test_cancel_running_sets_flag():
         assert row is not None
         assert row.cancel_requested is True
         assert row.status == "running"
+
+
+def test_reset_parse_run_to_queued_with_cancel_stays_cancelled():
+    with session_scope() as session:
+        rid = pr.create_parse_run(session, config_snapshot={}).id
+    with session_scope() as session:
+        claimed = pr.claim_parse_run(session, rid)
+        assert claimed is not None
+        pr.request_parse_run_cancel(session, rid)
+    with session_scope() as session:
+        pr.reset_parse_run_to_queued(session, rid)
+        row = pr.get_parse_run(session, rid)
+        assert row is not None
+        assert row.cancel_requested is True
+        assert row.status == "cancelled"
+        assert row.finished_at is not None
+
+
+def test_recover_stuck_running(fake_redis_for_parse, monkeypatch):
+    monkeypatch.setenv("PARSE_JOB_BACKEND", "rq")
+    monkeypatch.setenv("PARSE_JOB_STUCK_MINUTES", "1")
+    get_settings.cache_clear()
+
+    old = datetime.now(UTC) - timedelta(minutes=30)
+    with session_scope() as session:
+        row = pr.create_parse_run(session, config_snapshot={})
+        rid = row.id
+        claimed = pr.claim_parse_run(session, rid)
+        assert claimed is not None
+        claimed.created_at = old
+        claimed.started_at = old
+        claimed.progress_updated_at = old
+        session.flush()
+
+    q = Queue("parse", connection=fake_redis_for_parse)
+    before = q.count
+    n = recover_stuck_parse_runs()
+    assert n == 1
+    assert q.count == before + 1
+
+    with session_scope() as session:
+        row = pr.get_parse_run(session, rid)
+        assert row is not None
+        assert row.status == "queued"
+        assert row.rq_job_id
+        assert row.started_at is None
+
+
+def test_recover_skips_cancel_requested(fake_redis_for_parse, monkeypatch):
+    monkeypatch.setenv("PARSE_JOB_BACKEND", "rq")
+    monkeypatch.setenv("PARSE_JOB_STUCK_MINUTES", "1")
+    get_settings.cache_clear()
+
+    old = datetime.now(UTC) - timedelta(minutes=30)
+    with session_scope() as session:
+        rid = pr.create_parse_run(session, config_snapshot={}).id
+        claimed = pr.claim_parse_run(session, rid)
+        assert claimed is not None
+        claimed.created_at = old
+        claimed.started_at = old
+        claimed.progress_updated_at = old
+        pr.request_parse_run_cancel(session, rid)
+
+    q = Queue("parse", connection=fake_redis_for_parse)
+    before = q.count
+    n = recover_stuck_parse_runs()
+    assert n == 0
+    assert q.count == before
+
+    with session_scope() as session:
+        row = pr.get_parse_run(session, rid)
+        assert row is not None
+        assert row.status == "cancelled"
+        assert row.cancel_requested is True
+
+
+def test_recover_skips_live_rq_job(fake_redis_for_parse, monkeypatch):
+    monkeypatch.setenv("PARSE_JOB_BACKEND", "rq")
+    monkeypatch.setenv("PARSE_JOB_STUCK_MINUTES", "1")
+    get_settings.cache_clear()
+
+    with session_scope() as session:
+        row = pr.create_parse_run(session, config_snapshot={})
+        rid = row.id
+        row.created_at = datetime.now(UTC) - timedelta(minutes=30)
+        session.flush()
+
+    q = Queue("parse", connection=fake_redis_for_parse)
+    rq_job = q.enqueue(run_parse_job, str(rid), job_timeout=600)
+    with session_scope() as session:
+        pr.set_parse_run_rq_job_id(session, rid, str(rq_job.id))
+
+    before = q.count
+    n = recover_stuck_parse_runs()
+    assert n == 0
+    assert q.count == before
+
+    fake_redis_for_parse.flushall()
+    n2 = recover_stuck_parse_runs()
+    assert n2 == 1
+    assert Queue("parse", connection=fake_redis_for_parse).count >= 1
+    with session_scope() as session:
+        row = pr.get_parse_run(session, rid)
+        assert row is not None
+        assert row.rq_job_id
+        assert row.rq_job_id != str(rq_job.id)
