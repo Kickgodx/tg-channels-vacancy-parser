@@ -89,10 +89,16 @@ export default function VacancyTable({
     }
   }, [items]);
 
-  const sortedItems = useMemo(
-    () => (onSortChange ? items : sortVacancies(items, sortBy, sortOrder)),
-    [items, sortBy, sortOrder, onSortChange],
-  );
+  const sortedItems = useMemo(() => {
+    const base = onSortChange ? items : sortVacancies(items, sortBy, sortOrder);
+    // Live SSE иногда присылал кандидатов с одним content-id до дедупа.
+    const seen = new Set<string>();
+    return base.filter((v) => {
+      if (seen.has(v.id)) return false;
+      seen.add(v.id);
+      return true;
+    });
+  }, [items, sortBy, sortOrder, onSortChange]);
 
   const handleSort = (key: ColKey) => {
     if (!SORTABLE_COLUMNS.includes(key as VacancySortField)) return;

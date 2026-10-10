@@ -16,7 +16,11 @@ ParseProgressCallback = Callable[["ParseProgressSnapshot"], None]
 
 @dataclass
 class ParseProgressSnapshot:
-    """Промежуточное состояние во время ``run_parse`` (до финальной дедупликации)."""
+    """Промежуточное состояние во время ``run_parse``.
+
+    ``vacancies`` / ``vacancies_found`` — уникальные на текущий момент
+    (инкрементальный дедуп), чтобы live-preview в UI имел стабильные id.
+    """
 
     posts_processed: int
     posts_total: int

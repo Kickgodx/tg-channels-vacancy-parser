@@ -32,6 +32,7 @@ from tg_jobs_parser.config.loader import ConfigLoadError
 from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
 from tg_jobs_parser.exporters.json_exporter import export_json_bytes
 from tg_jobs_parser.models.parse_result import ParseResult
+from tg_jobs_parser.models.vacancy import Vacancy
 
 _LOG = logging.getLogger(__name__)
 
@@ -122,6 +123,32 @@ def run_vacancies(
     return VacancyListResponse(items=items, total=total, page=page, page_size=page_size)
 
 
+def build_vacancies_preview(vacancies: list[Vacancy] | None, *, limit: int = 30) -> list[dict]:
+    """Последние ``limit`` вакансий с уникальным ``id`` (для React keys в live-таблице)."""
+    by_id: dict[str, Vacancy] = {}
+    order: list[str] = []
+    for v in vacancies or []:
+        if v.id not in by_id:
+            order.append(v.id)
+        by_id[v.id] = v
+    selected = order[-limit:]
+    return [
+        {
+            "id": v.id,
+            "source_channel": v.source_channel,
+            "post_url": v.post_url,
+            "post_date": v.post_date.isoformat() if v.post_date else None,
+            "work_format": v.work_format,
+            "detected_salary_avg": v.detected_salary_avg,
+            "salary_currency": v.salary_currency,
+            "detected_specializations": v.detected_specializations,
+            "cleaned_text": (v.cleaned_text or "")[:300],
+        }
+        for vid in selected
+        for v in (by_id[vid],)
+    ]
+
+
 async def _sse_events(run_id: uuid.UUID) -> AsyncIterator[str]:
     q = await progress_bus.subscribe(run_id)
     try:
@@ -130,20 +157,6 @@ async def _sse_events(run_id: uuid.UUID) -> AsyncIterator[str]:
             if snap is None:
                 yield "event: done\ndata: {}\n\n"
                 break
-            preview = [
-                {
-                    "id": v.id,
-                    "source_channel": v.source_channel,
-                    "post_url": v.post_url,
-                    "post_date": v.post_date.isoformat() if v.post_date else None,
-                    "work_format": v.work_format,
-                    "detected_salary_avg": v.detected_salary_avg,
-                    "salary_currency": v.salary_currency,
-                    "detected_specializations": v.detected_specializations,
-                    "cleaned_text": (v.cleaned_text or "")[:300],
-                }
-                for v in (snap.vacancies or [])[-30:]
-            ]
             payload = {
                 "posts_processed": snap.posts_processed,
                 "posts_total": snap.posts_total,
@@ -154,7 +167,7 @@ async def _sse_events(run_id: uuid.UUID) -> AsyncIterator[str]:
                 "ai_tokens_in": snap.ai_tokens_in,
                 "ai_tokens_out": snap.ai_tokens_out,
                 "ai_skipped_score": snap.ai_skipped_score,
-                "vacancies_preview": preview,
+                "vacancies_preview": build_vacancies_preview(snap.vacancies),
             }
             yield f"event: progress\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
             await asyncio.sleep(0)

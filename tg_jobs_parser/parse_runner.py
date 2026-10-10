@@ -550,11 +550,14 @@ def run_parse(
             if not progress_callback and not partial_dir:
                 return
             rl = ai_service._client.rate_limiter if ai_service is not None else None
+            # В UI/SSE отдаём уникальные (инкрементальный дедуп уже прогнан):
+            # candidates могут делить один content-id → React key warning.
+            unique_so_far = list(deduplicator.unique)
             snap = ParseProgressSnapshot(
                 posts_processed=posts_processed,
                 posts_total=len(all_posts),
-                vacancies_found=len(candidates),
-                vacancies=list(candidates),
+                vacancies_found=len(unique_so_far),
+                vacancies=unique_so_far,
                 phase=phase,
                 ai_llm_disabled=bool(rl and rl.llm_disabled),
                 ai_llm_disabled_reason=rl.llm_disabled_reason if rl else None,
@@ -562,7 +565,7 @@ def run_parse(
                 ai_tokens_out=ai_service.stats.tokens_out if ai_service else 0,
                 ai_skipped_score=ai_service.stats.skipped_score if ai_service else 0,
             )
-            if partial_dir and candidates:
+            if partial_dir and unique_so_far:
                 p = save_partial_batch(partial_dir, snap, run_id=partial_run_id)
                 snap.extra["partial_path"] = str(p)
             if progress_callback:
