@@ -1,10 +1,10 @@
 # tg_jobs_parser
 
-Локальное **Windows-first** приложение для парсинга Telegram-каналов с IT-вакансиями: **Telethon** (ваш аккаунт, MTProto), правиловое извлечение полей, опциональный **AI** (OpenRouter), фильтры, дедуп, метрики, экспорт **Excel/JSON**.
+Локальное **Windows-first** приложение для парсинга Telegram-каналов с IT-вакансиями: **Telethon** (ваш аккаунт, MTProto), правиловое извлечение полей, опциональный **AI** (OpenRouter), фильтры, дедуп, метрики, экспорт **Excel/JSON**. Дополнительно — admin-sync вакансий с **HH.ru**, матчинг резюме и сопроводительные письма (фоновые LLM-джобы).
 
-**Основной способ работы** — веб-интерфейс на **React** + **FastAPI** backend + **PostgreSQL** (Docker Compose). Парсинг запускается из UI, прогресс идёт по SSE, вакансии сохраняются в БД.
+**Основной способ работы** — веб-интерфейс на **React** + **FastAPI** backend + **PostgreSQL** + **Redis** / `llm-worker` (Docker Compose). Парсинг запускается из UI, прогресс идёт по SSE, вакансии сохраняются в БД.
 
-Дополнительно — **CLI (Typer)** для первой авторизации Telethon и отладки без UI.
+Дополнительно — **CLI (Typer)** для первой авторизации Telethon, дампа/импорта БД и отладки без UI.
 
 ---
 
@@ -27,15 +27,18 @@ docker compose up --build
 | Сервис   | URL |
 |----------|-----|
 | **Web UI** | http://localhost:5173 |
-| **API** (OpenAPI) | http://localhost:8000/docs |
+| **API** (OpenAPI) | http://localhost:9000/docs |
 | **Prometheus** | http://localhost:9090 |
 | **Grafana** | http://localhost:3000 (login: `admin` / `admin`) |
 | **Loki** | http://localhost:3100 (API; логи смотрятся в Grafana → Explore) |
 | **Alloy** | http://localhost:12345 (UI пайплайна сбора логов и трасс) |
 | **Tempo** | http://localhost:3200 (API; трассы смотрятся в Grafana → Explore → Tempo) |
 | **PostgreSQL** | `localhost:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
+| **Redis** | `localhost:6379` (очередь LLM-джобов для `llm-worker`) |
 
-Prometheus, Grafana, стек логов (Loki + Alloy) и трассировка (Tempo) поднимаются вместе с основным стеком. Backend отдаёт метрики HTTP на `http://localhost:8000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
+В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `llm-worker` (тот же образ, команда `tg-jobs-llm-worker`) обрабатывает матчинг и письма через RQ; метрики воркера — контейнерный `:9101` (на хост не публикуется, чтобы работал `--scale`).
+
+Prometheus, Grafana, стек логов (Loki + Alloy) и трассировка (Tempo) поднимаются вместе с основным стеком. Backend отдаёт метрики HTTP на `http://localhost:9000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
 
 ### Первая авторизация Telethon
 
@@ -65,6 +68,8 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # JWT_SECRET=                     # подпись access-токенов; без него — эфемерный (сессии сгорают при рестарте)
 # JWT_TTL_MINUTES=60              # TTL access-токена
 # AUTH_REGISTRATION_OPEN=true     # false — регистрация закрыта после первого пользователя
+# LLM_JOB_BACKEND=rq              # rq (Docker) или inprocess (локально без Redis)
+# REDIS_URL=redis://redis:6379/0  # очередь RQ; локально — redis://localhost:6379/0
 # HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе
 # HTTP_LOG_BODY_LIMIT=4096        # макс. символов тела в логе, дальше — «…[truncated, N bytes]»
 # HTTP_LOG_EXCLUDE_PATHS=/metrics,/api/v1/health,/api/v1/vacancies/metrics,/api/v1/analytics/salaries,/api/v1/analytics/sources,/api/v1/analytics/companies,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico
@@ -203,15 +208,19 @@ LLM пишет черновик отклика под конкретную ва�
 ```powershell
 cd frontend
 npm install
+# API в Docker Compose (порт на хосте):
+# VITE_API_BASE_URL=http://localhost:9000/api/v1
+# или локальный uvicorn:
 # VITE_API_BASE_URL=http://localhost:8000/api/v1
 npm run dev
 ```
 
-Backend отдельно:
+Backend отдельно (без compose порт обычно `8000`; матчинг/письма — `LLM_JOB_BACKEND=inprocess` или свой Redis):
 
 ```powershell
 poetry install
 # DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@localhost:5432/tgjobs
+# LLM_JOB_BACKEND=inprocess
 uvicorn backend.main:app --reload --port 8000
 ```
 
@@ -252,8 +261,9 @@ uvicorn backend.main:app --reload --port 8000
 | `GET` | `/ai-cache/stats` | Число записей в кэше LLM |
 | `POST` | `/ai-cache/clear` | Полная очистка кэша LLM |
 
-Приватные разделы (`/filters`, `/resumes`, `POST /vacancies/import`) требуют JWT;
-остальные — `X-API-Key`, если `API_KEY` задан.
+JWT обязателен для `/auth/me`, `/filters`, `/resumes` (включая match и cover-letter),
+`/llm-jobs/*`, `POST /vacancies/import` и HH (`require_admin`). Остальные эндпоинты
+открыты без логина, но при заданном `API_KEY` требуют заголовок `X-API-Key`.
 
 Импортированные вручную вакансии помечаются `source_channel = "manual"`
 (по нему их можно отфильтровать в списке); дедупликация — по тому же хэшу
@@ -276,7 +286,8 @@ uvicorn backend.main:app --reload --port 8000
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…010`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…013`, head —
+`013_vacancies_active_post_date_index`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -306,38 +317,40 @@ tg_jobs_parser/
   pyproject.toml
   config.yaml
   llm_models.yaml
-  docker-compose.yml
+  docker-compose.yml       — postgres, redis, backend, llm-worker, frontend, observability
   Dockerfile.backend
 
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
-    api/routes/            — health, auth, config, runs, vacancies,
+    api/routes/            — health, auth, config, runs, vacancies, hh,
                              analytics, filters, resumes, fx, ai-cache, llm-jobs
     db/                    — модели, Alembic, репозиторий, кэш LLM, UPSERT
     services/              — run/match/cover_letter/llm_job/interactive_llm,
-                             llm_job_events, auth, import, progress_bus
+                             llm_job_events, auth, import, hh_sync, progress_bus
     workers/               — llm_worker (RQ), llm_tasks, recover
     queue/                 — RQ Redis connection
-  alembic/                 — миграции SQL
+  alembic/                 — миграции SQL (001…013)
 
   frontend/                — React UI (Vite)
-    src/pages/             — Login, Dashboard, Run, Vacancies
+    src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes
     src/components/        — ParseForm, VacancyTable, VacancyModal, ResumePanel,
                              MetricsCharts, AnalyticsPanel
 
   tg_jobs_parser/          — ядро парсинга (общее для API и CLI)
     parse_runner.py
-    cli/                   — Typer CLI
+    cli/                   — Typer CLI (+ db dump/import)
     config/                — YAML + Pydantic
     parsers/               — Telethon
     extraction/            — rules
     ai/                    — OpenRouter, кэш, token cost
+    hh/                    — клиент HH API, mapper → Vacancy
     evals/                 — scorer + live runner golden extraction
     filters/, deduplication/, analytics/, exporters/
 
-  evals/golden/            — golden JSONL (extraction; match/cover — позже)
+  observability/           — Prometheus, Loki, Tempo, Alloy, Grafana dashboards
+  evals/golden/            — golden JSONL (extraction; match/cover — см. ROADMAP)
   evals/fixtures/          — offline ответы для pytest
   sessions/                — Telethon session (не в git)
-  .cache/ai_extractions/   — дисковый кэш LLM
+  .cache/ai_extractions/   — дисковый кэш LLM (если cache_backend=disk)
   output/                  — Excel/JSON при экспорте
   tests/
 ```
@@ -391,6 +404,11 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 
 - **`vacancy_score_threshold`** — минимальный общий score правил.
 - **`vacancy_min_substantive_score`** — минимум без бонуса за email/@ (отсекает «пустые» контакты).
+- **`channel_concurrency`** — сколько каналов опрашивать параллельно в одной
+  Telethon-сессии (`1` — последовательно; слишком большое значение повышает риск FloodWait).
+- **`db_flush_every_posts`** / **`db_flush_pending_vacancies`** — промежуточный
+  UPSERT в БД во время прогона (backend), чтобы при обрыве не терять уже
+  обработанные уникальные вакансии.
 
 ### Хранение вакансий (`retention`)
 
@@ -483,7 +501,9 @@ python -m tg_jobs_parser.cli export --from-json output/vacancies.json --out reex
 
 ### Перенос данных между инстансами (дамп / импорт БД)
 
-Экспорт всех таблиц приложения (прогоны, вакансии, курсы ЦБ, кэш LLM) в JSON:
+Экспорт корпуса вакансий и служебных таблиц (прогоны, вакансии, курсы ЦБ, кэш
+LLM) в JSON. Пользователи, резюме, матчи, письма, пресеты и `hh_listings` в
+дамп **не** входят:
 
 ```powershell
 # локально (DATABASE_URL в .env)
@@ -591,8 +611,9 @@ pytest -n 8     # параллельно (pytest-xdist)
 
 В том числе: `tests/test_api_health.py`, `tests/test_auth.py`,
 `tests/test_solo_match.py`, `tests/test_cover_letter.py`, `tests/test_llm_jobs.py`,
-`tests/test_upsert_vacancies.py`, `tests/test_db_transfer.py`, тесты ядра
-extraction/AI.
+`tests/test_hh_mapper.py`, `tests/test_upsert_vacancies.py`,
+`tests/test_db_transfer.py`, тесты ядра extraction/AI. Live LLM evals —
+`@pytest.mark.llm` (не в обычном `pytest -q`).
 
 Тесты офлайновые: `tests/conftest.py` подставляет `CONFIG_PATH` на конфиг с
 выключенным `fx` — иначе агрегаты ходят за курсами в ЦБ на каждый запрос.
@@ -604,25 +625,31 @@ extraction/AI.
 ```text
 [React UI] ──REST/SSE──► [FastAPI backend] ──► parse_runner
                               │                    │
-                              ▼                    ├── Telethon
-                         PostgreSQL               ├── extraction/ (rules)
-                              ▲                    ├── ai/ (OpenRouter)
+                              │                    ├── Telethon
+                              ▼                    ├── extraction/ (rules)
+                         PostgreSQL               ├── ai/ (OpenRouter)
+                              ▲                    ├── hh/ (admin sync)
                               │                    ├── filters → dedup
                          UPSERT vacancies          └── metrics → export
+                              │
+                         Redis (RQ) ◄── llm-worker (match / cover letter)
 ```
 
 - **`extraction/`** — быстрые эвристики (всегда).
 - **`ai/`** — опционально: OpenRouter, JSON-схема, кэш, `merge_rules_and_ai`.
-- **`backend/`** — API, фоновые прогоны, персистентность.
+- **`hh/`** — sync вакансий HH.ru без LLM (admin).
+- **`backend/`** — API, фоновые прогоны, персистентность; интерактивный LLM —
+  через RQ + `llm-worker` (или `inprocess` без Redis).
 
 ---
 
 ## Roadmap
 
 Реализованное описано выше (аналитика, FTS и пресеты, матчинг резюме,
-JWT / multi-user). Планы — в [ROADMAP.md](ROADMAP.md): трекер откликов,
-экспорт в Google Sheets / Notion, CMS-админка вакансий, генерация
-сопроводительных писем.
+сопроводительные письма, HH sync, фоновые LLM-джобы / RQ, JWT / multi-user,
+observability). Планы — в [ROADMAP.md](ROADMAP.md): трекер откликов, экспорт в
+Google Sheets / Notion, CMS-админка вакансий, WebAuthn, golden/evals для
+match и cover letter.
 
 Вне списка фичей: восстановление прогресса прогона после рестарта backend,
 расширение Telethon (joinchat, rate-limit).

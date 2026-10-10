@@ -12,14 +12,14 @@
 
 | # | Ветка | Фича | Изменение схемы БД |
 |---|-------|------|--------------------|
-| 1 | `feature/application-tracker` | Трекер откликов | да (миграция 011+) |
+| 1 | `feature/application-tracker` | Трекер откликов | да (миграция 014+) |
 | 2 | `feature/external-export` | Экспорт в Google Sheets / Notion | нет |
 | 3 | `feature/admin-vacancies` | CMS-админка: редактирование/удаление вакансий | нет |
 | 4 | `feature/webauthn` | Вход по passkey (WebAuthn/FIDO2) поверх пароля | да (таблица `webauthn_credentials`) |
 | 5 | `feature/llm-evals-match` | Golden/evals для match + cover letter | нет |
 
 **Про миграции:** цепочка инкрементальная — head сейчас
-`009_cover_letters`. Новые фичи просто продолжают её
+`013_vacancies_active_post_date_index`. Новые фичи просто продолжают её
 (`alembic revision` → `upgrade head` на старте backend, без `down -v`).
 Колонки с FK добавлять через `op.batch_alter_table` с именованным
 constraint — SQLite (тесты) не умеет `ALTER TABLE ADD COLUMN` с FK.
@@ -31,7 +31,7 @@ constraint — SQLite (тесты) не умеет `ALTER TABLE ADD COLUMN` с F
 Мини-ATS поверх вакансий: статус (new → applied → interview → offer /
 rejected / skipped) + заметки.
 
-**БД (миграция 008)**
+**БД (миграция 014+)**
 
 - Таблица `vacancy_applications`: `vacancy_id` (FK → vacancies), `user_id`
   (FK → users — отклики приватные), `status`, `applied_at`, `notes`,
