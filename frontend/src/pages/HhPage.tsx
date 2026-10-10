@@ -1,10 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { api } from "../api/client";
-import type { HhSyncResult } from "../types/api";
+import type { HhSyncResult, HhSyncWindow } from "../types/api";
+
+const WINDOW_OPTIONS: { value: HhSyncWindow; label: string }[] = [
+  { value: "all", label: "Все" },
+  { value: "7d", label: "7 дней" },
+  { value: "14d", label: "14 дней" },
+  { value: "30d", label: "30 дней" },
+  { value: "range", label: "Диапазон" },
+];
 
 export default function HhPage() {
   const queryClient = useQueryClient();
+  const [syncWindow, setSyncWindow] = useState<HhSyncWindow>("7d");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
   const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me() });
   const statusQ = useQuery({
     queryKey: ["hh-status"],
@@ -13,7 +26,12 @@ export default function HhPage() {
   });
 
   const syncM = useMutation({
-    mutationFn: () => api.hhSync(),
+    mutationFn: () =>
+      api.hhSync(
+        syncWindow === "range"
+          ? { window: syncWindow, date_from: dateFrom, date_to: dateTo }
+          : { window: syncWindow },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["hh-status"] });
       void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
@@ -29,9 +47,12 @@ export default function HhPage() {
 
   const status = statusQ.data;
   const result: HhSyncResult | undefined = syncM.data;
+  const rangeInvalid =
+    syncWindow === "range" && (!dateFrom || !dateTo || dateFrom > dateTo);
   const canRun =
     Boolean(status?.enabled && status.token_configured && status.email_configured) &&
-    !syncM.isPending;
+    !syncM.isPending &&
+    !rangeInvalid;
 
   return (
     <div className="card">
@@ -81,6 +102,46 @@ export default function HhPage() {
         </dl>
       )}
 
+      <p className="field-label" style={{ marginTop: "1rem" }}>
+        Окно поиска
+      </p>
+      <div className="row" style={{ gap: "1rem", flexWrap: "wrap" }}>
+        {WINDOW_OPTIONS.map((opt) => (
+          <label key={opt.value} className="checkbox-row">
+            <input
+              type="radio"
+              name="hh-sync-window"
+              value={opt.value}
+              checked={syncWindow === opt.value}
+              onChange={() => setSyncWindow(opt.value)}
+            />
+            {opt.label}
+          </label>
+        ))}
+      </div>
+
+      {syncWindow === "range" && (
+        <div className="row" style={{ gap: "0.75rem", marginTop: "0.75rem" }}>
+          <label className="field">
+            Дата от
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            Дата до
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </label>
+        </div>
+      )}
+      {rangeInvalid && (
+        <p className="error" style={{ marginTop: "0.5rem" }}>
+          Укажите обе даты; «от» не позже «до».
+        </p>
+      )}
+
       <div className="row" style={{ gap: "0.75rem", marginTop: "1rem" }}>
         <button
           type="button"
@@ -103,6 +164,13 @@ export default function HhPage() {
         <div style={{ marginTop: "1.25rem" }}>
           <h3>Итог</h3>
           <ul className="plain-list">
+            <li>
+              Окно: {result.window}
+              {result.period != null ? ` (period=${result.period})` : ""}
+              {result.date_from || result.date_to
+                ? ` · ${result.date_from ?? "—"} … ${result.date_to ?? "—"}`
+                : ""}
+            </li>
             <li>
               Поиск: {result.searched} вакансий ({result.pages} стр.) за{" "}
               {result.duration_seconds.toFixed(1)} с

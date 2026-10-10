@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -10,6 +11,11 @@ from backend.settings import get_settings
 
 _engine = None
 _SessionLocal: sessionmaker[Session] | None = None
+
+
+def _json_serializer(obj: object) -> str:
+    """UTF-8 JSON без \\uXXXX — читаемее в БД и компактнее для кириллицы."""
+    return json.dumps(obj, ensure_ascii=False)
 
 
 def reset_engine() -> None:
@@ -38,7 +44,12 @@ def get_engine():
             pool_kw["max_overflow"] = 20
         # Через модуль, а не `from sqlalchemy import create_engine`: OTel-инструментация
         # подменяет `sqlalchemy.create_engine` уже после импорта этого модуля.
-        _engine = sqlalchemy.create_engine(url, connect_args=connect_args, **pool_kw)
+        _engine = sqlalchemy.create_engine(
+            url,
+            connect_args=connect_args,
+            json_serializer=_json_serializer,
+            **pool_kw,
+        )
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
     return _engine
 

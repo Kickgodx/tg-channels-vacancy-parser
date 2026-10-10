@@ -191,6 +191,14 @@ export interface HhStatus {
   listings_without_detail: number;
 }
 
+export type HhSyncWindow = "all" | "7d" | "14d" | "30d" | "range";
+
+export interface HhSyncRequest {
+  window?: HhSyncWindow;
+  date_from?: string;
+  date_to?: string;
+}
+
 export interface HhSyncResult {
   searched: number;
   listings_upserted: number;
@@ -205,6 +213,10 @@ export interface HhSyncResult {
   flush_batches: number;
   errors: string[];
   duration_seconds: number;
+  window: string;
+  period: number | null;
+  date_from: string | null;
+  date_to: string | null;
 }
 
 export interface TokenResponse {

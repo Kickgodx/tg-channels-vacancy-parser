@@ -14,6 +14,7 @@ from backend.db.models import UserRow
 from backend.db.session import get_db
 from backend.services import hh_sync_service
 from backend.services.hh_sync_service import HhSyncConflict, HhSyncNotConfigured
+from backend.services.hh_sync_window import HhSyncWindowError, resolve_hh_search_window
 from backend.settings import Settings, get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.hh.client import HHApiError
@@ -25,6 +26,12 @@ router = APIRouter(
     tags=["hh"],
     dependencies=[Depends(verify_api_key)],
 )
+
+
+class HhSyncRequest(BaseModel):
+    window: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
 
 
 class HhSyncResponse(BaseModel):
@@ -41,6 +48,10 @@ class HhSyncResponse(BaseModel):
     flush_batches: int = 0
     errors: list[str] = Field(default_factory=list)
     duration_seconds: float
+    window: str = "all"
+    period: int | None = None
+    date_from: str | None = None
+    date_to: str | None = None
 
 
 class HhStatusResponse(BaseModel):
@@ -78,10 +89,20 @@ def hh_status(
 
 @router.post("/sync", response_model=HhSyncResponse)
 def hh_sync(
+    body: HhSyncRequest = HhSyncRequest(),
     db: Session = Depends(get_db),
     _admin: UserRow = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> HhSyncResponse:
+    try:
+        resolved = resolve_hh_search_window(
+            window=body.window,
+            date_from=body.date_from,
+            date_to=body.date_to,
+        )
+    except HhSyncWindowError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     cfg = load_config(settings.config_path)
     try:
         hh_sync_service.ensure_hh_ready(settings, cfg.hh)
@@ -89,7 +110,7 @@ def hh_sync(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     try:
-        result = hh_sync_service.run_hh_sync(db, config=cfg, settings=settings)
+        result = hh_sync_service.run_hh_sync(db, config=cfg, settings=settings, search_window=resolved)
     except HhSyncConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except HhSyncNotConfigured as exc:
@@ -118,4 +139,8 @@ def hh_sync(
         flush_batches=result.flush_batches,
         errors=result.errors,
         duration_seconds=result.duration_seconds,
+        window=result.window,
+        period=result.period,
+        date_from=result.date_from,
+        date_to=result.date_to,
     )

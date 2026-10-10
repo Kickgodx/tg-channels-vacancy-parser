@@ -165,3 +165,60 @@ def test_hh_sync_skip_detail_on_second_run(client: TestClient, monkeypatch):
     assert body2["details_skipped"] == 1
     assert body2["details_fetched"] == 0
     assert detail_calls["n"] == 1  # второй sync не дергал detail
+
+
+def test_hh_sync_passes_period_for_7d(client: TestClient, monkeypatch):
+    monkeypatch.setenv("HH_API_TOKEN", "test-token")
+    monkeypatch.setenv("HH_CONTACT_EMAIL", "dev@example.com")
+    from backend.settings import get_settings
+
+    get_settings.cache_clear()
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            self.close()
+
+        def iter_vacancy_pages(self, params):
+            captured["params"] = params
+            return iter([])
+
+    monkeypatch.setattr("backend.services.hh_sync_service.HHClient", FakeClient)
+
+    admin = _register(client, "admin4@example.com")
+    r = client.post(
+        "/api/v1/hh/sync",
+        headers=_auth(admin),
+        json={"window": "7d"},
+    )
+    assert r.status_code == 200
+    assert r.json()["window"] == "7d"
+    assert r.json()["period"] == 7
+    assert captured["params"].period == 7
+    assert captured["params"].date_from is None
+
+
+def test_hh_sync_range_422_without_dates(client: TestClient, monkeypatch):
+    monkeypatch.setenv("HH_API_TOKEN", "test-token")
+    monkeypatch.setenv("HH_CONTACT_EMAIL", "dev@example.com")
+    from backend.settings import get_settings
+
+    get_settings.cache_clear()
+
+    admin = _register(client, "admin5@example.com")
+    r = client.post(
+        "/api/v1/hh/sync",
+        headers=_auth(admin),
+        json={"window": "range"},
+    )
+    assert r.status_code == 422

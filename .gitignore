@@ -83,3 +83,6 @@ $RECYCLE.BIN/
 
 # frontend
 frontend/node_modules/
+.superpowers/
+.worktrees/
+docs/superpowers/

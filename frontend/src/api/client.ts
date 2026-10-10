@@ -5,6 +5,7 @@ import type {
   CoverLetter,
   CoverLetterTone,
   HhStatus,
+  HhSyncRequest,
   HhSyncResult,
   LlmModelsCatalog,
   MetricsSummary,
@@ -266,9 +267,10 @@ export const api = {
 
   hhStatus: () => request<HhStatus>("/hh/status"),
 
-  hhSync: () =>
+  hhSync: (body?: HhSyncRequest) =>
     request<HhSyncResult>("/hh/sync", {
       method: "POST",
+      body: JSON.stringify(body ?? {}),
     }),
 
   listResumes: () => request<{ items: Resume[] }>("/resumes"),

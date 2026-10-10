@@ -18,6 +18,7 @@ from backend.observability import (
     record_hh_details,
     record_hh_sync_finished,
 )
+from backend.services.hh_sync_window import ResolvedHhSearchWindow
 from backend.settings import Settings
 from tg_jobs_parser.config.schema import AppConfig, HhConfig
 from tg_jobs_parser.hh.client import HHApiError, HHClient, HHClientConfig
@@ -60,6 +61,10 @@ class HhSyncResult:
     flush_batches: int = 0
     errors: list[str] = field(default_factory=list)
     duration_seconds: float = 0.0
+    window: str = "all"
+    period: int | None = None
+    date_from: str | None = None
+    date_to: str | None = None
 
 
 def _client_from(settings: Settings, hh: HhConfig) -> HHClient:
@@ -101,6 +106,7 @@ def run_hh_sync(
     *,
     config: AppConfig,
     settings: Settings,
+    search_window: ResolvedHhSearchWindow | None = None,
 ) -> HhSyncResult:
     thread_locked = _SYNC_LOCK.acquire(blocking=False)
     if not thread_locked:
@@ -109,6 +115,11 @@ def run_hh_sync(
     started = time.monotonic()
     result = HhSyncResult()
     outcome = "success"
+    resolved = search_window or ResolvedHhSearchWindow(window="all")
+    result.window = resolved.window
+    result.period = resolved.period
+    result.date_from = resolved.date_from
+    result.date_to = resolved.date_to
     try:
         db_locked = hh_repo.try_acquire_hh_sync_lock(session)
         if not db_locked:
@@ -118,7 +129,14 @@ def run_hh_sync(
             hh = config.hh
             client = _client_from(settings, hh)
             try:
-                shorts, pages = _collect_shorts(client, hh)
+                span.set_attribute("hh.window", resolved.window)
+                if resolved.period is not None:
+                    span.set_attribute("hh.period", resolved.period)
+                if resolved.date_from:
+                    span.set_attribute("hh.date_from", resolved.date_from)
+                if resolved.date_to:
+                    span.set_attribute("hh.date_to", resolved.date_to)
+                shorts, pages = _collect_shorts(client, hh, resolved)
                 result.pages = pages
                 result.searched = len(shorts)
                 span.set_attribute("hh.searched", result.searched)
@@ -215,9 +233,14 @@ def run_hh_sync(
         )
         record_hh_details(fetched=result.details_fetched, skipped=result.details_skipped)
         _LOG.info(
-            "HH sync done in %.1fs: searched=%s unique=%s dup=%s "
-            "detail_fetch=%s skip=%s vac +%s/~%s batches=%s errors=%s",
+            "HH sync done in %.1fs: window=%s period=%s date_from=%s date_to=%s "
+            "searched=%s unique=%s dup=%s detail_fetch=%s skip=%s vac +%s/~%s "
+            "batches=%s errors=%s",
             result.duration_seconds,
+            result.window,
+            result.period,
+            result.date_from,
+            result.date_to,
             result.searched,
             result.unique,
             result.duplicates,
@@ -231,11 +254,19 @@ def run_hh_sync(
     return result
 
 
-def _collect_shorts(client: HHClient, hh: HhConfig) -> tuple[list[VacancyShort], int]:
+def _collect_shorts(
+    client: HHClient,
+    hh: HhConfig,
+    search_window: ResolvedHhSearchWindow | None = None,
+) -> tuple[list[VacancyShort], int]:
+    resolved = search_window or ResolvedHhSearchWindow(window="all")
     params = VacancySearchParams(
         text=hh.search.text,
         professional_role=list(hh.search.professional_role),
         per_page=hh.search.per_page,
+        period=resolved.period,
+        date_from=resolved.date_from,
+        date_to=resolved.date_to,
     )
     shorts: list[VacancyShort] = []
     pages = 0
