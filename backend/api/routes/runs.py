@@ -162,14 +162,29 @@ async def _sse_events(run_id: uuid.UUID) -> AsyncIterator[str]:
         progress_bus.unsubscribe(run_id, q)
 
 
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+async def _sse_done_only() -> AsyncIterator[str]:
+    yield "event: done\ndata: {}\n\n"
+
+
 @router.get("/{run_id}/events")
 async def run_events(run_id: uuid.UUID, db: Session = Depends(get_db)) -> StreamingResponse:
-    if repo.get_parse_run(db, run_id) is None and run_registry.get(run_id) is None:
+    row = repo.get_parse_run(db, run_id)
+    if row is None and run_registry.get(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    if row is not None and row.status in _TERMINAL_RUN_STATUSES:
+        return StreamingResponse(
+            _sse_done_only(),
+            media_type="text/event-stream",
+            headers=headers,
+        )
     return StreamingResponse(
         _sse_events(run_id),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers=headers,
     )
 
 
