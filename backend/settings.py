@@ -39,6 +39,18 @@ class Settings(BaseSettings):
     hh_api_token: str | None = Field(default=None, alias="HH_API_TOKEN")
     hh_contact_email: str | None = Field(default=None, alias="HH_CONTACT_EMAIL")
 
+    # LLM jobs: inprocess (ThreadPool в API) или rq (Redis Queue + llm-worker).
+    llm_job_backend: str = Field(default="inprocess", alias="LLM_JOB_BACKEND")
+    redis_url: str | None = Field(default=None, alias="REDIS_URL")
+    llm_worker_metrics_port: int = Field(default=9101, alias="LLM_WORKER_METRICS_PORT")
+    llm_job_stuck_minutes: int = Field(default=15, alias="LLM_JOB_STUCK_MINUTES")
+    llm_rq_job_timeout_seconds: int = Field(default=600, alias="LLM_RQ_JOB_TIMEOUT_SECONDS")
+
+    @property
+    def llm_job_backend_normalized(self) -> str:
+        v = (self.llm_job_backend or "inprocess").strip().lower()
+        return v if v in ("inprocess", "rq") else "inprocess"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

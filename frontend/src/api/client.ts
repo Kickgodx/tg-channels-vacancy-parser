@@ -126,7 +126,85 @@ async function pollLlmJob(jobId: string): Promise<LlmJob> {
   throw new Error("LLM-задача не завершилась вовремя");
 }
 
-/** POST мэтч/письмо: 200 кэш или 202 job → poll до результата. */
+/** Ждать завершения через SSE; при обрыве — poll. */
+function waitLlmJobSse(jobId: string): Promise<LlmJob> {
+  const token = getToken();
+  const q = token ? `?access_token=${encodeURIComponent(token)}` : "";
+  const url = `${API_BASE}/llm-jobs/${jobId}/events${q}`;
+
+  return new Promise((resolve, reject) => {
+    let last: LlmJob | null = null;
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      es.close();
+      if (!settled) {
+        settled = true;
+        void pollLlmJob(jobId).then(resolve, reject);
+      }
+    }, LLM_JOB_POLL_MAX_MS);
+
+    const es = new EventSource(url);
+
+    const finish = (job: LlmJob) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      es.close();
+      resolve(job);
+    };
+
+    es.addEventListener("status", (ev) => {
+      try {
+        last = JSON.parse((ev as MessageEvent).data) as LlmJob;
+        if (last.status === "done" || last.status === "error") finish(last);
+      } catch {
+        /* ignore parse */
+      }
+    });
+
+    es.addEventListener("done", () => {
+      if (last && (last.status === "done" || last.status === "error")) {
+        finish(last);
+        return;
+      }
+      if (!settled) {
+        settled = true;
+        window.clearTimeout(timer);
+        es.close();
+        void pollLlmJob(jobId).then(resolve, reject);
+      }
+    });
+
+    es.addEventListener("error", () => {
+      if (settled) return;
+      // Первый error от EventSource часто при connect — ждём; если уже был status — fallback poll
+      if (last) {
+        settled = true;
+        window.clearTimeout(timer);
+        es.close();
+        void pollLlmJob(jobId).then(resolve, reject);
+      }
+    });
+
+    es.onerror = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      es.close();
+      void pollLlmJob(jobId).then(resolve, reject);
+    };
+  });
+}
+
+async function awaitLlmJob(jobId: string): Promise<LlmJob> {
+  try {
+    return await waitLlmJobSse(jobId);
+  } catch {
+    return pollLlmJob(jobId);
+  }
+}
+
+/** POST мэтч/письмо: 200 кэш или 202 job → SSE (fallback poll). */
 async function postInteractiveLlm<T>(
   path: string,
   init: RequestInit,
@@ -144,7 +222,7 @@ async function postInteractiveLlm<T>(
   if (res.status === 200) return (await res.json()) as T;
   if (res.status === 202) {
     const accepted = (await res.json()) as LlmJobAccepted;
-    const job = await pollLlmJob(accepted.job_id);
+    const job = await awaitLlmJob(accepted.job_id);
     if (job.status === "error") {
       throw new Error(job.error_message || "LLM: ошибка задачи");
     }

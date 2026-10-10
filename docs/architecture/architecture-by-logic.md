@@ -47,15 +47,16 @@ flowchart TB
   subgraph Match
     M1["POST match"] --> M2["кэш? → 200"]
     M1 --> M3["llm_jobs 202"]
-    M3 --> M4["worker pool"]
-    M4 --> M5["OpenRouter"]
-    M5 --> M6["vacancy_matches"]
-    M3 --> M7["GET /llm-jobs poll"]
+    M3 --> M4["Redis RQ"]
+    M4 --> M5["llm-worker"]
+    M5 --> M6["OpenRouter"]
+    M6 --> M7["vacancy_matches"]
+    M3 --> M8["SSE / poll GET"]
   end
 
   subgraph Letter["Cover letter"]
-    L1["POST letter"] --> L2["кэш? / llm_jobs"]
-    L2 --> L3["worker → OpenRouter"]
+    L1["POST letter"] --> L2["кэш? / llm_jobs + RQ"]
+    L2 --> L3["llm-worker → OpenRouter"]
     L3 --> L4["cover_letters"]
   end
 
@@ -69,4 +70,4 @@ flowchart TB
 - **JWT** — login/register; API Bearer, SSE через `access_token`
 - **Per-user** — resumes, saved_filters, matches, cover_letters, llm_jobs
 - **Shared** — vacancies, parse_runs, analytics, FX, AI cache
-- **Interactive LLM** — фоновые джобы in-process (`ai.interactive_concurrency`); сессия БД не держится на время вызова OpenRouter; несколько реплик backend потребуют внешней очереди
+- **Interactive LLM** — Task Queue (RQ) + Competing Consumers (`llm-worker`); Postgres = статус, Redis = очередь + pub/sub для SSE. Fallback `LLM_JOB_BACKEND=inprocess` для тестов. Scale: `--scale llm-worker=N`. Shared OpenRouter RPM across workers — follow-up (Redis token-bucket).

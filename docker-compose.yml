@@ -26,6 +26,17 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    logging: *default-logging
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build:
       context: .
@@ -41,6 +52,9 @@ services:
       LOG_DIR: ""
       OTEL_ENABLED: "true"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      OTEL_SERVICE_NAME: tg-jobs-parser-backend
+      LLM_JOB_BACKEND: rq
+      REDIS_URL: redis://redis:6379/0
     env_file:
       - .env
     volumes:
@@ -50,6 +64,39 @@ services:
       - ./output:/app/output
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Параллелизм LLM = число реплик: docker compose up --scale llm-worker=4
+  # Метрики :9101 только в Docker-сети (Prometheus scrape llm-worker:9101);
+  # host port mapping убран — иначе --scale конфликтует по 9101 на хосте.
+  llm-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    logging: *default-logging
+    command: ["tg-jobs-llm-worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
+      CONFIG_PATH: /app/config.yaml
+      PYTHONUNBUFFERED: "1"
+      LOG_DIR: ""
+      LLM_JOB_BACKEND: rq
+      REDIS_URL: redis://redis:6379/0
+      LLM_WORKER_METRICS_PORT: "9101"
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      OTEL_SERVICE_NAME: tg-jobs-parser-llm-worker
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./llm_models.yaml:/app/llm_models.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:

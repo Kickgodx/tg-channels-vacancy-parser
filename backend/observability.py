@@ -176,6 +176,67 @@ def record_llm_job(*, outcome: str, kind: str, duration_seconds: float | None = 
         LLM_JOB_DURATION.labels(kind=kind or "unknown").observe(max(duration_seconds, 0.0))
 
 
+LLM_JOB_ENQUEUE = Counter(
+    "llm_job_enqueue_total",
+    "Постановка LLM-джоб в очередь",
+    labelnames=("backend", "kind", "outcome"),  # queued|reused|rejected_limit|error
+)
+
+LLM_RQ_QUEUE_JOBS = Gauge(
+    "llm_rq_queue_jobs",
+    "Глубина очереди RQ llm",
+    labelnames=("queue",),
+)
+
+LLM_WORKER_JOBS = Counter(
+    "llm_worker_jobs_total",
+    "Исполнение LLM-джоб на worker",
+    labelnames=("kind", "outcome"),  # started|done|error
+)
+
+LLM_WORKER_DURATION = Histogram(
+    "llm_worker_job_duration_seconds",
+    "Длительность run_llm_job на worker",
+    labelnames=("kind",),
+    buckets=(1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 120.0, 300.0, 600.0),
+)
+
+LLM_JOBS_RECOVER = Counter(
+    "llm_jobs_recover_total",
+    "Recover зависших LLM-джоб при старте worker",
+    labelnames=("from_status",),
+)
+
+LLM_JOB_SSE_CONNECTIONS = Gauge(
+    "llm_job_sse_connections",
+    "Активные SSE-подписки на статус LLM-джоб",
+)
+
+
+def record_llm_job_enqueue(*, backend: str, kind: str, outcome: str) -> None:
+    LLM_JOB_ENQUEUE.labels(
+        backend=backend or "unknown",
+        kind=kind or "unknown",
+        outcome=outcome or "unknown",
+    ).inc()
+
+
+def record_llm_worker_job(*, kind: str, outcome: str, duration_seconds: float | None = None) -> None:
+    LLM_WORKER_JOBS.labels(kind=kind or "unknown", outcome=outcome or "unknown").inc()
+    if duration_seconds is not None:
+        LLM_WORKER_DURATION.labels(kind=kind or "unknown").observe(max(duration_seconds, 0.0))
+
+
+def record_llm_jobs_recover(*, from_status: str) -> None:
+    LLM_JOBS_RECOVER.labels(from_status=from_status or "unknown").inc()
+
+
+def set_llm_rq_queue_depth(count: int | None, *, queue: str = "llm") -> None:
+    if count is None:
+        return
+    LLM_RQ_QUEUE_JOBS.labels(queue=queue).set(count)
+
+
 # --- Auth -------------------------------------------------------------------
 
 AUTH_EVENTS = Counter(
@@ -295,6 +356,7 @@ class _DBStatsCollector:
         )
         yield GaugeMetricFamily("fx_latest_rate_timestamp_seconds", "Дата последнего курса ЦБ (unix time)")
         yield GaugeMetricFamily("db_hh_listings", "Кэш HH listings", labels=["state"])
+        yield GaugeMetricFamily("llm_jobs_by_status", "LLM-джобы в БД по статусу", labels=["status"])
 
     def collect(self):
         try:
@@ -305,10 +367,17 @@ class _DBStatsCollector:
                 posts_fetched_24h,
                 fx_latest_ts,
                 hh_listings,
+                llm_jobs_by_status,
             ) = self._read_db()
         except Exception as e:
             _LOG.debug("DBStatsCollector: БД недоступна: %s", e)
             return
+        try:
+            from backend.queue.rq_conn import llm_queue_length
+
+            set_llm_rq_queue_depth(llm_queue_length())
+        except Exception:
+            pass
 
         fam = GaugeMetricFamily("db_vacancies", "Вакансии в БД", labels=["state"])
         fam.add_metric(["active"], counts["vacancies_active"])
@@ -362,6 +431,11 @@ class _DBStatsCollector:
         fam.add_metric(["without_detail"], hh_listings["without_detail"])
         yield fam
 
+        fam = GaugeMetricFamily("llm_jobs_by_status", "LLM-джобы в БД по статусу", labels=["status"])
+        for status, n in llm_jobs_by_status.items():
+            fam.add_metric([status], n)
+        yield fam
+
     @staticmethod
     def _read_db() -> tuple[
         dict[str, int],
@@ -369,6 +443,7 @@ class _DBStatsCollector:
         dict[str, int],
         int,
         float | None,
+        dict[str, int],
         dict[str, int],
     ]:
         from datetime import timedelta
@@ -380,6 +455,7 @@ class _DBStatsCollector:
             CoverLetterRow,
             ExchangeRateRow,
             HhListingRow,
+            LlmJobRow,
             ParseRunRow,
             ResumeRow,
             UserRow,
@@ -394,6 +470,7 @@ class _DBStatsCollector:
         posts_fetched_24h = 0
         fx_latest_ts: float | None = None
         hh_listings = {"total": 0, "with_detail": 0, "without_detail": 0}
+        llm_jobs_by_status: dict[str, int] = {}
         since = datetime.now(UTC) - timedelta(hours=24)
 
         with session_scope() as s:
@@ -447,6 +524,9 @@ class _DBStatsCollector:
                 "without_detail": hh_total - hh_with,
             }
 
+            for status, n in s.execute(select(LlmJobRow.status, func.count()).group_by(LlmJobRow.status)):
+                llm_jobs_by_status[str(status)] = int(n)
+
         return (
             counts,
             runs_by_status,
@@ -454,6 +534,7 @@ class _DBStatsCollector:
             posts_fetched_24h,
             fx_latest_ts,
             hh_listings,
+            llm_jobs_by_status,
         )
 
 

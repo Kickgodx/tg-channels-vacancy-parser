@@ -79,9 +79,11 @@
 |------|------------|
 | **`prompt_version`** | Должен совпадать с `EXTRACT_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py`. Кэш LLM ключуется константой; при расхождении — warning. Смысловое изменение extraction-промпта → bump константы. |
 | **`concurrency`** | Параллелизм LLM при **парсинге** постов. |
-| **`interactive_concurrency`** | Размер in-process пула фоновых джоб мэтчинга и писем (по умолчанию 4). |
+| **`interactive_concurrency`** | Inprocess: размер ThreadPool; при RQ — ориентир для `--scale llm-worker`. |
 | **`interactive_per_user_limit`** | Сколько LLM-джоб (`queued`+`running`) одновременно на одного пользователя (по умолчанию 2); сверх лимита — HTTP 429. |
-| **`requests_per_minute`** | Целевой темп к OpenRouter; для interactive LLM — общий process-wide limiter. |
+| **`requests_per_minute`** | Целевой темп к OpenRouter; для interactive LLM — process-wide limiter (per worker при RQ). |
+
+Env (не yaml): `LLM_JOB_BACKEND=inprocess|rq`, `REDIS_URL`, `LLM_WORKER_METRICS_PORT`, `LLM_JOB_STUCK_MINUTES`, `LLM_RQ_JOB_TIMEOUT_SECONDS` — см. `.env.example`.
 
 ---
 

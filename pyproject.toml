@@ -37,16 +37,19 @@ dependencies = [
   "opentelemetry-instrumentation-fastapi==0.65b0",
   "opentelemetry-instrumentation-sqlalchemy==0.65b0",
   "opentelemetry-instrumentation-httpx==0.65b0",
+  "redis (>=5.0.0)",
+  "rq (>=2.0.0)",
 ]
 
 [project.optional-dependencies]
 # Poetry: poetry install --extras telethon — опционально cryptg для ускорения Telethon на Windows
-dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0", "ruff>=0.14.0,<1.0.0"]
+dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0", "ruff>=0.14.0,<1.0.0", "fakeredis>=2.26.0"]
 telethon = ["cryptg>=0.5.0"]
 
 [project.scripts]
 tg-jobs-parser = "tg_jobs_parser.cli.app:main"
 tg-jobs-api = "backend.main:main"
+tg-jobs-llm-worker = "backend.workers.llm_worker:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -97,3 +100,8 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
 docstring-code-format = true
+
+[dependency-groups]
+dev = [
+    "fakeredis (>=2.26.0)"
+]

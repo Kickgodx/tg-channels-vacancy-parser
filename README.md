@@ -147,9 +147,14 @@ confidence оценки, пояснение и списки совпадающи
   (`force=true`) запускает LLM заново.
 - Посчитанные скоры видны в колонке **Match**, по ним же работает сортировка
   (`sort_by=match_score` при выбранном резюме).
-- Мэтчинг и письма идут фоновыми джобами (`llm_jobs`): кэш → сразу 200,
-  иначе 202 + poll `GET /llm-jobs/{id}` (UI делает poll сам). Параллелизм —
-  `ai.interactive_concurrency` / `interactive_per_user_limit`.
+- Мэтчинг и письма — фоновые джобы (`llm_jobs`): кэш → 200; иначе 202 +
+  `job_id`. В Docker: Redis Queue (RQ) + сервис `llm-worker` (тот же образ,
+  `tg-jobs-llm-worker`). UI ждёт через SSE `GET /llm-jobs/{id}/events`
+  (fallback — poll). Параллелизм: `--scale llm-worker=N` и
+  `ai.interactive_per_user_limit`; `ai.interactive_concurrency` — для
+  inprocess / ориентир scale. Метрики воркера — контейнерный порт 9101
+  (Prometheus: `llm-worker:9101` в Docker-сети; на хост не пробрасывается,
+  чтобы `--scale` не конфликтовал). Локально без Redis: `LLM_JOB_BACKEND=inprocess`.
 - Модель матчинга задаётся отдельно от модели парсинга: `ai.match_model`
   (+ `ai.match_reasoning_enabled` для reasoning-моделей) — качество здесь
   важнее скорости, вызовов на порядок меньше. Глубина рассуждений —
@@ -234,7 +239,8 @@ uvicorn backend.main:app --reload --port 8000
 | `GET` `POST` `PUT` `DELETE` | `/resumes` | Резюме пользователя |
 | `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Оценка: кэш → 200; иначе фоновая джоба → 202 `{job_id}` (`force=true` — пересчёт) |
 | `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Письмо: кэш → 200; иначе 202 `{job_id}` (`force`, `tone`/`extra_notes`) |
-| `GET` | `/llm-jobs/{job_id}` | Статус фоновой LLM-задачи; при `done` — payload match/letter |
+| `GET` | `/llm-jobs/{job_id}` | Статус LLM-задачи; при `done` — payload match/letter |
+| `GET` | `/llm-jobs/{job_id}/events` | SSE статусов (Bearer или `?access_token=`); poll остаётся fallback |
 | `GET` | `/fx/rates`, `POST` `/fx/refresh` \| `/fx/recalculate-rub` | Курсы ЦБ и пересчёт зарплат в ₽ |
 | `GET` | `/ai-cache/stats` | Число записей в кэше LLM |
 | `POST` | `/ai-cache/clear` | Полная очистка кэша LLM |
@@ -295,12 +301,13 @@ tg_jobs_parser/
 
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
     api/routes/            — health, auth, config, channels, runs, vacancies,
-                             analytics, filters, resumes, fx, ai-cache
+                             analytics, filters, resumes, fx, ai-cache, llm-jobs
     db/                    — модели, Alembic, репозиторий, кэш LLM, UPSERT
+    services/              — run/match/cover_letter/llm_job/interactive_llm,
+                             llm_job_events, auth, import, progress_bus
+    workers/               — llm_worker (RQ), llm_tasks, recover
+    queue/                 — RQ Redis connection
   alembic/                 — миграции SQL
-    services/              — run_service, match_service, cover_letter_service,
-                             llm_job_service, interactive_llm,
-                             auth_service, import_service, progress_bus
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Vacancies
@@ -508,9 +515,11 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
 | **`GET /metrics`** | Эндпоинт Prometheus (не путать с `/api/v1/vacancies/metrics`) |
 | **Prometheus** | Scrape backend каждые 15 с (`observability/prometheus.yml`) |
-| **Grafana** | Дашборды **tg-jobs-parser API**, **LLM**, **Pipeline** и **HH.ru sync** (папка `tg-jobs-parser`) |
+| **Grafana** | Дашборды **API**, **LLM**, **LLM jobs / queue**, **Pipeline**, **HH.ru sync** |
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
-| **Доменные метрики** | `backend/observability.py`: прогоны (`parse_runs_*`), UPSERT и TTL-архивация вакансий, ручной импорт, матчинг (`vacancy_match_*`), письма (`cover_letter_*`), фоновые LLM-джобы (`llm_jobs_*`), auth-события, запросы к ЦБ |
+| **Доменные метрики** | прогоны, UPSERT/TTL, импорт, матчинг, письма, LLM-джобы (`llm_job_enqueue_*`, `llm_worker_*`, `llm_rq_queue_jobs`, `llm_jobs_by_status`, recover), auth, ЦБ |
+
+**Затор очереди LLM:** смотреть дашборд **LLM jobs / queue** — растут `llm_rq_queue_jobs` и `llm_jobs_by_status{status="queued"}`; worker latency в `llm_worker_job_duration_seconds`. TraceQL: `{ name = "llm_job.run" }`, `{ name = "llm_job.enqueue" }`.
 | **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
 | **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и отправляет в Tempo (`observability/alloy-config.alloy`) |
