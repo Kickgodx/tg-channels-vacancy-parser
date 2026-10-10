@@ -12,10 +12,10 @@ cd frontend && npm run build                   # tsc -b + vite build
 - Виртуальное окружение — `.venv`; вызывать `.venv/Scripts/python.exe -m pip`,
   а не `.venv/Scripts/pip.exe` (последний указывает на устаревший путь).
 - Тесты офлайновые: `tests/conftest.py` подставляет `CONFIG_PATH` на конфиг с
-  `fx.enabled: false`. Без этого агрегаты (`_prepare_fx` в
-  `backend/db/vacancy_metrics.py`) на каждый вызов ходят за курсами в ЦБ —
-  прогон растягивается с 10 с до ~5 мин. Тест, которому нужен курс, должен
-  подменять `fx_repository.ensure_latest_rates`, а не полагаться на сеть.
+  `fx.enabled: false`. Агрегаты (`_prepare_fx`) курсы из сети не тянут — только
+  БД; сеть остаётся в startup-sync / upsert / `ensure_latest_rates`. Тест,
+  которому нужен курс, должен подменять `fx_repository.ensure_latest_rates`,
+  а не полагаться на сеть.
 - LLM live evals помечены `@pytest.mark.llm` — **не** входят в обычный
   `pytest -q`. Опционально:
   `pytest -m llm` или

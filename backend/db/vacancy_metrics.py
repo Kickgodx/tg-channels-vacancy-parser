@@ -156,12 +156,15 @@ def _salary_rub_expr_table(table):
 
 
 def _prepare_fx(session: Session) -> SalaryDisplayMeta:
+    """Метаданные курсов для UI: только последний снимок из БД, без HTTP к ЦБ.
+
+    Синхронизация курсов — при старте API (`fx.sync_on_startup`) и явных FX-эндпоинтах.
+    Агрегаты зарплат опираются на ``detected_salary_avg_rub`` / курсы уже в БД.
+    """
     cfg = load_config(get_settings().config_path)
+    rate_date = None
     if cfg.fx.enabled:
-        fx_repo.sync_recent_days(session, cfg.fx)
-        rate_date, _ = fx_repo.ensure_latest_rates(session, cfg.fx)
-    else:
-        rate_date = None
+        rate_date, _ = fx_repo.get_latest_rates(session)
     rates_as_of = rate_date.isoformat() if rate_date is not None else datetime.now(UTC).date().isoformat()
     return SalaryDisplayMeta(
         display_currency=cfg.fx.display_currency,

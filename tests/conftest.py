@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-# Минимальный конфиг: fx выключен, иначе агрегаты (`_prepare_fx`) на каждый
-# вызов ходят за курсами в ЦБ — десятки секунд таймаутов в оффлайн-прогоне.
+# Минимальный конфиг: fx выключен (upsert/apply и startup-sync не тянут ЦБ в оффлайне).
 _TEST_CONFIG = """
 telegram:
   telethon_session_file: sessions/tg_jobs.session
