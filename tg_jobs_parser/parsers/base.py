@@ -5,7 +5,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-
 from typing import TYPE_CHECKING
 
 from tg_jobs_parser.config.schema import AppConfig
@@ -44,9 +43,7 @@ class BaseChannelParser(ABC):
         ``channel_username`` — без ``@``.
         """
 
-    def fetch_posts_many(
-        self, channel_usernames: list[str]
-    ) -> list[tuple[str, list[RawPost], str | None]]:
+    def fetch_posts_many(self, channel_usernames: list[str]) -> list[tuple[str, list[RawPost], str | None]]:
         """
         Пакетный вариант: вернуть результаты по нескольким каналам.
 

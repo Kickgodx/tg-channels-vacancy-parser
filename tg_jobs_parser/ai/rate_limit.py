@@ -5,17 +5,14 @@ from __future__ import annotations
 import re
 import threading
 import time
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 from tg_jobs_parser.utils.logger import get_logger
 
 _LOG = get_logger(__name__)
 
 _RESET_MS_RE = re.compile(r"X-RateLimit-Reset['\"]?\s*[:=]\s*['\"]?(\d+)", re.I)
-_REMAINING_RE = re.compile(
-    r"X-RateLimit-Remaining['\"]?\s*[:=]\s*['\"]?(\d+)", re.I
-)
+_REMAINING_RE = re.compile(r"X-RateLimit-Remaining['\"]?\s*[:=]\s*['\"]?(\d+)", re.I)
 
 
 class LlmQuotaExhausted(RuntimeError):
@@ -111,12 +108,9 @@ class OpenRouterRateLimiter:
 
         until_txt = ""
         if self.llm_disabled_until_epoch:
-            until_txt = datetime.fromtimestamp(
-                self.llm_disabled_until_epoch, tz=timezone.utc
-            ).strftime("%Y-%m-%d %H:%M UTC")
+            until_txt = datetime.fromtimestamp(self.llm_disabled_until_epoch, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
         _LOG.error(
-            "OpenRouter: LLM отключён до конца прогона (%s). %s "
-            "Дальнейшие посты — только rule-based извлечение.",
+            "OpenRouter: LLM отключён до конца прогона (%s). %s Дальнейшие посты — только rule-based извлечение.",
             reason,
             f"Сброс лимита ориентировочно: {until_txt}. " if until_txt else "",
         )
@@ -127,17 +121,11 @@ class OpenRouterRateLimiter:
         """
         headers = extract_rate_limit_headers(error)
         msg = str(error).lower()
-        remaining_raw = headers.get("X-RateLimit-Remaining") or headers.get(
-            "x-ratelimit-remaining"
-        )
+        remaining_raw = headers.get("X-RateLimit-Remaining") or headers.get("x-ratelimit-remaining")
         reset_raw = headers.get("X-RateLimit-Reset") or headers.get("x-ratelimit-reset")
         reset_ms = int(reset_raw) if reset_raw and str(reset_raw).isdigit() else None
 
-        exhausted = (
-            "per-day" in msg
-            or "per day" in msg
-            or (remaining_raw is not None and int(remaining_raw) <= 0)
-        )
+        exhausted = "per-day" in msg or "per day" in msg or (remaining_raw is not None and int(remaining_raw) <= 0)
 
         if exhausted and self.stop_llm_when_rate_limited:
             label = "дневной лимит" if "per-day" in msg or "per day" in msg else "квота (Remaining=0)"
@@ -153,9 +141,7 @@ class OpenRouterRateLimiter:
 
     def acquire(self) -> None:
         if self.llm_disabled:
-            raise LlmQuotaExhausted(
-                self.llm_disabled_reason or "LLM отключён (rate limit)"
-            )
+            raise LlmQuotaExhausted(self.llm_disabled_reason or "LLM отключён (rate limit)")
         with self._lock:
             now = time.monotonic()
             delay = self._min_interval - (now - self._last_request_at)

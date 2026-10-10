@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.db.ai_cache_repository import cache_clear_all, cache_count, cache_get, cache_put
-from backend.db.base import Base
+from backend.db.ai_cache_repository import (
+    cache_clear_all,
+    cache_count,
+    cache_get,
+    cache_put,
+)
 from backend.db.migrate import upgrade_head
 from tg_jobs_parser.ai.cache import cache_key
 from tg_jobs_parser.ai.schema import VacancyAIExtraction
@@ -73,7 +77,7 @@ def test_cache_ttl_expires(db_session):
 
     row = db_session.get(AIExtractionCacheRow, key)
     assert row is not None
-    row.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
     db_session.commit()
     assert cache_get(db_session, cache_key=key, ttl_days=1) is None
     assert cache_count(db_session) == 0

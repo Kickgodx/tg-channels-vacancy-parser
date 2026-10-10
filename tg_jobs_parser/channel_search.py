@@ -13,10 +13,7 @@ import httpx
 from tg_jobs_parser.utils.logger import get_logger
 
 _LOG = get_logger(__name__)
-_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-)
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
 
 class ChannelSearchBackend:

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from tg_jobs_parser.config.schema import AppConfig, ParserConfig
 from tg_jobs_parser.deduplication.deduplicator import deduplicate_vacancies
@@ -12,7 +12,7 @@ def _v(text: str, vid: str) -> Vacancy:
         source_channel="ch",
         source_url="https://t.me/s/ch",
         post_url="https://t.me/ch/1",
-        post_date=datetime.now(timezone.utc),
+        post_date=datetime.now(UTC),
         raw_text=text,
         cleaned_text=text,
         detected_specializations=["Python"],

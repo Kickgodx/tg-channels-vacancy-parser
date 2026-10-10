@@ -69,12 +69,15 @@ def test_sampler_drops_only_orphan_client_spans(exporter):
     tracer = trace.get_tracer("test")
     with tracer.start_as_current_span("orphan sql", kind=SpanKind.CLIENT):
         pass
-    with tracer.start_as_current_span("parse_run"):
-        with tracer.start_as_current_span("child sql", kind=SpanKind.CLIENT):
-            pass
+    with tracer.start_as_current_span("parse_run"), tracer.start_as_current_span("child sql", kind=SpanKind.CLIENT):
+        pass
     with tracer.start_as_current_span("GET /x", kind=SpanKind.SERVER):
         pass
-    assert sorted(s.name for s in exporter.get_finished_spans()) == ["GET /x", "child sql", "parse_run"]
+    assert sorted(s.name for s in exporter.get_finished_spans()) == [
+        "GET /x",
+        "child sql",
+        "parse_run",
+    ]
 
 
 @pytest.fixture
@@ -93,7 +96,9 @@ def traced_client(exporter):
 
     app.add_middleware(HttpLoggingMiddleware)
     instrument_app(
-        app, exclude_paths=frozenset({"/metrics"}), tracer_provider=trace.get_tracer_provider()
+        app,
+        exclude_paths=frozenset({"/metrics"}),
+        tracer_provider=trace.get_tracer_provider(),
     )
     with TestClient(app) as c:
         yield c
@@ -178,9 +183,11 @@ def test_sql_spans_are_children_of_current_span(exporter):
     instrumentor.instrument(tracer_provider=trace.get_tracer_provider())
     try:
         engine = sqlalchemy.create_engine("sqlite://")
-        with trace.get_tracer("test").start_as_current_span("vacancy.match") as parent:
-            with engine.connect() as conn:
-                conn.execute(sqlalchemy.text("SELECT 1"))
+        with (
+            trace.get_tracer("test").start_as_current_span("vacancy.match") as parent,
+            engine.connect() as conn,
+        ):
+            conn.execute(sqlalchemy.text("SELECT 1"))
         engine.dispose()
     finally:
         instrumentor.uninstrument()

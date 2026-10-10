@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -32,7 +32,7 @@ def _add_vacancy(vacancy_id: str = "vac-1", text: str = "Нужен Python-ра�
                 source_post_key="ch-1",
                 source_channel="ch",
                 source_url="https://t.me/s/ch",
-                post_date=datetime(2026, 9, 1, tzinfo=timezone.utc),
+                post_date=datetime(2026, 9, 1, tzinfo=UTC),
                 raw_text=text,
                 cleaned_text=text,
             )
@@ -67,10 +67,18 @@ def stub_llm(monkeypatch):
             },
             explanation="Подходит по стеку, не хватает k8s",
             matching_skills=[
-                {"skill": "python", "importance": "critical", "evidence": "В резюме есть Python."}
+                {
+                    "skill": "python",
+                    "importance": "critical",
+                    "evidence": "В резюме есть Python.",
+                }
             ],
             missing_skills=[
-                {"skill": "k8s", "importance": "important", "evidence": "В резюме не указан."}
+                {
+                    "skill": "k8s",
+                    "importance": "important",
+                    "evidence": "В резюме не указан.",
+                }
             ],
             strengths=["Совпадает основной стек."],
             risks=["Опыт с Kubernetes в резюме не указан."],
@@ -85,7 +93,9 @@ def test_solo_match_runs_llm_then_serves_cache(api_client, stub_llm):
     token = _register(api_client, "a@example.com")
     vid = _add_vacancy()
     rid = api_client.post(
-        "/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python dev"}
+        "/api/v1/resumes",
+        headers=_auth(token),
+        json={"name": "CV", "text": "python dev"},
     ).json()["id"]
 
     r = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
@@ -109,9 +119,7 @@ def test_solo_match_runs_llm_then_serves_cache(api_client, stub_llm):
     assert len(stub_llm) == 1
 
     # force=true — новый вызов и новая оценка
-    forced = api_client.post(
-        f"/api/v1/resumes/{rid}/match/{vid}?force=true", headers=_auth(token)
-    )
+    forced = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}?force=true", headers=_auth(token))
     assert forced.json()["overall_score"] == 79
     assert forced.json()["cached"] is False
     assert len(stub_llm) == 2
@@ -127,26 +135,15 @@ def test_solo_match_404_and_auth(api_client, stub_llm):
     t1 = _register(api_client, "a@example.com")
     t2 = _register(api_client, "b@example.com")
     vid = _add_vacancy()
-    rid = api_client.post(
-        "/api/v1/resumes", headers=_auth(t1), json={"name": "CV", "text": "python"}
-    ).json()["id"]
+    rid = api_client.post("/api/v1/resumes", headers=_auth(t1), json={"name": "CV", "text": "python"}).json()["id"]
 
     assert api_client.post(f"/api/v1/resumes/{rid}/match/{vid}").status_code == 401
     # чужое резюме
-    assert (
-        api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(t2)).status_code
-        == 404
-    )
+    assert api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(t2)).status_code == 404
     # несуществующая вакансия
-    assert (
-        api_client.post(f"/api/v1/resumes/{rid}/match/nope", headers=_auth(t1)).status_code
-        == 404
-    )
+    assert api_client.post(f"/api/v1/resumes/{rid}/match/nope", headers=_auth(t1)).status_code == 404
     # оценки ещё нет
-    assert (
-        api_client.get(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(t1)).status_code
-        == 404
-    )
+    assert api_client.get(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(t1)).status_code == 404
     assert stub_llm == []
 
 
@@ -168,16 +165,25 @@ def test_match_single_end_to_end(api_client, monkeypatch):
             extraction = VacancyMatchExtraction(
                 confidence=88,
                 breakdown=MatchBreakdown(
-                    role_match=90, skills_match=70, seniority_match=80,
-                    domain_match=100, work_format_match=100,
+                    role_match=90,
+                    skills_match=70,
+                    seniority_match=80,
+                    domain_match=100,
+                    work_format_match=100,
                 ),
                 matching_skills=[
-                    SkillMatch(skill="Python", importance="critical",
-                               evidence="В резюме указан Python.")
+                    SkillMatch(
+                        skill="Python",
+                        importance="critical",
+                        evidence="В резюме указан Python.",
+                    )
                 ],
                 missing_skills=[
-                    SkillMatch(skill="Kubernetes", importance="important",
-                               evidence="Опыт с Kubernetes в резюме не указан.")
+                    SkillMatch(
+                        skill="Kubernetes",
+                        importance="important",
+                        evidence="Опыт с Kubernetes в резюме не указан.",
+                    )
                 ],
                 strengths=["Совпадает основной стек."],
                 risks=["Опыт с Kubernetes в резюме не указан."],
@@ -192,9 +198,7 @@ def test_match_single_end_to_end(api_client, monkeypatch):
 
     token = _register(api_client, "a@example.com")
     vid = _add_vacancy()
-    rid = api_client.post(
-        "/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}
-    ).json()["id"]
+    rid = api_client.post("/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}).json()["id"]
 
     r = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
     assert r.status_code == 200, r.text
@@ -214,9 +218,7 @@ def test_solo_match_reports_llm_failure(api_client, monkeypatch):
     monkeypatch.setattr(match_service, "match_single", _boom)
     token = _register(api_client, "a@example.com")
     vid = _add_vacancy()
-    rid = api_client.post(
-        "/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}
-    ).json()["id"]
+    rid = api_client.post("/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}).json()["id"]
 
     r = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
     assert r.status_code == 502
@@ -225,10 +227,7 @@ def test_solo_match_reports_llm_failure(api_client, monkeypatch):
 
 def test_match_model_falls_back_to_parse_model():
     assert AiConfig(model="parse/model").resolved_match_model() == "parse/model"
-    assert (
-        AiConfig(model="parse/model", match_model="reasoning/model").resolved_match_model()
-        == "reasoning/model"
-    )
+    assert AiConfig(model="parse/model", match_model="reasoning/model").resolved_match_model() == "reasoning/model"
 
 
 def test_match_uses_match_model_and_reasoning(monkeypatch):
@@ -246,8 +245,15 @@ def test_match_uses_match_model_and_reasoning(monkeypatch):
     client = OpenRouterClient(ai)
     seen: dict = {}
 
-    def _fake_call(*, messages, parse, model=None, reasoning=None, reasoning_effort="",
-                   json_schema=None):
+    def _fake_call(
+        *,
+        messages,
+        parse,
+        model=None,
+        reasoning=None,
+        reasoning_effort="",
+        json_schema=None,
+    ):
         seen["model"] = model
         seen["reasoning"] = reasoning
         seen["reasoning_effort"] = reasoning_effort
@@ -272,8 +278,15 @@ def test_match_retries_once_on_invalid_json(monkeypatch):
     client = OpenRouterClient(AiConfig(model="m"))
     attempts: list[int] = []
 
-    def _flaky(*, messages, parse, model=None, reasoning=None, reasoning_effort="",
-               json_schema=None):
+    def _flaky(
+        *,
+        messages,
+        parse,
+        model=None,
+        reasoning=None,
+        reasoning_effort="",
+        json_schema=None,
+    ):
         attempts.append(1)
         if len(attempts) == 1:
             raise _json.JSONDecodeError("bad", "doc", 0)
@@ -285,8 +298,15 @@ def test_match_retries_once_on_invalid_json(monkeypatch):
     assert len(attempts) == 2
 
     # обе попытки провалились — ошибка пробрасывается (дальше fallback-цепочка)
-    def _always_bad(*, messages, parse, model=None, reasoning=None, reasoning_effort="",
-                    json_schema=None):
+    def _always_bad(
+        *,
+        messages,
+        parse,
+        model=None,
+        reasoning=None,
+        reasoning_effort="",
+        json_schema=None,
+    ):
         raise ValueError("broken")
 
     monkeypatch.setattr(client, "_call_llm", _always_bad)

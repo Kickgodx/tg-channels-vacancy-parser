@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -32,7 +32,7 @@ def _add_vacancy(vacancy_id: str = "vac-1", text: str = "Нужен Python-ра�
                 source_post_key="ch-1",
                 source_channel="ch",
                 source_url="https://t.me/s/ch",
-                post_date=datetime(2026, 9, 1, tzinfo=timezone.utc),
+                post_date=datetime(2026, 9, 1, tzinfo=UTC),
                 raw_text=text,
                 cleaned_text=text,
             )
@@ -44,9 +44,7 @@ def _add_vacancy(vacancy_id: str = "vac-1", text: str = "Нужен Python-ра�
 
 
 def _add_resume(client, token: str, text: str = "python dev") -> int:
-    return client.post(
-        "/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": text}
-    ).json()["id"]
+    return client.post("/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": text}).json()["id"]
 
 
 @pytest.fixture
@@ -54,11 +52,17 @@ def stub_llm(monkeypatch):
     """Подменяет LLM-вызов: считает обращения, возвращает фиксированное письмо."""
     calls: list[dict] = []
 
-    def _fake(session, *, resume_id, resume_text, vacancy_id, vacancy_text,
-              tone="neutral", extra_notes=None):
-        calls.append(
-            {"resume_id": resume_id, "vacancy_id": vacancy_id, "tone": tone}
-        )
+    def _fake(
+        session,
+        *,
+        resume_id,
+        resume_text,
+        vacancy_id,
+        vacancy_text,
+        tone="neutral",
+        extra_notes=None,
+    ):
+        calls.append({"resume_id": resume_id, "vacancy_id": vacancy_id, "tone": tone})
         from backend.db import repository as repo
 
         return repo.upsert_cover_letter(
@@ -79,9 +83,7 @@ def test_cover_letter_runs_llm_then_serves_cache(api_client, stub_llm):
     vid = _add_vacancy()
     rid = _add_resume(api_client, token)
 
-    r = api_client.post(
-        f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={}
-    )
+    r = api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["text"] == "Здравствуйте! Письмо #1 под вашу вакансию."
@@ -91,9 +93,7 @@ def test_cover_letter_runs_llm_then_serves_cache(api_client, stub_llm):
     assert len(stub_llm) == 1
 
     # повторный POST без force — из БД, без вызова LLM
-    again = api_client.post(
-        f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={}
-    )
+    again = api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={})
     assert again.json()["cached"] is True
     assert len(stub_llm) == 1
 
@@ -109,9 +109,7 @@ def test_cover_letter_runs_llm_then_serves_cache(api_client, stub_llm):
     assert len(stub_llm) == 2
 
     # GET отдаёт сохранённый вариант
-    got = api_client.get(
-        f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token)
-    )
+    got = api_client.get(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token))
     assert got.status_code == 200
     assert got.json()["text"] == "Здравствуйте! Письмо #2 под вашу вакансию."
     assert got.json()["tone"] == "formal"
@@ -124,30 +122,13 @@ def test_cover_letter_404_and_auth(api_client, stub_llm):
     vid = _add_vacancy()
     rid = _add_resume(api_client, t1)
 
-    assert (
-        api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}").status_code == 401
-    )
+    assert api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}").status_code == 401
     # чужое резюме
-    assert (
-        api_client.post(
-            f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(t2)
-        ).status_code
-        == 404
-    )
+    assert api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(t2)).status_code == 404
     # несуществующая вакансия
-    assert (
-        api_client.post(
-            f"/api/v1/resumes/{rid}/cover-letter/nope", headers=_auth(t1)
-        ).status_code
-        == 404
-    )
+    assert api_client.post(f"/api/v1/resumes/{rid}/cover-letter/nope", headers=_auth(t1)).status_code == 404
     # письма ещё нет
-    assert (
-        api_client.get(
-            f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(t1)
-        ).status_code
-        == 404
-    )
+    assert api_client.get(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(t1)).status_code == 404
     assert stub_llm == []
 
 
@@ -156,26 +137,12 @@ def test_cover_letter_delete(api_client, stub_llm):
     vid = _add_vacancy()
     rid = _add_resume(api_client, token)
 
-    api_client.post(
-        f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={}
-    )
-    r = api_client.delete(
-        f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token)
-    )
+    api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={})
+    r = api_client.delete(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token))
     assert r.status_code == 204
-    assert (
-        api_client.get(
-            f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token)
-        ).status_code
-        == 404
-    )
+    assert api_client.get(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token)).status_code == 404
     # повторный delete — 404
-    assert (
-        api_client.delete(
-            f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token)
-        ).status_code
-        == 404
-    )
+    assert api_client.delete(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token)).status_code == 404
 
 
 def test_cover_letter_removed_with_resume(api_client, stub_llm):
@@ -183,9 +150,7 @@ def test_cover_letter_removed_with_resume(api_client, stub_llm):
     token = _register(api_client, "a@example.com")
     vid = _add_vacancy()
     rid = _add_resume(api_client, token)
-    api_client.post(
-        f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={}
-    )
+    api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={})
 
     session = get_session_factory()()
     try:
@@ -211,9 +176,7 @@ def test_cover_letter_reports_llm_failure(api_client, monkeypatch):
     vid = _add_vacancy()
     rid = _add_resume(api_client, token)
 
-    r = api_client.post(
-        f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={}
-    )
+    r = api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={})
     assert r.status_code == 502
     assert "OpenRouter" in r.json()["detail"]
 
@@ -226,8 +189,7 @@ def test_cover_letter_end_to_end(api_client, monkeypatch):
         def __init__(self, ai):
             pass
 
-        def cover_letter_with_fallback(self, *, resume_text, vacancy_text, tone,
-                                       extra_notes, match_summary):
+        def cover_letter_with_fallback(self, *, resume_text, vacancy_text, tone, extra_notes, match_summary):
             assert "python" in resume_text
             assert "Python-разработчик" in vacancy_text
             assert tone == "friendly"
@@ -257,9 +219,7 @@ def test_cover_letter_end_to_end(api_client, monkeypatch):
 def test_cover_letter_model_falls_back_to_match_then_parse():
     assert AiConfig(model="parse/model").resolved_cover_letter_model() == "parse/model"
     assert (
-        AiConfig(model="parse/model", match_model="reasoning/model")
-        .resolved_cover_letter_model()
-        == "reasoning/model"
+        AiConfig(model="parse/model", match_model="reasoning/model").resolved_cover_letter_model() == "reasoning/model"
     )
     assert (
         AiConfig(
@@ -284,8 +244,16 @@ def test_cover_letter_uses_own_model_without_json_format(monkeypatch):
     client = OpenRouterClient(ai)
     seen: dict = {}
 
-    def _fake_call(*, messages, parse, model=None, reasoning=None, reasoning_effort="",
-                   json_schema=None, plain_text=False):
+    def _fake_call(
+        *,
+        messages,
+        parse,
+        model=None,
+        reasoning=None,
+        reasoning_effort="",
+        json_schema=None,
+        plain_text=False,
+    ):
         seen["model"] = model
         seen["plain_text"] = plain_text
         return "Текст письма", LLMUsage(model=model or "")

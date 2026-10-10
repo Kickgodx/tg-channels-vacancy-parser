@@ -9,9 +9,9 @@ import re
 import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from typing import TYPE_CHECKING
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from opentelemetry import context as otel_context
 from opentelemetry import trace
@@ -22,7 +22,10 @@ from tg_jobs_parser.deduplication.deduplicator import VacancyDeduplicator
 from tg_jobs_parser.extraction.company_extractor import extract_company
 from tg_jobs_parser.extraction.contact_extractor import extract_contact
 from tg_jobs_parser.extraction.grade_extractor import extract_grade
-from tg_jobs_parser.extraction.location_extractor import detect_work_format, extract_country_city
+from tg_jobs_parser.extraction.location_extractor import (
+    detect_work_format,
+    extract_country_city,
+)
 from tg_jobs_parser.extraction.normalizer import clean_display_text, normalize_for_match
 from tg_jobs_parser.extraction.salary_extractor import extract_salary
 from tg_jobs_parser.extraction.salary_period import (
@@ -34,6 +37,7 @@ from tg_jobs_parser.extraction.specialization_extractor import extract_specializ
 from tg_jobs_parser.extraction.technology_extractor import extract_technologies
 from tg_jobs_parser.extraction.vacancy_detector import compute_vacancy_score
 from tg_jobs_parser.filters.vacancy_filters import apply_post_filters
+from tg_jobs_parser.fx.vacancy_rub import enrich_vacancies_salary_rub
 from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_cancel import (
@@ -55,10 +59,9 @@ from tg_jobs_parser.utils.dates import (
     resolve_search_date_to,
 )
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
-from tg_jobs_parser.fx.vacancy_rub import enrich_vacancies_salary_rub
 from tg_jobs_parser.utils.hashing import vacancy_content_id
-from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
 from tg_jobs_parser.utils.logger import get_logger
+from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
 from tg_jobs_parser.utils.thread_pool import DaemonThreadPoolExecutor
 
 if TYPE_CHECKING:
@@ -74,7 +77,10 @@ def _channel_parser(
     cancellation: ParseCancellationToken | None = None,
 ) -> BaseChannelParser:
     """Единственный источник сообщений — Telethon (MTProto с файлом сессии)."""
-    from tg_jobs_parser.parsers.telegram_telethon import TelegramTelethonParser, telethon_import_error
+    from tg_jobs_parser.parsers.telegram_telethon import (
+        TelegramTelethonParser,
+        telethon_import_error,
+    )
 
     if err := telethon_import_error():
         raise RuntimeError(
@@ -96,7 +102,11 @@ def _extract_employment(text: str) -> str | None:
 
 
 def _extract_experience(text: str) -> str | None:
-    m = re.search(r"\b(\d+\+?\s*(?:лет|years?|y\/o)|опыт\s*от\s*\d+[\s\-]*\d*\s*(?:лет|years)?)\b", text, re.I)
+    m = re.search(
+        r"\b(\d+\+?\s*(?:лет|years?|y\/o)|опыт\s*от\s*\d+[\s\-]*\d*\s*(?:лет|years)?)\b",
+        text,
+        re.I,
+    )
     if m:
         return m.group(1).strip()
     if re.search(r"\bno\s+experience\b|без\s+опыт", text, re.I):
@@ -176,7 +186,7 @@ def raw_post_to_vacancy_rules(
         is_duplicate=False,
         duplicate_group_id=None,
         duplicate_reason=None,
-        parsed_at=datetime.now(timezone.utc),
+        parsed_at=datetime.now(UTC),
     )
     apply_hourly_currency_from_text(vacancy)
     sanitize_salary_currency_period(vacancy)
@@ -193,9 +203,7 @@ def raw_post_to_vacancy(
     wf_map: dict[str, list[str]] | None = None,
 ) -> Vacancy:
     """Алиас rule-based извлечения (обратная совместимость)."""
-    return raw_post_to_vacancy_rules(
-        post, config, spec_map=spec_map, tech_list=tech_list, wf_map=wf_map
-    )
+    return raw_post_to_vacancy_rules(post, config, spec_map=spec_map, tech_list=tech_list, wf_map=wf_map)
 
 
 def _build_parse_result(
@@ -295,10 +303,7 @@ def _process_posts_parallel(
     with pool_cls(max_workers=workers, thread_name_prefix="post-proc") as ex:
         # copy_context: воркеры наследуют текущий OTel-span (LLM-вызовы — дети
         # parse.process_posts, а не отдельные трассы); один Context на задачу.
-        futures = {
-            ex.submit(contextvars.copy_context().run, process_one, post): post
-            for post in all_posts
-        }
+        futures = {ex.submit(contextvars.copy_context().run, process_one, post): post for post in all_posts}
         pending = set(futures.keys())
         while pending:
             if cancel and cancel.is_cancelled():
@@ -379,8 +384,7 @@ def run_parse(
 
     if not _api_run(cli_overrides):
         all_warnings.append(
-            "Telegram: Telethon (MTProto). Убедитесь, что активна сессия и заданы "
-            "TELEGRAM_API_ID / TELEGRAM_API_HASH."
+            "Telegram: Telethon (MTProto). Убедитесь, что активна сессия и заданы TELEGRAM_API_ID / TELEGRAM_API_HASH."
         )
 
     # Предвычисляем все словари один раз — иначе они пересобирались бы на каждом из тысяч постов.
@@ -394,7 +398,7 @@ def run_parse(
     candidates: list[Vacancy] = []
     batch_step = progress_every_n_posts or config.parser.progress_batch_posts
     partial_dir: Path | None = None
-    partial_run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    partial_run_id = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     if config.output.save_progress_batches:
         partial_dir = Path(config.output.directory) / config.output.partial_batches_subdirectory
         removed = clear_partial_batches(partial_dir)
@@ -418,9 +422,7 @@ def run_parse(
             "parse.fetch_posts", attributes={"parse.channels": len(channels_unique)}
         ) as fetch_span:
             fetch_results = channel_fetcher.fetch_posts_many(channels_unique)
-            fetch_span.set_attribute(
-                "parse.posts_fetched", sum(len(posts) for _, posts, _ in fetch_results)
-            )
+            fetch_span.set_attribute("parse.posts_fetched", sum(len(posts) for _, posts, _ in fetch_results))
         if cancel:
             cancel.check()
     except ParseCancelled:
@@ -531,9 +533,7 @@ def run_parse(
         def _process_one(post: RawPost) -> Vacancy | None:
             if cancel and cancel.is_cancelled():
                 return None
-            v = raw_post_to_vacancy_rules(
-                post, config, spec_map=specs_map, tech_list=tech_list, wf_map=wf_map
-            )
+            v = raw_post_to_vacancy_rules(post, config, spec_map=specs_map, tech_list=tech_list, wf_map=wf_map)
             if ai_service is not None:
                 if cancel and cancel.is_cancelled():
                     return None

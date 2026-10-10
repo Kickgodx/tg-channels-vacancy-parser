@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from backend.services import import_service
 
 VACANCY_TEXT = (
@@ -89,9 +87,7 @@ def test_import_batch_and_empty(api_client):
 
 
 def test_import_requires_auth(api_client):
-    assert api_client.post(
-        "/api/v1/vacancies/import", json={"texts": [VACANCY_TEXT]}
-    ).status_code == 401
+    assert api_client.post("/api/v1/vacancies/import", json={"texts": [VACANCY_TEXT]}).status_code == 401
 
 
 def test_import_with_ai_enrichment(api_client, monkeypatch, default_test_config):
@@ -100,9 +96,7 @@ def test_import_with_ai_enrichment(api_client, monkeypatch, default_test_config)
     from tg_jobs_parser.config.loader import load_config
 
     real_cfg = load_config(default_test_config)
-    ai_cfg = real_cfg.model_copy(
-        update={"ai": real_cfg.ai.model_copy(update={"enabled": True})}
-    )
+    ai_cfg = real_cfg.model_copy(update={"ai": real_cfg.ai.model_copy(update={"enabled": True})})
     monkeypatch.setattr(import_service, "load_config", lambda *a, **k: ai_cfg)
 
     llm_calls: list[str] = []
@@ -120,9 +114,7 @@ def test_import_with_ai_enrichment(api_client, monkeypatch, default_test_config)
             if "пикник" in vacancy.cleaned_text:
                 self.stats.dropped_not_job += 1
                 return None
-            return vacancy.model_copy(
-                update={"extraction_source": "hybrid", "ai_confidence": 0.9}
-            )
+            return vacancy.model_copy(update={"extraction_source": "hybrid", "ai_confidence": 0.9})
 
         def log_batch_finished(self):
             pass
@@ -130,9 +122,7 @@ def test_import_with_ai_enrichment(api_client, monkeypatch, default_test_config)
         def close(self):
             pass
 
-    monkeypatch.setattr(
-        "tg_jobs_parser.ai.enricher.AIEnrichmentService", _FakeAI, raising=True
-    )
+    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", _FakeAI, raising=True)
 
     token = _register(api_client, "imp@example.com")
     r = _import(api_client, token, [VACANCY_TEXT, NOT_VACANCY_TEXT])

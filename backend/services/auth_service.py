@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import secrets
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from pwdlib import PasswordHash
@@ -42,14 +42,13 @@ def _jwt_secret() -> str:
         if _ephemeral_secret is None:
             _ephemeral_secret = secrets.token_urlsafe(32)
             _LOG.warning(
-                "JWT_SECRET не задан — используется эфемерный секрет, "
-                "все сессии сбросятся при перезапуске backend."
+                "JWT_SECRET не задан — используется эфемерный секрет, все сессии сбросятся при перезапуске backend."
             )
     return _ephemeral_secret
 
 
 def create_access_token(user_id: int) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
         "iat": now,

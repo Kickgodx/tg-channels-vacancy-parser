@@ -4,6 +4,8 @@ import type {
   ConfigDefaults,
   CoverLetter,
   CoverLetterTone,
+  HhStatus,
+  HhSyncResult,
   LlmModelsCatalog,
   MetricsSummary,
   ProgressEvent,
@@ -260,6 +262,13 @@ export const api = {
     request<VacancyImportResponse>("/vacancies/import", {
       method: "POST",
       body: JSON.stringify({ texts, source_url: sourceUrl || null }),
+    }),
+
+  hhStatus: () => request<HhStatus>("/hh/status"),
+
+  hhSync: () =>
+    request<HhSyncResult>("/hh/sync", {
+      method: "POST",
     }),
 
   listResumes: () => request<{ items: Resume[] }>("/resumes"),

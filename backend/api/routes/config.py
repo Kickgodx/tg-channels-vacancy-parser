@@ -2,17 +2,27 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from backend.settings import get_settings
+from tg_jobs_parser.ai.llm_models_registry import (
+    load_llm_models_registry,
+    resolve_llm_models_path,
+)
+from tg_jobs_parser.ai.models_catalog import catalog_model_ids, label_for_model_id
 from tg_jobs_parser.config.loader import ConfigLoadError, load_config
 from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
-from tg_jobs_parser.ai.llm_models_registry import load_llm_models_registry, resolve_llm_models_path
-from tg_jobs_parser.ai.models_catalog import catalog_model_ids, label_for_model_id
 from tg_jobs_parser.utils.dates import resolve_search_date_from, resolve_search_date_to
-from backend.settings import get_settings
 
 router = APIRouter(prefix="/config", tags=["config"])
 
-WORK_FORMAT_OPTIONS = ["any", "remote", "hybrid", "office", "relocation", "exclude_office"]
+WORK_FORMAT_OPTIONS = [
+    "any",
+    "remote",
+    "hybrid",
+    "office",
+    "relocation",
+    "exclude_office",
+]
 
 
 @router.get("")

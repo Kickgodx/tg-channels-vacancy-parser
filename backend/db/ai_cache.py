@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+from backend.db.ai_cache_repository import cache_get, cache_put
+from backend.db.session import session_scope
 from tg_jobs_parser.ai.cache import cache_key as make_cache_key
 from tg_jobs_parser.ai.schema import VacancyAIExtraction
 from tg_jobs_parser.config.schema import AiConfig
 from tg_jobs_parser.utils.logger import get_logger
-
-from backend.db.ai_cache_repository import cache_clear_all, cache_get, cache_put
-from backend.db.session import session_scope
 
 _LOG = get_logger(__name__)
 

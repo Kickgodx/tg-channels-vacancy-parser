@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,8 +42,8 @@ fx:
     monkeypatch.setenv("CONFIG_PATH", str(cfg))
     monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
 
-    from backend.settings import get_settings
     from backend.db.session import init_db, reset_engine
+    from backend.settings import get_settings
 
     get_settings.cache_clear()
     reset_engine()
@@ -104,10 +105,10 @@ def test_ai_cache_stats(client: TestClient):
 
 def test_vacancy_metrics_aggregated(client: TestClient):
     import uuid
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    from backend.db.session import get_session_factory
     from backend.db.repository import upsert_vacancies
+    from backend.db.session import get_session_factory
     from tg_jobs_parser.models.vacancy import Vacancy
     from tg_jobs_parser.utils.hashing import vacancy_content_id
 
@@ -119,7 +120,7 @@ def test_vacancy_metrics_aggregated(client: TestClient):
         source_channel="chan",
         source_url="https://t.me/s/chan",
         post_url="https://t.me/chan/1",
-        post_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        post_date=datetime(2026, 3, 1, tzinfo=UTC),
         raw_text=text1,
         cleaned_text=text1,
         detected_specializations=["Python"],
@@ -142,7 +143,7 @@ def test_vacancy_metrics_aggregated(client: TestClient):
         source_channel="chan",
         source_url="https://t.me/s/chan",
         post_url="https://t.me/chan/2",
-        post_date=datetime(2026, 3, 2, tzinfo=timezone.utc),
+        post_date=datetime(2026, 3, 2, tzinfo=UTC),
         raw_text=text2,
         cleaned_text=text2,
         detected_specializations=["Python", "Backend"],
@@ -199,7 +200,7 @@ def test_vacancy_metrics_aggregated(client: TestClient):
         source_channel="chan",
         source_url="https://t.me/s/chan",
         post_url="https://t.me/chan/3",
-        post_date=datetime(2026, 3, 3, tzinfo=timezone.utc),
+        post_date=datetime(2026, 3, 3, tzinfo=UTC),
         raw_text=text3,
         cleaned_text=text3,
         detected_specializations=["Python"],

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
@@ -44,7 +44,7 @@ def _row(
         source_post_key=f"{channel}-{idx}",
         source_channel=channel,
         source_url="https://t.me/s/ch",
-        post_date=post_date or datetime(2026, 9, 1, tzinfo=timezone.utc),
+        post_date=post_date or datetime(2026, 9, 1, tzinfo=UTC),
         raw_text="t",
         cleaned_text="t",
         detected_grade=grade,
@@ -76,7 +76,13 @@ def test_salary_analytics_quantiles(db_session):
     assert mid.max == 400_000
 
     assert {b.range for b in res.distribution} == {
-        "до 100k", "100–150k", "150–200k", "200–250k", "250–300k", "300–400k", "400k+",
+        "до 100k",
+        "100–150k",
+        "150–200k",
+        "200–250k",
+        "250–300k",
+        "300–400k",
+        "400k+",
     }
     assert sum(b.count for b in res.distribution) == 5
     band = {b.range: b.count for b in res.distribution}

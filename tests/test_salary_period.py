@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -19,7 +19,7 @@ def _vacancy(**kwargs) -> Vacancy:
         source_url="https://t.me/s/ch",
         raw_text="text",
         cleaned_text="text",
-        parsed_at=datetime.now(timezone.utc),
+        parsed_at=datetime.now(UTC),
     )
     base.update(kwargs)
     return Vacancy(**base)

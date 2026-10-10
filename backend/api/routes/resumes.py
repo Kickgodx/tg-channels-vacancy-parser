@@ -97,12 +97,8 @@ def _match_to_out(row: VacancyMatchRow, *, cached: bool) -> VacancyMatchOut:
         confidence=row.confidence,
         breakdown=MatchBreakdown.model_validate(row.breakdown or {}),
         explanation=row.explanation,
-        matching_skills=[
-            SkillMatch.model_validate(s) for s in row.matching_skills or []
-        ],
-        missing_skills=[
-            SkillMatch.model_validate(s) for s in row.missing_skills or []
-        ],
+        matching_skills=[SkillMatch.model_validate(s) for s in row.matching_skills or []],
+        missing_skills=[SkillMatch.model_validate(s) for s in row.missing_skills or []],
         strengths=row.strengths or [],
         risks=row.risks or [],
         model=row.model,
@@ -153,9 +149,7 @@ def match_single_vacancy(
             vacancy_text=vacancy.cleaned_text or vacancy.raw_text or "",
         )
     except Exception as e:
-        _LOG.warning(
-            "Матчинг резюме %s ↔ вакансия %s не удался: %s", resume_id, vacancy_id, e
-        )
+        _LOG.warning("Матчинг резюме %s ↔ вакансия %s не удался: %s", resume_id, vacancy_id, e)
         raise HTTPException(status_code=502, detail=f"LLM: {e}") from e
     return _match_to_out(row, cached=False)
 
@@ -172,9 +166,7 @@ def _letter_to_out(row: CoverLetterRow, *, cached: bool) -> CoverLetterOut:
     )
 
 
-@resumes_router.get(
-    "/{resume_id}/cover-letter/{vacancy_id}", response_model=CoverLetterOut
-)
+@resumes_router.get("/{resume_id}/cover-letter/{vacancy_id}", response_model=CoverLetterOut)
 def get_cover_letter(
     resume_id: int,
     vacancy_id: str,
@@ -189,9 +181,7 @@ def get_cover_letter(
     return _letter_to_out(row, cached=True)
 
 
-@resumes_router.post(
-    "/{resume_id}/cover-letter/{vacancy_id}", response_model=CoverLetterOut
-)
+@resumes_router.post("/{resume_id}/cover-letter/{vacancy_id}", response_model=CoverLetterOut)
 def generate_cover_letter(
     resume_id: int,
     vacancy_id: str,
@@ -223,9 +213,7 @@ def generate_cover_letter(
             extra_notes=extra_notes,
         )
     except Exception as e:
-        _LOG.warning(
-            "Письмо резюме %s ↔ вакансия %s не удалось: %s", resume_id, vacancy_id, e
-        )
+        _LOG.warning("Письмо резюме %s ↔ вакансия %s не удалось: %s", resume_id, vacancy_id, e)
         raise HTTPException(status_code=502, detail=f"LLM: {e}") from e
     return _letter_to_out(row, cached=False)
 

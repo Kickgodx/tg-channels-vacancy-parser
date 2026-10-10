@@ -81,7 +81,12 @@ def upgrade() -> None:
         sa.Column("duplicate_reason", sa.Text(), nullable=True),
         sa.Column("parsed_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("last_parse_run_id", sa.Uuid(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_vacancies_source_post_key", "vacancies", ["source_post_key"], unique=False)
@@ -89,7 +94,12 @@ def upgrade() -> None:
     op.create_index("ix_vacancies_post_date", "vacancies", ["post_date"], unique=False)
     op.create_index("ix_vacancies_detected_grade", "vacancies", ["detected_grade"], unique=False)
     op.create_index("ix_vacancies_work_format", "vacancies", ["work_format"], unique=False)
-    op.create_index("ix_vacancies_last_parse_run_id", "vacancies", ["last_parse_run_id"], unique=False)
+    op.create_index(
+        "ix_vacancies_last_parse_run_id",
+        "vacancies",
+        ["last_parse_run_id"],
+        unique=False,
+    )
 
     op.create_table(
         "ai_extraction_cache",

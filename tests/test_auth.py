@@ -38,8 +38,8 @@ fx:
     monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
     monkeypatch.setenv("JWT_SECRET", "test-secret")
 
-    from backend.settings import get_settings
     from backend.db.session import init_db, reset_engine
+    from backend.settings import get_settings
 
     get_settings.cache_clear()
     reset_engine()
@@ -52,9 +52,7 @@ fx:
 
 
 def _register(client: TestClient, email: str, password: str = "secret1"):
-    return client.post(
-        "/api/v1/auth/register", json={"email": email, "password": password}
-    )
+    return client.post("/api/v1/auth/register", json={"email": email, "password": password})
 
 
 def _auth(token: str) -> dict:
@@ -121,23 +119,13 @@ def test_resumes_are_per_user(client: TestClient):
     # второй пользователь не видит чужое резюме
     assert client.get("/api/v1/resumes", headers=_auth(t2)).json()["items"] == []
     assert client.get(f"/api/v1/resumes/{rid}", headers=_auth(t2)).status_code == 404
-    assert (
-        client.delete(f"/api/v1/resumes/{rid}", headers=_auth(t2)).status_code == 404
-    )
+    assert client.delete(f"/api/v1/resumes/{rid}", headers=_auth(t2)).status_code == 404
     # вакансии с чужим resume_id → 404, без токена → 401
     assert client.get(f"/api/v1/vacancies?resume_id={rid}").status_code == 401
-    assert (
-        client.get(f"/api/v1/vacancies?resume_id={rid}", headers=_auth(t2)).status_code
-        == 404
-    )
-    assert (
-        client.get(f"/api/v1/vacancies?resume_id={rid}", headers=_auth(t1)).status_code
-        == 200
-    )
+    assert client.get(f"/api/v1/vacancies?resume_id={rid}", headers=_auth(t2)).status_code == 404
+    assert client.get(f"/api/v1/vacancies?resume_id={rid}", headers=_auth(t1)).status_code == 200
 
-    assert (
-        client.delete(f"/api/v1/resumes/{rid}", headers=_auth(t1)).status_code == 204
-    )
+    assert client.delete(f"/api/v1/resumes/{rid}", headers=_auth(t1)).status_code == 204
 
 
 def test_resume_update(client: TestClient):
@@ -150,12 +138,7 @@ def test_resume_update(client: TestClient):
         json={"name": "CV", "text": "old text"},
     ).json()["id"]
 
-    assert (
-        client.put(
-            f"/api/v1/resumes/{rid}", headers=_auth(t2), json={"name": "x"}
-        ).status_code
-        == 404
-    )
+    assert client.put(f"/api/v1/resumes/{rid}", headers=_auth(t2), json={"name": "x"}).status_code == 404
     assert client.put(f"/api/v1/resumes/{rid}", json={"name": "x"}).status_code == 401
 
     r = client.put(
@@ -167,9 +150,7 @@ def test_resume_update(client: TestClient):
     assert r.json()["name"] == "CV v2"
     assert r.json()["text"] == "new text"
 
-    r = client.put(
-        f"/api/v1/resumes/{rid}", headers=_auth(t1), json={"text": "newer text"}
-    )
+    r = client.put(f"/api/v1/resumes/{rid}", headers=_auth(t1), json={"text": "newer text"})
     assert r.status_code == 200
     assert r.json()["name"] == "CV v2"
     assert r.json()["text"] == "newer text"
@@ -187,13 +168,9 @@ def test_saved_filters_are_per_user(client: TestClient):
     assert r.status_code == 201
     fid = r.json()["id"]
 
-    assert client.get("/api/v1/filters", headers=_auth(t1)).json()["items"][0][
-        "name"
-    ] == "preset"
+    assert client.get("/api/v1/filters", headers=_auth(t1)).json()["items"][0]["name"] == "preset"
     assert client.get("/api/v1/filters", headers=_auth(t2)).json()["items"] == []
-    assert (
-        client.delete(f"/api/v1/filters/{fid}", headers=_auth(t2)).status_code == 404
-    )
+    assert client.delete(f"/api/v1/filters/{fid}", headers=_auth(t2)).status_code == 404
     assert client.delete(f"/api/v1/filters/{fid}", headers=_auth(t1)).status_code == 204
 
 

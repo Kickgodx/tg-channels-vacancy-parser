@@ -43,9 +43,7 @@ def test_disable_on_remaining_zero():
 
 
 def test_extract_headers_from_error():
-    err = Exception(
-        "{'metadata': {'headers': {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1778976000000'}}}"
-    )
+    err = Exception("{'metadata': {'headers': {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1778976000000'}}}")
     h = extract_rate_limit_headers(err)
     assert h.get("X-RateLimit-Remaining") == "0"
     assert h.get("X-RateLimit-Reset") == "1778976000000"

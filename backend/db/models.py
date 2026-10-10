@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
     Float,
     ForeignKey,
     Integer,
-    JSON,
     String,
     Text,
     func,
@@ -26,7 +24,7 @@ from backend.db.base import Base
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class ParseRunRow(Base):
@@ -100,18 +98,15 @@ class VacancyRow(Base):
     duplicate_group_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     duplicate_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    parsed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, index=True
-    )
-    last_parse_run_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True, index=True
-    )
+    parsed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    last_parse_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, server_default=func.now()
+        DateTime(timezone=True),
+        default=_utcnow,
+        onupdate=_utcnow,
+        server_default=func.now(),
     )
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
 
 class UserRow(Base):
@@ -124,9 +119,7 @@ class UserRow(Base):
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 
 class SavedFilterRow(Base):
@@ -140,9 +133,7 @@ class SavedFilterRow(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     params: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 
 class ResumeRow(Base):
@@ -157,9 +148,7 @@ class ResumeRow(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     skills_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 
 class VacancyMatchRow(Base):
@@ -167,9 +156,7 @@ class VacancyMatchRow(Base):
 
     __tablename__ = "vacancy_matches"
 
-    resume_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("resumes.id", ondelete="CASCADE"), primary_key=True
-    )
+    resume_id: Mapped[int] = mapped_column(Integer, ForeignKey("resumes.id", ondelete="CASCADE"), primary_key=True)
     vacancy_id: Mapped[str] = mapped_column(
         String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), primary_key=True
     )
@@ -182,9 +169,7 @@ class VacancyMatchRow(Base):
     strengths: Mapped[list | None] = mapped_column(JSON, nullable=True)
     risks: Mapped[list | None] = mapped_column(JSON, nullable=True)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 
 class CoverLetterRow(Base):
@@ -192,17 +177,39 @@ class CoverLetterRow(Base):
 
     __tablename__ = "cover_letters"
 
-    resume_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("resumes.id", ondelete="CASCADE"), primary_key=True
-    )
+    resume_id: Mapped[int] = mapped_column(Integer, ForeignKey("resumes.id", ondelete="CASCADE"), primary_key=True)
     vacancy_id: Mapped[str] = mapped_column(
         String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), primary_key=True
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
     tone: Mapped[str] = mapped_column(String(32), nullable=False)
     model: Mapped[str] = mapped_column(String(128), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, server_default=func.now()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+
+
+class HhListingRow(Base):
+    """Кэш короткой выдачи HH: last_seen + флаг detail_fetched для anti-DDOS."""
+
+    __tablename__ = "hh_listings"
+
+    hh_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(512), nullable=False)
+    employer: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    area: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    alternate_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    salary_json: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    snippet_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    raw_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    detail_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=_utcnow,
+        onupdate=_utcnow,
+        server_default=func.now(),
     )
 
 
@@ -217,9 +224,5 @@ class AIExtractionCacheRow(Base):
     mode: Mapped[str] = mapped_column(String(16), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
-    )
-    expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

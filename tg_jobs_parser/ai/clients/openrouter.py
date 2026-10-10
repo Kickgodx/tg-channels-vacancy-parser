@@ -132,9 +132,7 @@ class OpenRouterClient:
         self._ai = ai
         self._api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         if not self._api_key:
-            raise RuntimeError(
-                "OPENROUTER_API_KEY не задан. Добавьте ключ в .env (см. .env.example)."
-            )
+            raise RuntimeError("OPENROUTER_API_KEY не задан. Добавьте ключ в .env (см. .env.example).")
         self._rate_limiter = rate_limiter or OpenRouterRateLimiter(
             requests_per_minute=ai.requests_per_minute,
             max_retries_on_429=ai.max_retries_on_429,
@@ -168,9 +166,7 @@ class OpenRouterClient:
         try:
             from openai import OpenAI
         except ImportError as e:
-            raise RuntimeError(
-                "Для AI нужен пакет openai: poetry install --extras ai"
-            ) from e
+            raise RuntimeError("Для AI нужен пакет openai: poetry install --extras ai") from e
 
         default_headers: dict[str, str] = {}
         referer = os.getenv("OPENROUTER_HTTP_REFERER", "").strip()
@@ -190,9 +186,7 @@ class OpenRouterClient:
 
     def _create_completion(self, kwargs: dict[str, Any]) -> Any:
         if self._rate_limiter.llm_disabled:
-            raise LlmQuotaExhausted(
-                self._rate_limiter.llm_disabled_reason or "LLM отключён"
-            )
+            raise LlmQuotaExhausted(self._rate_limiter.llm_disabled_reason or "LLM отключён")
 
         attempts = self._rate_limiter.max_retries + 1
         last_err: Exception | None = None
@@ -208,12 +202,9 @@ class OpenRouterClient:
                     raise RuntimeError(f"OpenRouter API: {e}") from e
 
                 headers = extract_rate_limit_headers(e)
-                rem = headers.get("X-RateLimit-Remaining") or headers.get(
-                    "x-ratelimit-remaining"
-                )
+                rem = headers.get("X-RateLimit-Remaining") or headers.get("x-ratelimit-remaining")
                 if self._ai.stop_llm_when_rate_limited and (
-                    rem is not None and int(rem) <= 0
-                    or "per-day" in str(e).lower()
+                    (rem is not None and int(rem) <= 0) or "per-day" in str(e).lower()
                 ):
                     try:
                         self._rate_limiter.apply_error(e)
@@ -258,9 +249,7 @@ class OpenRouterClient:
         }
         extra_body: dict[str, Any] | None = None
         if use_reasoning:
-            extra_body = {
-                "reasoning": {"effort": reasoning_effort} if reasoning_effort else {"enabled": True}
-            }
+            extra_body = {"reasoning": {"effort": reasoning_effort} if reasoning_effort else {"enabled": True}}
         elif json_schema is not None:
             kwargs["response_format"] = {
                 "type": "json_schema",
@@ -433,9 +422,7 @@ class OpenRouterClient:
         search_context: SearchContext,
     ) -> tuple[VacancyAIExtraction, LLMUsage]:
         if self._rate_limiter.llm_disabled:
-            raise LlmQuotaExhausted(
-                self._rate_limiter.llm_disabled_reason or "LLM отключён"
-            )
+            raise LlmQuotaExhausted(self._rate_limiter.llm_disabled_reason or "LLM отключён")
         try:
             return self.extract(text=text, search_context=search_context)
         except LlmQuotaExhausted:
@@ -475,9 +462,7 @@ class OpenRouterClient:
         match_summary: dict | None = None,
     ) -> tuple[str, LLMUsage]:
         if self._rate_limiter.llm_disabled:
-            raise LlmQuotaExhausted(
-                self._rate_limiter.llm_disabled_reason or "LLM отключён"
-            )
+            raise LlmQuotaExhausted(self._rate_limiter.llm_disabled_reason or "LLM отключён")
         try:
             return self.cover_letter(
                 resume_text=resume_text,
@@ -527,9 +512,7 @@ class OpenRouterClient:
         vacancy_text: str,
     ) -> tuple[VacancyMatchExtraction, LLMUsage]:
         if self._rate_limiter.llm_disabled:
-            raise LlmQuotaExhausted(
-                self._rate_limiter.llm_disabled_reason or "LLM отключён"
-            )
+            raise LlmQuotaExhausted(self._rate_limiter.llm_disabled_reason or "LLM отключён")
         try:
             return self.match(resume_text=resume_text, vacancy_text=vacancy_text)
         except LlmQuotaExhausted:
@@ -549,9 +532,7 @@ class OpenRouterClient:
                         first_err,
                         fb,
                     )
-                    return self.match(
-                        resume_text=resume_text, vacancy_text=vacancy_text, model=fb
-                    )
+                    return self.match(resume_text=resume_text, vacancy_text=vacancy_text, model=fb)
                 except LlmQuotaExhausted:
                     raise
                 except Exception as e:

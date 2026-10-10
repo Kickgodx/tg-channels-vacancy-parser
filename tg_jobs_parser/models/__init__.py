@@ -3,9 +3,9 @@ from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
 
 __all__ = [
-    "Vacancy",
-    "ParseResult",
     "MetricsSummary",
+    "ParseResult",
     "SalaryStats",
     "TimeSeriesBucket",
+    "Vacancy",
 ]

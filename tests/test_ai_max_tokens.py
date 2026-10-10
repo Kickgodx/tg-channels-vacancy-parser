@@ -1,6 +1,6 @@
 """Лимит выходных токенов LLM."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -29,9 +29,7 @@ def test_max_completion_tokens_default():
 def test_extract_sends_max_tokens(monkeypatch, search_context):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     cfg = AppConfig()
-    cfg = cfg.model_copy(
-        update={"ai": cfg.ai.model_copy(update={"max_completion_tokens": 5000})}
-    )
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"max_completion_tokens": 5000})})
     client = OpenRouterClient(cfg.ai)
     captured: dict = {}
 

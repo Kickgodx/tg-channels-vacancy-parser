@@ -179,6 +179,34 @@ export interface AuthUser {
   created_at: string;
 }
 
+export interface HhStatus {
+  enabled: boolean;
+  token_configured: boolean;
+  email_configured: boolean;
+  listing_ttl_days: number;
+  search_text: string;
+  professional_role: string[];
+  listings_total: number;
+  listings_with_detail: number;
+  listings_without_detail: number;
+}
+
+export interface HhSyncResult {
+  searched: number;
+  listings_upserted: number;
+  unique: number;
+  duplicates: number;
+  details_fetched: number;
+  details_skipped: number;
+  vacancies_inserted: number;
+  vacancies_updated: number;
+  listings_purged: number;
+  pages: number;
+  flush_batches: number;
+  errors: string[];
+  duration_seconds: number;
+}
+
 export interface TokenResponse {
   access_token: string;
   token_type: string;

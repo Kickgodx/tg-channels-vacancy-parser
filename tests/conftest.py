@@ -51,8 +51,8 @@ def api_client(monkeypatch, tmp_path, default_test_config):
     monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
     monkeypatch.setenv("JWT_SECRET", "test-secret-value-for-tests")
 
-    from backend.settings import get_settings
     from backend.db.session import init_db, reset_engine
+    from backend.settings import get_settings
 
     get_settings.cache_clear()
     reset_engine()

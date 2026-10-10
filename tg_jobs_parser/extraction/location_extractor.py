@@ -6,7 +6,6 @@ import re
 
 from tg_jobs_parser.extraction.normalizer import normalize_for_match
 
-
 _COMMON_COUNTRY_MARKERS = {
     "россия": "Россия",
     "russia": "Россия",

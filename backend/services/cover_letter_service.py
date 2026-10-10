@@ -22,11 +22,7 @@ def _match_summary(session, *, resume_id: int, vacancy_id: str) -> dict | None:
     row = repo.get_vacancy_match(session, resume_id=resume_id, vacancy_id=vacancy_id)
     if row is None:
         return None
-    skills = [
-        s.get("skill", "")
-        for s in row.matching_skills or []
-        if isinstance(s, dict)
-    ]
+    skills = [s.get("skill", "") for s in row.matching_skills or [] if isinstance(s, dict)]
     return {
         "score": row.overall_score,
         "strengths": row.strengths or [],
@@ -48,7 +44,11 @@ def generate_single(
     """Синхронная генерация одного письма: вызов LLM + запись в ``cover_letters``."""
     with _TRACER.start_as_current_span(
         "cover_letter.generate",
-        attributes={"resume.id": resume_id, "vacancy.id": vacancy_id, "cover_letter.tone": tone},
+        attributes={
+            "resume.id": resume_id,
+            "vacancy.id": vacancy_id,
+            "cover_letter.tone": tone,
+        },
     ) as span:
         cfg = load_config(get_settings().config_path)
         max_chars = cfg.ai.max_input_chars

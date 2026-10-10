@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import tg_jobs_parser.parse_runner as parse_runner
 from tg_jobs_parser.config.schema import (
@@ -27,7 +27,7 @@ def _v(text: str, vid: str) -> Vacancy:
         source_channel="ch",
         source_url="https://t.me/s/ch",
         post_url="https://t.me/ch/1",
-        post_date=datetime.now(timezone.utc),
+        post_date=datetime.now(UTC),
         raw_text=text,
         cleaned_text=text,
         detected_specializations=["Python"],
@@ -37,15 +37,12 @@ def _v(text: str, vid: str) -> Vacancy:
 
 
 def _post(i: int, text: str | None = None) -> RawPost:
-    body = text or (
-        f"Вакансия #{i}: Python backend developer, remote, "
-        f"зарплата от {300 + i}k, компания Acme{i}."
-    )
+    body = text or (f"Вакансия #{i}: Python backend developer, remote, зарплата от {300 + i}k, компания Acme{i}.")
     return RawPost(
         channel_username="chan",
         post_id=str(i),
         text=body,
-        post_date=datetime.now(timezone.utc),
+        post_date=datetime.now(UTC),
         post_url=f"https://t.me/chan/{i}",
     )
 

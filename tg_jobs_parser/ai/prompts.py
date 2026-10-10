@@ -40,17 +40,24 @@ _JOB_SEEKER_RULES = """
 - A role title alone does NOT make it a vacancy. Prefer false when the author is the candidate.
 """
 
-SYSTEM_PROMPT_V1 = """You extract structured IT job vacancy fields from Telegram posts (Russian and/or English).
+SYSTEM_PROMPT_V1 = (
+    """You extract structured IT job vacancy fields from Telegram posts (Russian and/or English).
 Return ONE JSON object only. No markdown, no commentary outside JSON.
 Rules:
 - If the post is a resume, course ad, spam, or discussion without hiring — set is_job_post=false and rejection_reason briefly.
-""" + _JOB_SEEKER_RULES + """
+"""
+    + _JOB_SEEKER_RULES
+    + """
 - If SEARCH_CONTEXT sets ANY_IT_SPECIALIZATION=true — do not reject an IT job only because the role/stack is outside target_specializations (e.g. PHP, Ruby, .NET are valid).
 - Do NOT invent salary, company, or URLs: use null/[] when absent in text.
 - Numbers in URLs (vacancy id in path, e.g. /76348/) are NOT salary — salary_min/max must be null if pay is not stated in prose.
-""" + _SPECIALIZATION_RULES + """
+"""
+    + _SPECIALIZATION_RULES
+    + """
 - work_format: one of remote, hybrid, office, relocation, unknown (or null).
-- detected_grade: one of """ + ", ".join(GRADE_OPTIONS) + """ (use unknown if not stated).
+- detected_grade: one of """
+    + ", ".join(GRADE_OPTIONS)
+    + """ (use unknown if not stated).
   Title/role grade wins (e.g. "Senior QA" → senior). Do NOT treat verb "to staff" / "staffing" as grade staff.
 - salary_min/max MUST be MONTHLY amounts (except hourly — see below). Never store annual
   totals in salary_min/max. Prefer plain ISO currency (no /YEAR).
@@ -73,6 +80,7 @@ Rules:
 - confidence: 0..1 how sure you are about the main fields.
 - notes: optional short clarifications (ambiguity, missing data, assumptions) — always in Russian, 1–3 sentences; null if nothing useful to add.
 - rejection_reason: when is_job_post=false — brief reason in Russian."""
+)
 
 
 def resolve_extract_prompt_version(configured: str | None = None) -> str:
@@ -90,6 +98,7 @@ def resolve_extract_prompt_version(configured: str | None = None) -> str:
             stacklevel=2,
         )
     return EXTRACT_PROMPT_VERSION
+
 
 _FEW_SHOT_USER = """Example job post:
 "Senior Go Developer, remote EU, 350-450k RUB, Requirements: Go, Kubernetes, Docker, apply: https://example.com/careers/go".
@@ -473,9 +482,7 @@ def build_match_messages(*, resume_text: str, vacancy_text: str) -> list[dict[st
         {"role": "system", "content": MATCH_SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": MATCH_USER_PROMPT.format(
-                resume=resume_text, vacancy=vacancy_text
-            ),
+            "content": MATCH_USER_PROMPT.format(resume=resume_text, vacancy=vacancy_text),
         },
     ]
 

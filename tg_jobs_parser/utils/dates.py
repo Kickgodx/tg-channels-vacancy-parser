@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 
 def utc_now() -> datetime:
     """Текущий момент в UTC."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def clamp_range_days(dt_from: date, dt_to: date, max_days: int) -> tuple[date, date]:
@@ -21,9 +21,7 @@ def clamp_range_days(dt_from: date, dt_to: date, max_days: int) -> tuple[date, d
 
 
 _TODAY_ALIASES = frozenset({"today", "сегодня", "сейчас", "now"})
-_WEEK_AGO_ALIASES = frozenset(
-    {"week_ago", "week", "today-7d", "today_minus_week", "неделя", "weekago"}
-)
+_WEEK_AGO_ALIASES = frozenset({"week_ago", "week", "today-7d", "today_minus_week", "неделя", "weekago"})
 
 
 def parse_date(s: str | None) -> date | None:
@@ -62,8 +60,5 @@ def resolve_search_date_to(s: str | None) -> date | None:
 def date_in_range(d: datetime | date | None, start: date, end: date) -> bool:
     if d is None:
         return True
-    if isinstance(d, datetime):
-        dd = d.date()
-    else:
-        dd = d
+    dd = d.date() if isinstance(d, datetime) else d
     return start <= dd <= end

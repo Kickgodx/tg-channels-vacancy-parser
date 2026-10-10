@@ -13,7 +13,6 @@ from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 
-
 RunStatus = Literal["pending", "running", "completed", "cancelled", "failed"]
 
 
@@ -213,9 +212,7 @@ class VacancyMatchOut(BaseModel):
     resume_id: int
     vacancy_id: str
     overall_score: int = Field(description="0-100: итоговый score, считает backend.")
-    confidence: int = Field(
-        description="0-100: уверенность LLM в качестве оценки, не сам score."
-    )
+    confidence: int = Field(description="0-100: уверенность LLM в качестве оценки, не сам score.")
     breakdown: MatchBreakdown
     explanation: str | None = None
     matching_skills: list[SkillMatch] = Field(default_factory=list)
@@ -306,6 +303,3 @@ class TokenResponse(BaseModel):
     token_type: Literal["bearer"] = "bearer"
     expires_in: int = Field(description="TTL access-токена в секундах")
     user: UserOut
-
-
-

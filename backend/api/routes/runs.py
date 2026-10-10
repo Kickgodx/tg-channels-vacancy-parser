@@ -4,16 +4,11 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-
-from tg_jobs_parser.config.loader import ConfigLoadError
-from tg_jobs_parser.exporters.json_exporter import export_json_bytes
-from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
-from tg_jobs_parser.models.parse_result import ParseResult
 
 from backend.api.deps import get_db, verify_api_key
 from backend.config_builder import build_config
@@ -29,10 +24,14 @@ from backend.schemas import (
     VacancySortField,
     VacancySortOrder,
 )
+from backend.services import run_service
 from backend.services.progress_bus import progress_bus
 from backend.services.run_registry import run_registry
-from backend.services import run_service
 from backend.settings import get_settings
+from tg_jobs_parser.config.loader import ConfigLoadError
+from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
+from tg_jobs_parser.exporters.json_exporter import export_json_bytes
+from tg_jobs_parser.models.parse_result import ParseResult
 
 _LOG = logging.getLogger(__name__)
 
@@ -196,7 +195,9 @@ def export_run_json(run_id: uuid.UUID, db: Session = Depends(get_db)):
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     items = repo.list_all_run_vacancies(
-        db, run_id, VacancyQuery(page=1, page_size=500, sort_by="post_date", sort_order="desc")
+        db,
+        run_id,
+        VacancyQuery(page=1, page_size=500, sort_by="post_date", sort_order="desc"),
     )
     result = _parse_result_from_run(row, items)
     data = export_json_bytes(result)
@@ -213,7 +214,9 @@ def export_run_xlsx(run_id: uuid.UUID, db: Session = Depends(get_db)):
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     items = repo.list_all_run_vacancies(
-        db, run_id, VacancyQuery(page=1, page_size=500, sort_by="post_date", sort_order="desc")
+        db,
+        run_id,
+        VacancyQuery(page=1, page_size=500, sort_by="post_date", sort_order="desc"),
     )
     metrics = metrics_from_run(row)
     data = export_excel_bytes(items, metrics=metrics)

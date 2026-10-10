@@ -40,11 +40,7 @@ class RequestIdFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         rid = request_id_var.get()
         span_ctx = trace.get_current_span().get_span_context()
-        trace_id = (
-            format(span_ctx.trace_id, "032x")
-            if span_ctx.is_valid and span_ctx.trace_flags.sampled
-            else None
-        )
+        trace_id = format(span_ctx.trace_id, "032x") if span_ctx.is_valid and span_ctx.trace_flags.sampled else None
         record.request_id = rid
         record.trace_id = trace_id
         parts = [f"request_id={rid}"] if rid else []
@@ -110,7 +106,10 @@ def setup_logging(
         p = Path(log_dir)
         p.mkdir(parents=True, exist_ok=True)
         fh = RotatingFileHandler(
-            p / "app.log", maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+            p / "app.log",
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
         )
         fh.namer = _gzip_namer
         fh.rotator = _gzip_rotator

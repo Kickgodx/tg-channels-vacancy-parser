@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, func, select
@@ -49,11 +49,11 @@ def _vac(
         source_channel=source_post_key.split("-", 1)[0],
         source_url="https://t.me/s/ch",
         post_url=f"https://t.me/{source_post_key.replace('-', '/', 1)}",
-        post_date=post_date or datetime.now(timezone.utc),
+        post_date=post_date or datetime.now(UTC),
         raw_text=cleaned,
         cleaned_text=cleaned,
         company=company,
-        parsed_at=parsed_at or datetime.now(timezone.utc),
+        parsed_at=parsed_at or datetime.now(UTC),
     )
 
 
@@ -95,7 +95,7 @@ def test_upsert_long_required_experience(db_session):
         source_channel="DarikaINITVacancies",
         source_url="https://t.me/s/DarikaINITVacancies",
         post_url="https://t.me/DarikaINITVacancies/930",
-        post_date=datetime.now(timezone.utc),
+        post_date=datetime.now(UTC),
         raw_text="x",
         cleaned_text=cleaned,
         required_experience=long_exp,
@@ -116,7 +116,7 @@ def test_upsert_two_distinct_texts_two_rows(db_session):
 
 
 def test_archive_expired_vacancies_archives_records_beyond_ttl(db_session):
-    now = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 7, tzinfo=UTC)
     expired = _vac(
         cleaned="expired vacancy",
         source_post_key="old-1",
@@ -155,7 +155,7 @@ def test_archive_expired_vacancies_archives_records_beyond_ttl(db_session):
 
 
 def test_list_vacancies_hides_archived_unless_included(db_session):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old = _vac(
         cleaned="old vacancy",
         source_post_key="old-1",

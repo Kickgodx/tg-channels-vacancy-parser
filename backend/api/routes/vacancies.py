@@ -37,9 +37,7 @@ def import_vacancies(
     source_url = (body.source_url or "").strip() or None
     result = import_service.import_vacancy_texts(db, texts, source_url=source_url)
     items = [
-        VacancyImportItemResult(
-            index=it.index, status=it.status, message=it.message, vacancy=it.vacancy
-        )
+        VacancyImportItemResult(index=it.index, status=it.status, message=it.message, vacancy=it.vacancy)
         for it in result.items
     ]
     return VacancyImportResponse(

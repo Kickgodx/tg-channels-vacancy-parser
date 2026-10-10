@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 # Коды и символы валют → канонический код в exchange_rates / ЦБ.
 _CURRENCY_ALIASES: dict[str, str] = {
@@ -117,15 +117,15 @@ def monthly_salary_amount(
 def rate_date_for_vacancy(post_date: datetime | None) -> date:
     """Календарный день поста (для архива/отладки; не для отображения зарплаты)."""
     if post_date is None:
-        return datetime.now(timezone.utc).date()
+        return datetime.now(UTC).date()
     if getattr(post_date, "tzinfo", None):
-        return post_date.astimezone(timezone.utc).date()
+        return post_date.astimezone(UTC).date()
     return post_date.date()
 
 
 def rate_date_for_live_display() -> date:
     """Дата курса для отображения вакансий: сегодня (последний снимок ЦБ в кэше)."""
-    return datetime.now(timezone.utc).date()
+    return datetime.now(UTC).date()
 
 
 def salary_amount_to_rub(

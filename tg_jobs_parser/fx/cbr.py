@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import httpx
 
@@ -42,15 +42,12 @@ def fetch_cbr_rates(
 
     ``rate_date`` None или сегодня — ``daily_json.js``; иначе — архив ЦБ.
     """
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     target = rate_date or today
     if target > today:
         target = today
 
-    if target == today:
-        url = CBR_DAILY_URL
-    else:
-        url = CBR_ARCHIVE_URL.format(y=target.year, m=target.month, d=target.day)
+    url = CBR_DAILY_URL if target == today else CBR_ARCHIVE_URL.format(y=target.year, m=target.month, d=target.day)
 
     with httpx.Client(timeout=timeout) as client:
         resp = client.get(url)

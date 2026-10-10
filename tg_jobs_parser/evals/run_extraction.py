@@ -14,8 +14,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 
 from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
 from tg_jobs_parser.ai.prompts import EXTRACT_PROMPT_VERSION
@@ -143,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     out_dir = reports_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out_path = out_dir / f"extraction_{stamp}.json"
     out_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n",

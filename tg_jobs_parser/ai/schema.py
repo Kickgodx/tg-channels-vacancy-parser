@@ -9,9 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS, normalize_grade
 
 _VALID_GRADES = frozenset(GRADE_OPTIONS)
-_VALID_WORK_FORMATS = frozenset(
-    {"remote", "hybrid", "office", "relocation", "unknown"}
-)
+_VALID_WORK_FORMATS = frozenset({"remote", "hybrid", "office", "relocation", "unknown"})
 
 
 def _coerce_optional_str(v: object) -> str | None:
@@ -163,7 +161,7 @@ _IMPORTANCE_ALIASES = {
 def _clamp_score(v: object) -> int:
     """Модели иногда отдают float/str — приводим к int 0..100."""
     try:
-        n = int(round(float(str(v).strip())))
+        n = round(float(str(v).strip()))
     except (TypeError, ValueError):
         return 0
     return max(0, min(100, n))
@@ -225,7 +223,9 @@ class VacancyMatchExtraction(BaseModel):
     """
 
     confidence: int = Field(
-        default=50, ge=0, le=100,
+        default=50,
+        ge=0,
+        le=100,
         description="0-100: уверенность в качестве оценки (полнота резюме/вакансии), не сам score.",
     )
     breakdown: MatchBreakdown = Field(default_factory=MatchBreakdown)

@@ -55,13 +55,18 @@ class SkipOrphanClientSpans(Sampler):
         self._delegate = delegate
 
     def should_sample(
-        self, parent_context, trace_id, name, kind=None, attributes=None, links=None, trace_state=None
+        self,
+        parent_context,
+        trace_id,
+        name,
+        kind=None,
+        attributes=None,
+        links=None,
+        trace_state=None,
     ) -> SamplingResult:
         if kind == SpanKind.CLIENT:
             return SamplingResult(Decision.DROP)
-        return self._delegate.should_sample(
-            parent_context, trace_id, name, kind, attributes, links, trace_state
-        )
+        return self._delegate.should_sample(parent_context, trace_id, name, kind, attributes, links, trace_state)
 
     def get_description(self) -> str:
         return f"SkipOrphanClientSpans{{{self._delegate.get_description()}}}"
@@ -96,9 +101,7 @@ def _server_request_hook(span, scope) -> None:
         span.set_attribute("url.query", safe)
 
 
-def instrument_app(
-    app: FastAPI, *, exclude_paths: frozenset[str], tracer_provider=None
-) -> None:
+def instrument_app(app: FastAPI, *, exclude_paths: frozenset[str], tracer_provider=None) -> None:
     FastAPIInstrumentor.instrument_app(
         app,
         tracer_provider=tracer_provider,
@@ -115,12 +118,8 @@ def setup_tracing(app: FastAPI, settings: Settings) -> bool:
         return False
     if _provider is not None:
         return True
-    resource = Resource.create(
-        {SERVICE_NAME: DEFAULT_SERVICE_NAME, SERVICE_VERSION: app.version}
-    )
-    provider = TracerProvider(
-        resource=resource, sampler=build_sampler(settings.otel_traces_sample_ratio)
-    )
+    resource = Resource.create({SERVICE_NAME: DEFAULT_SERVICE_NAME, SERVICE_VERSION: app.version})
+    provider = TracerProvider(resource=resource, sampler=build_sampler(settings.otel_traces_sample_ratio))
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     trace.set_tracer_provider(provider)
 

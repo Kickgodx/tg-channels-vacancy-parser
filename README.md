@@ -55,6 +55,8 @@ docker compose exec backend python -m tg_jobs_parser.cli parse --config /app/con
 TELEGRAM_API_ID=...
 TELEGRAM_API_HASH=...
 OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
+HH_API_TOKEN=...                # Bearer-токен HH (admin sync); без client_credentials
+HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 
 # Опционально (для docker compose уже задано в compose-файле):
 # DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
@@ -88,6 +90,7 @@ OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
 | **Парсинг** | Форма парсинга (каналы, даты, специализации, формат работы, AI, пороги score), поиск каналов (DuckDuckGo) |
 | **Прогон** | Прогресс (SSE), метрики, графики, блок AI (токены и стоимость input/output/total), таблица вакансий, экспорт Excel/JSON |
 | **Импорт** | `/import` — вставка текста вакансии вручную (например, с hh.ru): rules + LLM-разбор и запись в общую базу; ниже — последние импортированные |
+| **HH** | `/hh` — только для админа: sync вакансий с HH.ru (поиск AQA/Python), без LLM; кэш listings + skip detail |
 | **Вакансии** | Все уникальные вакансии из PostgreSQL: поиск, фильтры, пресеты, пагинация, сортировка по клику на заголовок; вкладка **Аналитика** |
 | **Резюме** | Список резюме пользователя: просмотр текста, создание, редактирование, удаление |
 
@@ -219,6 +222,8 @@ uvicorn backend.main:app --reload --port 8000
 | `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта |
 | `GET` | `/vacancies` | Глобальный список вакансий (фильтры, сортировка, пагинация, `resume_id`) |
 | `POST` | `/vacancies/import` | Импорт вакансий из текста: `{texts, source_url?}` → rules + LLM → запись в БД |
+| `GET` | `/hh/status` | Статус HH sync (admin): токен задан?, TTL listings, счётчики кэша |
+| `POST` | `/hh/sync` | Синхронный sync HH (admin): поиск → dedup → detail только для новых → БД |
 | `GET` | `/vacancies/metrics` | Агрегаты для графиков по текущим фильтрам |
 | `GET` | `/vacancies/export.xlsx` | Excel всех вакансий в БД (те же фильтры, что у списка) |
 | `GET` | `/analytics/salaries` \| `/sources` \| `/companies` | Зарплатные квантили, качество каналов, топ компаний |
@@ -240,16 +245,23 @@ uvicorn backend.main:app --reload --port 8000
 при включённом AI решение «вакансия или нет» принимает LLM (`is_job_post`),
 без него текст сохраняется как есть.
 
+Вакансии с HH (`source_channel = "hh"`) появляются после admin-sync
+(`/hh` или `POST /hh/sync`): поля берутся из API без LLM, дедуп мультигорода
+как в MVP hhparser, TTL вакансий — общий `retention.vacancy_ttl_days`.
+Кэш короткой выдачи (`hh_listings`) живёт `hh.listing_ttl_days` и не даёт
+повторно дергать detail для уже загруженных id.
+
 Кэш ответов LLM хранится в PostgreSQL (`ai_extraction_cache`). Параметры в `config.yaml`: `ai.cache_backend: postgres`, `ai.cache_ttl_days` (0 — без срока, иначе дни). Очистка — кнопка на странице **Парсинг** или `POST /ai-cache/clear`.
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…008`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…010`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
 | `parse_runs` | Журнал прогонов: статус, метрики, снимок конфигурации |
-| `vacancies` | Уникальные вакансии (`id` = sha256 текста), `archived_at` — TTL |
+| `vacancies` | Уникальные вакансии (`id` = content-hash или `sha256(hh:{id})` для HH), `archived_at` — TTL |
+| `hh_listings` | Кэш короткой выдачи HH + `detail_fetched_at` (anti-DDOS detail) |
 | `exchange_rates` | Курсы ЦБ по датам |
 | `ai_extraction_cache` | Кэш ответов LLM при парсинге |
 | `saved_filters` | Пресеты фильтров (`user_id`) |
@@ -364,6 +376,20 @@ poetry run python -c "import telethon; print(telethon.__version__)"
   час фоном и после каждого прогона. Архивные строки не попадают в списки и
   агрегаты, пока не передать `include_archived=true`.
 
+### HH.ru (`hh`)
+
+- **`enabled`** — разрешить admin sync.
+- **`listing_ttl_days`** (по умолчанию 40) — TTL кэша `hh_listings` (hard delete
+  по `last_seen_at`); после purge detail снова запросится.
+- **`search.text` / `professional_role` / `per_page`** — параметры выдачи
+  (дефолт — AQA/Python, роли 124 и 96).
+- **`max_rps`** — лимит запросов к API (по умолчанию 3).
+- **`db_flush_batch_size`** (по умолчанию 30) — промежуточный UPSERT+commit;
+  буфер Vacancy в памяти очищается после каждого батча (меньше RAM, прогресс
+  не теряется при обрыве/429).
+- Секреты: `HH_API_TOKEN`, `HH_CONTACT_EMAIL` в `.env` (и в docker через `env_file`).
+- Метрики/дашборд: Grafana «HH.ru sync» (`observability/grafana/.../hh.json`).
+
 ### Секция `ai` (опционально)
 
 По умолчанию **`ai.enabled: false`**. При включении — разбор через **OpenRouter** (OpenAI-compatible SDK).
@@ -474,7 +500,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
 | **`GET /metrics`** | Эндпоинт Prometheus (не путать с `/api/v1/vacancies/metrics`) |
 | **Prometheus** | Scrape backend каждые 15 с (`observability/prometheus.yml`) |
-| **Grafana** | Дашборды **tg-jobs-parser API**, **tg-jobs-parser LLM** и **tg-jobs-parser Pipeline** (папка `tg-jobs-parser`) |
+| **Grafana** | Дашборды **tg-jobs-parser API**, **LLM**, **Pipeline** и **HH.ru sync** (папка `tg-jobs-parser`) |
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
 | **Доменные метрики** | `backend/observability.py`: прогоны (`parse_runs_*`), UPSERT и TTL-архивация вакансий, ручной импорт, матчинг резюме↔вакансия (`vacancy_match_*`), письма (`cover_letter_*`), auth-события, запросы к ЦБ |
 | **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |

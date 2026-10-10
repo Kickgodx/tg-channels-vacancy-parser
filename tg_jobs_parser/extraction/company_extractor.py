@@ -6,7 +6,6 @@ import re
 
 from tg_jobs_parser.utils.text import compact_whitespace
 
-
 _COMPANY_LINE = re.compile(
     r"^(?:компани|компания|company|employer|клиент|заказчик)\s*[:\-]\s*(.+)$",
     re.I | re.M,

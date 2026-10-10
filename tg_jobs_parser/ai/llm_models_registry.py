@@ -10,7 +10,11 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, ValidationError
 
-from tg_jobs_parser.ai.models_catalog import LlmModelEntry, catalog_model_ids, dedupe_model_ids
+from tg_jobs_parser.ai.models_catalog import (
+    LlmModelEntry,
+    catalog_model_ids,
+    dedupe_model_ids,
+)
 
 
 class LlmModelsRegistry(BaseModel):
@@ -74,9 +78,7 @@ def _load_registry_cached(resolved_path: str, mtime_ns: int) -> LlmModelsRegistr
     _ = mtime_ns
     path = Path(resolved_path)
     if not path.is_file():
-        raise LlmModelsLoadError(
-            f"Каталог моделей не найден: {path}. Создайте llm_models.yaml в корне проекта."
-        )
+        raise LlmModelsLoadError(f"Каталог моделей не найден: {path}. Создайте llm_models.yaml в корне проекта.")
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
@@ -138,7 +140,5 @@ def apply_ai_defaults_from_registry(
             f"ai.model '{model}' отсутствует в llm_models.yaml. Доступные id: {', '.join(sorted(ids)[:8])}…"
         )
     if not data.get("fallback_models"):
-        data["fallback_models"] = [
-            m for m in registry.default_fallbacks if m in ids and m != model
-        ]
+        data["fallback_models"] = [m for m in registry.default_fallbacks if m in ids and m != model]
     return data

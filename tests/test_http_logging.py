@@ -21,14 +21,12 @@ def _records(caplog) -> list[dict]:
     for r in caplog.records:
         if r.name == "backend.http":
             msg = r.getMessage()
-            out.append(json.loads(msg[msg.index("{"):]))
+            out.append(json.loads(msg[msg.index("{") :]))
     return out
 
 
 def _last(caplog, path: str, event: str = "response") -> dict:
-    return [
-        r for r in _records(caplog) if r["event"] == event and r["path"].startswith(path)
-    ][-1]
+    return [r for r in _records(caplog) if r["event"] == event and r["path"].startswith(path)][-1]
 
 
 @pytest.fixture
@@ -76,9 +74,7 @@ def mini_client():
 
 def test_auth_bodies_and_headers_are_redacted(api_client, caplog):
     caplog.set_level(logging.INFO, logger="backend.http")
-    r = api_client.post(
-        "/api/v1/auth/register", json={"email": "a@b.c", "password": "hunter22"}
-    )
+    r = api_client.post("/api/v1/auth/register", json={"email": "a@b.c", "password": "hunter22"})
     assert r.status_code == 201
     token = r.json()["access_token"]
 
@@ -89,9 +85,7 @@ def test_auth_bodies_and_headers_are_redacted(api_client, caplog):
     assert resp["body"]["access_token"] == MASK
     assert resp["body"]["user"]["email"] == "a@b.c"
 
-    api_client.get(
-        "/api/v1/auth/me", headers={"Authorization": f"Bearer {token}", "X-Trace": "t1"}
-    )
+    api_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}", "X-Trace": "t1"})
     req = _last(caplog, "/api/v1/auth/me", "request")
     assert req["headers"]["authorization"] == f"Bearer {MASK}"
     assert req["headers"]["x-trace"] == "t1"
@@ -161,7 +155,10 @@ def test_noisy_endpoints_and_preflight_are_not_logged(api_client, caplog):
     assert api_client.get("/openapi.json").status_code == 200
     preflight = api_client.options(
         "/api/v1/auth/me",
-        headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "GET"},
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
     )
     assert preflight.status_code == 200
     assert "x-request-id" not in preflight.headers
@@ -173,9 +170,15 @@ def test_noisy_endpoints_and_preflight_are_not_logged(api_client, caplog):
 
 def test_nested_json_redaction(mini_client, caplog):
     caplog.set_level(logging.INFO, logger="backend.http")
-    payload = {"cfg": {"api_key": "k", "x_api_key": "k2", "max_tokens": 5}, "list": [{"secret": 1}]}
+    payload = {
+        "cfg": {"api_key": "k", "x_api_key": "k2", "max_tokens": 5},
+        "list": [{"secret": 1}],
+    }
     mini_client.post("/echo", json=payload)
-    expected = {"cfg": {"api_key": MASK, "x_api_key": MASK, "max_tokens": 5}, "list": [{"secret": MASK}]}
+    expected = {
+        "cfg": {"api_key": MASK, "x_api_key": MASK, "max_tokens": 5},
+        "list": [{"secret": MASK}],
+    }
     assert _last(caplog, "/echo", "request")["body"] == expected
     assert _last(caplog, "/echo")["body"] == expected
 
@@ -211,13 +214,11 @@ def test_truncated_json_falls_back_to_regex_redaction():
     raw = b'{"email": "a@b.c", "password": "p\\"w", "items": [1, 2, 3'
     out = render_body(raw, "application/json", total_bytes=len(raw) + 100, limit=1000)
     assert '"password": "***"' in out
-    assert "p\\\"w" not in out
+    assert 'p\\"w' not in out
     assert '"email": "a@b.c"' in out
 
 
 def test_form_body_redaction():
     raw = b"username=u&password=p&grant_type=password"
-    out = render_body(
-        raw, "application/x-www-form-urlencoded", total_bytes=len(raw), limit=1000
-    )
+    out = render_body(raw, "application/x-www-form-urlencoded", total_bytes=len(raw), limit=1000)
     assert out == "username=u&password=***&grant_type=password"

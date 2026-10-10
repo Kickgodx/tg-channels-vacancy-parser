@@ -89,6 +89,25 @@
 
 ---
 
+## `hh` — парсинг HH.ru (admin sync)
+
+Секреты (`HH_API_TOKEN`, `HH_CONTACT_EMAIL`) задаются в `.env` / переменных
+контейнера, не в yaml.
+
+| Поле | Назначение |
+|------|------------|
+| **`enabled`** | Разрешить `POST /hh/sync` и вкладку `/hh`. |
+| **`listing_ttl_days`** | TTL кэша короткой выдачи `hh_listings` (по `last_seen_at`). `0` — не чистить. После purge detail снова запросится. |
+| **`max_rps`** | Лимит RPS к HH API (retry на 429). |
+| **`db_flush_batch_size`** | Сколько вакансий копить перед UPSERT+commit (по умолчанию 30). Буфер в памяти очищается после каждого батча. |
+| **`api_base` / `host`** | Базовый URL API и query `host`. |
+| **`app_name` / `app_version`** | Часть `User-Agent` / `HH-User-Agent`. |
+| **`search.text`** | Текст поиска (дефолт — AQA/Python как в MVP hhparser). |
+| **`search.professional_role`** | Роли HH (124 = тестировщик, 96 = разработчик). |
+| **`search.per_page`** | Размер страницы (макс. 100). |
+
+---
+
 ## `output` — куда писать файлы
 
 | Поле | Назначение |

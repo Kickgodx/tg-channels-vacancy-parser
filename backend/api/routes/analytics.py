@@ -50,8 +50,15 @@ def salary_analytics(
 ) -> SalaryAnalytics:
     """Квантили зарплат по грейдам/формату/специализациям, месячная динамика, распределение."""
     query = _filters(
-        source_channel, grade, specialization, work_format,
-        date_from, date_to, has_salary, q, include_archived,
+        source_channel,
+        grade,
+        specialization,
+        work_format,
+        date_from,
+        date_to,
+        has_salary,
+        q,
+        include_archived,
     )
     return analytics.salary_analytics(db, query)
 
@@ -71,8 +78,15 @@ def source_stats(
 ) -> SourceAnalytics:
     """Качество каналов: уникальные вакансии, дубли, средний score, покрытие зарплатой."""
     query = _filters(
-        source_channel, grade, specialization, work_format,
-        date_from, date_to, has_salary, q, include_archived,
+        source_channel,
+        grade,
+        specialization,
+        work_format,
+        date_from,
+        date_to,
+        has_salary,
+        q,
+        include_archived,
     )
     return SourceAnalytics(items=analytics.source_quality(db, query))
 
@@ -93,7 +107,14 @@ def company_stats(
 ) -> CompanyAnalytics:
     """Топ работодателей по числу вакансий."""
     query = _filters(
-        source_channel, grade, specialization, work_format,
-        date_from, date_to, has_salary, q, include_archived,
+        source_channel,
+        grade,
+        specialization,
+        work_format,
+        date_from,
+        date_to,
+        has_salary,
+        q,
+        include_archived,
     )
     return CompanyAnalytics(items=analytics.top_companies(db, query, limit=limit))

@@ -155,6 +155,25 @@ retention:
   # Через сколько дней архивировать вакансию (post_date, а без неё — parsed_at). 0 — не архивировать.
   vacancy_ttl_days: 40
 
+hh:
+  enabled: true
+  # TTL кэша короткой выдачи (hh_listings). После purge detail снова запросится.
+  listing_ttl_days: 40
+  max_rps: 3.0
+  # Промежуточная запись в БД + commit; буфер в памяти очищается после каждого батча.
+  db_flush_batch_size: 30
+  api_base: https://api.hh.ru
+  host: hh.ru
+  app_name: PersonalJobSearch
+  app_version: "1.0"
+  search:
+    # Как в MVP hhparser: AQA/Python + роли тестировщик (124) и разработчик (96).
+    text: >-
+      Python AND (автотест* OR AQA OR "QA Automation" OR pytest OR QAA OR QA Auto
+      OR "Fullstack QA" OR Automation QA OR SDET OR автоматизатор)
+    professional_role: ["124", "96"]
+    per_page: 100
+
 parser:
   progress_batch_posts: 25
   # Промежуточная запись уникальных вакансий в БД (для backend-прогонов): каждые N обработанных

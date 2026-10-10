@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import AliasChoices, BaseModel, Field
 
@@ -24,4 +24,4 @@ class ParseResult(BaseModel):
     vacancies_unique: list[Vacancy] = Field(default_factory=list)
     duplicates: list[Vacancy] = Field(default_factory=list)
     metrics: MetricsSummary = Field(default_factory=MetricsSummary)
-    parsed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    parsed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

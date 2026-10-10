@@ -41,7 +41,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Poetry: poetry install --extras telethon — опционально cryptg для ускорения Telethon на Windows
-dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0"]
+dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0", "ruff>=0.14.0,<1.0.0"]
 telethon = ["cryptg>=0.5.0"]
 
 [project.scripts]
@@ -58,3 +58,42 @@ addopts = "-m \"not llm\""
 markers = [
   "llm: live OpenRouter calls (needs OPENROUTER_API_KEY; not in default CI)",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["tg_jobs_parser", "backend", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # Pyflakes
+  "I",   # isort
+  "B",   # flake8-bugbear
+  "UP",  # pyupgrade
+  "SIM", # flake8-simplify
+  "RUF", # Ruff-specific
+]
+ignore = [
+  "E501",   # длина строк — ориентир formatter / editorconfig (120)
+  "B008",   # FastAPI Depends / Typer Option в defaults
+  "RUF001", # кириллица / en-dash в строках — ожидаемо для RU-проекта
+  "RUF002", # кириллица в docstring
+  "RUF003", # кириллица в комментариях
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["tg_jobs_parser", "backend"]
+
+[tool.ruff.lint.per-file-ignores]
+# Исторические миграции не трогаем (UP/I ломают стабильность ревизий).
+"alembic/versions/*" = ["UP", "I", "RUF"]
+# Локальные отладочные скрипты вне пакета.
+"z*.py" = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true

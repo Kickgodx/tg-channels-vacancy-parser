@@ -192,6 +192,34 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.kv-list {
+  display: grid;
+  gap: 0.5rem 1rem;
+  margin: 1rem 0 0;
+}
+.kv-list > div {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: 0.5rem;
+}
+.kv-list dt {
+  margin: 0;
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+.kv-list dd {
+  margin: 0;
+}
+.kv-list code.wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.85rem;
+}
+.plain-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;

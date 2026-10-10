@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.config.schema import AiConfig, AppConfig
+from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.extraction.salary_period import (
     apply_hourly_currency_from_text,
     normalize_annual_salary_to_monthly,
@@ -16,7 +16,12 @@ from tg_jobs_parser.models.vacancy import Vacancy
 _URL_RE = re.compile(r"https?://[^\s\]\)\"'<>]+", re.I)
 
 _SALARY_FIELDS = frozenset(
-    {"detected_salary_min", "detected_salary_max", "salary_currency", "detected_salary_avg"}
+    {
+        "detected_salary_min",
+        "detected_salary_max",
+        "salary_currency",
+        "detected_salary_avg",
+    }
 )
 
 
@@ -81,9 +86,7 @@ def merge_rules_and_ai(
         allow_unknown=ai_cfg.allow_unknown_specializations,
         allowed=allowed_specs,
     )
-    if _use_ai("detected_specializations") or ai_cfg.mode == "primary":
-        updates["detected_specializations"] = specs
-    elif specs:
+    if _use_ai("detected_specializations") or ai_cfg.mode == "primary" or specs:
         updates["detected_specializations"] = specs
 
     if ai_cfg.mode == "primary":
@@ -105,9 +108,7 @@ def merge_rules_and_ai(
         if ai_cfg.mode == "primary" and fld in _SALARY_FIELDS:
             updates[fld] = ai_val
             continue
-        if _use_ai(fld) and ai_val is not None:
-            updates[fld] = ai_val
-        elif rules_val is None and ai_val is not None:
+        if (_use_ai(fld) and ai_val is not None) or (rules_val is None and ai_val is not None):
             updates[fld] = ai_val
 
     ai_urls = _normalize_urls(ai.application_urls)

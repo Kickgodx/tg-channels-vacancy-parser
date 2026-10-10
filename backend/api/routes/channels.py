@@ -1,12 +1,10 @@
 from __future__ import annotations
 
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from fastapi import APIRouter
-
-from tg_jobs_parser.channel_search import search_channels
 
 from backend.api.deps import verify_api_key
-from fastapi import Depends
+from tg_jobs_parser.channel_search import search_channels
 
 router = APIRouter(prefix="/channels", tags=["channels"], dependencies=[Depends(verify_api_key)])
 

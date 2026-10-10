@@ -6,7 +6,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -72,10 +72,7 @@ def _serialize_value(value: Any) -> Any:
 
 def _row_to_dict(row: object) -> dict[str, Any]:
     table = row.__table__  # type: ignore[attr-defined]
-    return {
-        col.name: _serialize_value(getattr(row, col.name))
-        for col in table.columns
-    }
+    return {col.name: _serialize_value(getattr(row, col.name)) for col in table.columns}
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -83,7 +80,7 @@ def _parse_datetime(value: str | None) -> datetime | None:
         return None
     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -131,7 +128,7 @@ def dump_database(session: Session) -> dict[str, Any]:
     )
     return {
         "format_version": DUMP_FORMAT_VERSION,
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "tables": tables,
     }
 
@@ -155,9 +152,7 @@ def load_dump_file(path: Path) -> dict[str, Any]:
         raise ValueError("Файл дампа должен содержать JSON-объект")
     version = data.get("format_version")
     if version != DUMP_FORMAT_VERSION:
-        raise ValueError(
-            f"Неподдерживаемая версия дампа: {version!r} (ожидается {DUMP_FORMAT_VERSION})"
-        )
+        raise ValueError(f"Неподдерживаемая версия дампа: {version!r} (ожидается {DUMP_FORMAT_VERSION})")
     tables = data.get("tables")
     if not isinstance(tables, dict):
         raise ValueError("В дампе отсутствует объект tables")

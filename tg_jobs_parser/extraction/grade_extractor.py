@@ -39,7 +39,7 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 
 UNKNOWN_GRADE = "unknown"
 
-GRADE_OPTIONS: tuple[str, ...] = tuple(_ORDER) + (UNKNOWN_GRADE,)
+GRADE_OPTIONS: tuple[str, ...] = (*tuple(_ORDER), UNKNOWN_GRADE)
 _GRADE_SET = frozenset(GRADE_OPTIONS)
 
 _ALIASES: dict[str, str] = {

@@ -10,25 +10,24 @@ import uuid
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from tg_jobs_parser.config.schema import AppConfig
-from tg_jobs_parser.models.parse_result import ParseResult
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.parse_cancel import ParseCancelled
-from tg_jobs_parser.parse_progress import ParseProgressSnapshot
-from tg_jobs_parser.parse_runner import run_parse
-
 from backend.config_builder import config_snapshot_dict
 from backend.db import repository as repo
+from backend.db.session import session_scope
 from backend.observability import (
     PARSE_RUNS_ACTIVE,
     mark_parse_run_started,
     mark_parse_run_stopped,
     record_parse_run_finished,
 )
-from backend.db.session import session_scope
 from backend.schemas import RunCreateRequest
 from backend.services.progress_bus import progress_bus
 from backend.services.run_registry import run_registry
+from tg_jobs_parser.config.schema import AppConfig
+from tg_jobs_parser.models.parse_result import ParseResult
+from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.parse_cancel import ParseCancelled
+from tg_jobs_parser.parse_progress import ParseProgressSnapshot
+from tg_jobs_parser.parse_runner import run_parse
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)

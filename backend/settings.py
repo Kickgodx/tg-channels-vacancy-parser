@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -36,6 +35,9 @@ class Settings(BaseSettings):
         default="/metrics,/api/v1/health,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico",
         alias="HTTP_LOG_EXCLUDE_PATHS",
     )
+    # HH.ru: готовый Bearer-токен (без client_credentials). Email — для User-Agent.
+    hh_api_token: str | None = Field(default=None, alias="HH_API_TOKEN")
+    hh_contact_email: str | None = Field(default=None, alias="HH_CONTACT_EMAIL")
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import case, cast, func, lateral, literal, select, true
 from sqlalchemy.orm import Session
@@ -14,7 +14,12 @@ from backend.schemas import VacancyQuery
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.fx.convert import HOURS_PER_MONTH
-from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta, SalaryStats, TimeSeriesBucket
+from tg_jobs_parser.models.metrics import (
+    MetricsSummary,
+    SalaryDisplayMeta,
+    SalaryStats,
+    TimeSeriesBucket,
+)
 
 _TOP_SPECS = 50
 _TOP_SALARY_SPECS = 25
@@ -157,11 +162,7 @@ def _prepare_fx(session: Session) -> SalaryDisplayMeta:
         rate_date, _ = fx_repo.ensure_latest_rates(session, cfg.fx)
     else:
         rate_date = None
-    rates_as_of = (
-        rate_date.isoformat()
-        if rate_date is not None
-        else datetime.now(timezone.utc).date().isoformat()
-    )
+    rates_as_of = rate_date.isoformat() if rate_date is not None else datetime.now(UTC).date().isoformat()
     return SalaryDisplayMeta(
         display_currency=cfg.fx.display_currency,
         rates_as_of=rates_as_of,
@@ -209,17 +210,11 @@ def _count_by_column(
 
 def _daily_buckets(session: Session, query: VacancyQuery, *, dialect: str) -> list[TimeSeriesBucket]:
     day = func.date(VacancyRow.post_date)
-    stmt = (
-        apply_vacancy_filters(
-            select(day, func.count(VacancyRow.id))
-            .where(VacancyRow.post_date.isnot(None))
-            .group_by(day)
-            .order_by(day),
-            query,
-            dialect=dialect,
-        )
-        .limit(_MAX_DAILY_BUCKETS)
-    )
+    stmt = apply_vacancy_filters(
+        select(day, func.count(VacancyRow.id)).where(VacancyRow.post_date.isnot(None)).group_by(day).order_by(day),
+        query,
+        dialect=dialect,
+    ).limit(_MAX_DAILY_BUCKETS)
     return [TimeSeriesBucket(period=str(d), count=int(c)) for d, c in session.execute(stmt).all() if d is not None]
 
 
@@ -232,9 +227,9 @@ def _pg_spec_lateral(v):
     """LATERAL unnest специализаций; v — алиас vacancies с .correlate(v)."""
     from sqlalchemy.dialects.postgresql import JSONB
 
-    spec_q = select(
-        func.jsonb_array_elements_text(cast(v.c.detected_specializations, JSONB)).label("spec")
-    ).correlate(v)
+    spec_q = select(func.jsonb_array_elements_text(cast(v.c.detected_specializations, JSONB)).label("spec")).correlate(
+        v
+    )
     return lateral(spec_q).alias("spec_el")
 
 
@@ -352,19 +347,19 @@ def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsS
         total_vacancies=total,
         duplicate_count=0,
         vacancies_by_specialization=by_spec,
-        vacancies_by_grade=_count_by_column(
-            session, query, VacancyRow.detected_grade, dialect=dialect
-        ),
+        vacancies_by_grade=_count_by_column(session, query, VacancyRow.detected_grade, dialect=dialect),
         vacancies_by_work_format=_count_by_column(
-            session, query, VacancyRow.work_format, null_label="unknown", dialect=dialect
+            session,
+            query,
+            VacancyRow.work_format,
+            null_label="unknown",
+            dialect=dialect,
         ),
         daily=_daily_buckets(session, query, dialect=dialect),
         vacancies_with_salary=with_salary,
         vacancies_without_salary=total - with_salary,
         salary_by_specialization=salary_spec,
         salary_by_grade=_salary_by_grade(session, query, dialect=dialect),
-        grade_distribution=_count_by_column(
-            session, query, VacancyRow.detected_grade, dialect=dialect
-        ),
+        grade_distribution=_count_by_column(session, query, VacancyRow.detected_grade, dialect=dialect),
         salary_display=salary_display,
     )

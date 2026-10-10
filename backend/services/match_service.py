@@ -18,9 +18,7 @@ _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)
 
 
-def match_single(
-    session, *, resume_text: str, vacancy_id: str, vacancy_text: str, resume_id: int
-):
+def match_single(session, *, resume_text: str, vacancy_id: str, vacancy_text: str, resume_id: int):
     """Синхронная оценка одной пары: вызов LLM + запись в ``vacancy_matches``.
 
     ``overall_score`` считается здесь (детерминированно), LLM отдаёт только
@@ -44,9 +42,7 @@ def match_single(
         except Exception:
             record_match(outcome="error", duration_seconds=time.perf_counter() - started)
             raise
-        overall_score = calculate_overall_score(
-            extraction.breakdown, extraction.missing_skills
-        )
+        overall_score = calculate_overall_score(extraction.breakdown, extraction.missing_skills)
         span.set_attribute("match.overall_score", overall_score)
         span.set_attribute("gen_ai.response.model", usage.model)
     record_match(

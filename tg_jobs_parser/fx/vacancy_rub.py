@@ -21,6 +21,7 @@ def effective_salary_amount_for_vacancy(v: Vacancy) -> float | None:
         salary_max=v.detected_salary_max,
     )
 
+
 _LOG = logging.getLogger(__name__)
 
 _rates_cache: dict[date, dict[str, float]] = {}
@@ -69,10 +70,9 @@ def enrich_vacancy_salary_rub(
         v.detected_salary_avg_rub = None
         return
     rates: dict[str, float] | None = None
-    if rates_for_date:
-        if rates_for_date:
-            latest = max(rates_for_date)
-            rates = rates_for_date[latest]
+    if rates_for_date and rates_for_date:
+        latest = max(rates_for_date)
+        rates = rates_for_date[latest]
     if rates is None:
         rates = _live_rates(timeout=request_timeout_seconds)
     if rates is None:

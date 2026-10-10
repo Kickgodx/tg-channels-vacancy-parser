@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import UTC, datetime, time
 
-from sqlalchemy import ColumnElement, Table, and_, cast, exists, func, literal, literal_column, or_, select
+from sqlalchemy import (
+    ColumnElement,
+    Table,
+    and_,
+    cast,
+    exists,
+    func,
+    literal,
+    literal_column,
+    or_,
+    select,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import Select
 
@@ -15,12 +26,7 @@ from backend.schemas import VacancyQuery
 def _specializations_match(c, specs: list[str], dialect: str) -> ColumnElement[bool]:
     """Хотя бы одна из выбранных специализаций в JSON-массиве вакансии."""
     if dialect == "postgresql":
-        return or_(
-            *[
-                cast(c.detected_specializations, JSONB).contains([spec])
-                for spec in specs
-            ]
-        )
+        return or_(*[cast(c.detected_specializations, JSONB).contains([spec]) for spec in specs])
     je = func.json_each(c.detected_specializations).table_valued("value")
     return exists(select(literal(1)).select_from(je).where(je.c.value.in_(specs)))
 
@@ -48,10 +54,10 @@ def vacancy_filter_conditions(
     if query.work_format:
         conditions.append(c.work_format == query.work_format)
     if query.date_from:
-        dt_from = datetime.combine(query.date_from, time.min, tzinfo=timezone.utc)
+        dt_from = datetime.combine(query.date_from, time.min, tzinfo=UTC)
         conditions.append(c.post_date >= dt_from)
     if query.date_to:
-        dt_to = datetime.combine(query.date_to, time.max, tzinfo=timezone.utc)
+        dt_to = datetime.combine(query.date_to, time.max, tzinfo=UTC)
         conditions.append(c.post_date <= dt_to)
     if query.q:
         if dialect == "postgresql":
@@ -82,9 +88,7 @@ def apply_vacancy_filters(
     include_duplicates: bool = False,
 ) -> Select:
     """Ограничить выборку уникальными вакансиями и параметрами запроса."""
-    conditions = vacancy_filter_conditions(
-        query, table=table, dialect=dialect, include_duplicates=include_duplicates
-    )
+    conditions = vacancy_filter_conditions(query, table=table, dialect=dialect, include_duplicates=include_duplicates)
     if not conditions:
         return stmt
     return stmt.where(and_(*conditions))

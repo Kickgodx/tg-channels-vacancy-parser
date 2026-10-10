@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
-from pathlib import Path
+from datetime import date
 
 import pytest
 from sqlalchemy import create_engine

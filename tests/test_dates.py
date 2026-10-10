@@ -4,7 +4,11 @@ from datetime import date, timedelta
 
 import pytest
 
-from tg_jobs_parser.utils.dates import parse_date, resolve_search_date_from, resolve_search_date_to
+from tg_jobs_parser.utils.dates import (
+    parse_date,
+    resolve_search_date_from,
+    resolve_search_date_to,
+)
 
 
 def test_resolve_search_date_from_week_ago_aliases():

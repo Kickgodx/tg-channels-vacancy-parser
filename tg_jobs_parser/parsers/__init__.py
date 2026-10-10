@@ -10,7 +10,7 @@ __all__ = [
     "BaseChannelParser",
     "RawPost",
     "TelegramTelethonParser",
+    "normalize_channel_username",
     "telegram_api_credentials",
     "telethon_import_error",
-    "normalize_channel_username",
 ]

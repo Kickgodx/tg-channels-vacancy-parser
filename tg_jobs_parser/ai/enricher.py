@@ -7,16 +7,16 @@ from dataclasses import dataclass, field
 
 from tg_jobs_parser.ai.cache import AIExtractionCache
 from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
+from tg_jobs_parser.ai.merger import merge_rules_and_ai
 from tg_jobs_parser.ai.models_catalog import LlmModelEntry
 from tg_jobs_parser.ai.prompts import resolve_extract_prompt_version
 from tg_jobs_parser.ai.rate_limit import LlmQuotaExhausted
-from tg_jobs_parser.ai.merger import merge_rules_and_ai
-from tg_jobs_parser.ai.search_context import SearchContext, build_search_context
+from tg_jobs_parser.ai.search_context import build_search_context
 from tg_jobs_parser.ai.token_cost import TokenCostEstimate, estimate_run_cost
 from tg_jobs_parser.config.schema import AppConfig
+from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.observability.llm_metrics import record_enrich_event
 from tg_jobs_parser.parse_cancel import ParseCancellationToken, ParseCancelled
-from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.utils.logger import get_logger
 
 _LOG = get_logger(__name__)
@@ -70,10 +70,7 @@ class RunAIStats:
 
     def format_token_summary(self) -> str:
         """Строка для лога / UI: суммарные токены за текущий прогон."""
-        return (
-            f"Токены LLM за прогон: input={self.tokens_in}, "
-            f"output={self.tokens_out}, всего={self.tokens_total}"
-        )
+        return f"Токены LLM за прогон: input={self.tokens_in}, output={self.tokens_out}, всего={self.tokens_total}"
 
     def format_cost_summary(
         self,

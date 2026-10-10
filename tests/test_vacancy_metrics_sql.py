@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import cast, func, lateral, select, true
+from sqlalchemy import func, select, true
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects.postgresql import JSONB
 
-from backend.db.models import VacancyRow
 from backend.db.vacancy_metrics import _pg_spec_lateral, _vacancies_alias
 
 

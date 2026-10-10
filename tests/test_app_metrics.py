@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from prometheus_client import REGISTRY
 
@@ -54,53 +54,35 @@ def _vacancy(text: str, *, post_date: datetime | None = None) -> Vacancy:
 def test_auth_events_metric(api_client):
     before_reg = _sample("auth_events_total", {"event": "register", "outcome": "success"})
     token = _register(api_client, "m@example.com")
-    assert (
-        _sample("auth_events_total", {"event": "register", "outcome": "success"})
-        == before_reg + 1
-    )
+    assert _sample("auth_events_total", {"event": "register", "outcome": "success"}) == before_reg + 1
 
     before_invalid = _sample("auth_events_total", {"event": "login", "outcome": "invalid"})
     r = api_client.post(
-        "/api/v1/auth/login", json={"email": "m@example.com", "password": "wrong_password"}
+        "/api/v1/auth/login",
+        json={"email": "m@example.com", "password": "wrong_password"},
     )
     assert r.status_code == 401
-    assert (
-        _sample("auth_events_total", {"event": "login", "outcome": "invalid"})
-        == before_invalid + 1
-    )
+    assert _sample("auth_events_total", {"event": "login", "outcome": "invalid"}) == before_invalid + 1
 
     before_ok = _sample("auth_events_total", {"event": "login", "outcome": "success"})
-    r = api_client.post(
-        "/api/v1/auth/login", json={"email": "m@example.com", "password": "secret1"}
-    )
+    r = api_client.post("/api/v1/auth/login", json={"email": "m@example.com", "password": "secret1"})
     assert r.status_code == 200
     assert token
-    assert (
-        _sample("auth_events_total", {"event": "login", "outcome": "success"})
-        == before_ok + 1
-    )
+    assert _sample("auth_events_total", {"event": "login", "outcome": "success"}) == before_ok + 1
 
 
 def test_import_items_metric(api_client):
     token = _register(api_client, "imp@example.com")
 
     before_created = _sample("vacancy_import_items_total", {"status": "created"})
-    r = api_client.post(
-        "/api/v1/vacancies/import", headers=_auth(token), json={"texts": [VACANCY_TEXT]}
-    )
+    r = api_client.post("/api/v1/vacancies/import", headers=_auth(token), json={"texts": [VACANCY_TEXT]})
     assert r.status_code == 200, r.text
-    assert (
-        _sample("vacancy_import_items_total", {"status": "created"}) == before_created + 1
-    )
+    assert _sample("vacancy_import_items_total", {"status": "created"}) == before_created + 1
 
     before_exists = _sample("vacancy_import_items_total", {"status": "exists"})
-    r = api_client.post(
-        "/api/v1/vacancies/import", headers=_auth(token), json={"texts": [VACANCY_TEXT]}
-    )
+    r = api_client.post("/api/v1/vacancies/import", headers=_auth(token), json={"texts": [VACANCY_TEXT]})
     assert r.json()["items"][0]["status"] == "exists"
-    assert (
-        _sample("vacancy_import_items_total", {"status": "exists"}) == before_exists + 1
-    )
+    assert _sample("vacancy_import_items_total", {"status": "exists"}) == before_exists + 1
 
 
 def test_match_metrics(api_client, monkeypatch):
@@ -132,7 +114,7 @@ def test_match_metrics(api_client, monkeypatch):
     monkeypatch.setattr(match_service, "OpenRouterClient", _FakeClient)
 
     token = _register(api_client, "mm@example.com")
-    v = _vacancy(VACANCY_TEXT, post_date=datetime(2026, 9, 1, tzinfo=timezone.utc))
+    v = _vacancy(VACANCY_TEXT, post_date=datetime(2026, 9, 1, tzinfo=UTC))
     factory = get_session_factory()
     session = factory()
     try:
@@ -140,9 +122,7 @@ def test_match_metrics(api_client, monkeypatch):
         session.commit()
     finally:
         session.close()
-    rid = api_client.post(
-        "/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}
-    ).json()["id"]
+    rid = api_client.post("/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}).json()["id"]
 
     before_ok = _sample("vacancy_match_calls_total", {"outcome": "success"})
     before_score = _sample("vacancy_match_score_count", {})
@@ -154,13 +134,11 @@ def test_match_metrics(api_client, monkeypatch):
     before_cached = _sample("vacancy_match_calls_total", {"outcome": "cached"})
     r = api_client.post(f"/api/v1/resumes/{rid}/match/{v.id}", headers=_auth(token))
     assert r.json()["cached"] is True
-    assert (
-        _sample("vacancy_match_calls_total", {"outcome": "cached"}) == before_cached + 1
-    )
+    assert _sample("vacancy_match_calls_total", {"outcome": "cached"}) == before_cached + 1
 
 
 def test_upsert_and_archive_metrics(api_client):
-    old_date = datetime.now(timezone.utc) - timedelta(days=365)
+    old_date = datetime.now(UTC) - timedelta(days=365)
     v = _vacancy("Старая вакансия про Python", post_date=old_date)
 
     before_ins = _sample("vacancies_upserted_total", {"result": "inserted"})
@@ -185,7 +163,7 @@ def test_upsert_and_archive_metrics(api_client):
 
 
 def test_db_stats_collector_in_metrics(api_client):
-    token = _register(api_client, "db@example.com")
+    _register(api_client, "db@example.com")
     r = api_client.get("/metrics")
     assert r.status_code == 200
     body = r.text
@@ -200,7 +178,7 @@ def test_db_stats_collector_in_metrics(api_client):
         "db_parse_posts_fetched_24h",
     ):
         assert name in body
-    assert 'db_users} 1.0' in body or "db_users 1.0" in body
+    assert "db_users} 1.0" in body or "db_users 1.0" in body
 
 
 def test_db_parse_runs_finished_24h_counts_recent(api_client):
@@ -209,7 +187,7 @@ def test_db_parse_runs_finished_24h_counts_recent(api_client):
     try:
         from backend.db.models import ParseRunRow
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         session.add(
             ParseRunRow(
                 status="completed",
@@ -239,7 +217,7 @@ def test_db_parse_runs_finished_24h_counts_recent(api_client):
 def test_parse_run_duration_has_fine_buckets():
     from backend.observability import PARSE_RUN_DURATION
 
-    edges = list(PARSE_RUN_DURATION._upper_bounds)  # noqa: SLF001
+    edges = list(PARSE_RUN_DURATION._upper_bounds)
     assert 10.0 in edges
     assert 30.0 in edges
     assert 60.0 in edges
@@ -253,8 +231,8 @@ def test_parse_run_started_timestamp_gauge():
     )
 
     mark_parse_run_stopped()
-    assert PARSE_RUN_STARTED_TIMESTAMP._value.get() == 0.0  # noqa: SLF001
+    assert PARSE_RUN_STARTED_TIMESTAMP._value.get() == 0.0
     mark_parse_run_started()
-    assert PARSE_RUN_STARTED_TIMESTAMP._value.get() > 0.0  # noqa: SLF001
+    assert PARSE_RUN_STARTED_TIMESTAMP._value.get() > 0.0
     mark_parse_run_stopped()
-    assert PARSE_RUN_STARTED_TIMESTAMP._value.get() == 0.0  # noqa: SLF001
+    assert PARSE_RUN_STARTED_TIMESTAMP._value.get() == 0.0

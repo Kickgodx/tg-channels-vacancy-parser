@@ -6,8 +6,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from backend.db.base import Base
 from backend.db import models  # noqa: F401 — регистрация таблиц
+from backend.db.base import Base
 
 config = context.config
 # Из backend (migrate.upgrade_head) логирование уже настроено — fileConfig

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ def _naive_utc_for_excel(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
     if getattr(dt, "tzinfo", None):
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt.astimezone(UTC).replace(tzinfo=None)
     return dt
 
 
@@ -178,12 +178,8 @@ def export_excel(
 
     df_loc = pd.concat(
         [
-            pd.DataFrame(metrics.vacancies_by_country.items(), columns=["location", "count"]).assign(
-                kind="country"
-            ),
-            pd.DataFrame(metrics.vacancies_by_city.items(), columns=["location", "count"]).assign(
-                kind="city"
-            ),
+            pd.DataFrame(metrics.vacancies_by_country.items(), columns=["location", "count"]).assign(kind="country"),
+            pd.DataFrame(metrics.vacancies_by_city.items(), columns=["location", "count"]).assign(kind="city"),
         ],
         ignore_index=True,
     )

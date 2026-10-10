@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from prometheus_client import REGISTRY
@@ -32,7 +32,7 @@ def _vacancy() -> Vacancy:
         raw_text="Senior Go dev remote 400k",
         cleaned_text="Senior Go dev remote 400k",
         vacancy_score=4,
-        parsed_at=datetime.now(timezone.utc),
+        parsed_at=datetime.now(UTC),
     )
 
 
@@ -52,7 +52,11 @@ def test_llm_enrich_metrics_skipped_score(monkeypatch):
     cfg = cfg.model_copy(
         update={
             "ai": cfg.ai.model_copy(
-                update={"enabled": True, "skip_if_vacancy_score_below": 3, "use_cache": False}
+                update={
+                    "enabled": True,
+                    "skip_if_vacancy_score_below": 3,
+                    "use_cache": False,
+                }
             ),
         }
     )
@@ -75,9 +79,7 @@ def test_llm_openrouter_metrics_on_success(monkeypatch):
     response = MagicMock()
     response.choices = [
         MagicMock(
-            message=MagicMock(
-                content='{"is_job_post": true, "confidence": 0.9, "detected_specializations": ["Go"]}'
-            )
+            message=MagicMock(content='{"is_job_post": true, "confidence": 0.9, "detected_specializations": ["Go"]}')
         )
     ]
     response.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
@@ -114,15 +116,11 @@ def test_llm_enrich_metrics_cache_hit(monkeypatch):
 def test_llm_enrich_metrics_merged_on_llm_success(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     cfg = AppConfig()
-    cfg = cfg.model_copy(
-        update={"ai": cfg.ai.model_copy(update={"enabled": True, "use_cache": False})}
-    )
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "use_cache": False})})
     service = AIEnrichmentService(cfg)
     fake = VacancyAIExtraction(is_job_post=True, confidence=0.9)
     before = _counter("llm_enrich_events_total", {"event": "merged"})
     service.begin_batch(1)
-    with patch.object(
-        service._client, "extract_with_fallback", return_value=(fake, LLMUsage())
-    ):
+    with patch.object(service._client, "extract_with_fallback", return_value=(fake, LLMUsage())):
         assert service.enrich(_vacancy()) is not None
     assert _counter("llm_enrich_events_total", {"event": "merged"}) == before + 1

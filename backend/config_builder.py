@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from backend.schemas import RunCreateRequest
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import (
     AiConfig,
@@ -14,7 +15,6 @@ from tg_jobs_parser.config.schema import (
     SourcesConfig,
     TelegramConfig,
 )
-from backend.schemas import RunCreateRequest
 
 
 def build_config(base_path: Path, body: RunCreateRequest) -> AppConfig:
@@ -42,7 +42,10 @@ def build_config(base_path: Path, body: RunCreateRequest) -> AppConfig:
         data["ai"] = AiConfig(**merged).model_dump()
 
     if body.telegram_session_file:
-        merged_tg = {**data.get("telegram", {}), "telethon_session_file": body.telegram_session_file}
+        merged_tg = {
+            **data.get("telegram", {}),
+            "telethon_session_file": body.telegram_session_file,
+        }
         data["telegram"] = TelegramConfig(**merged_tg).model_dump()
 
     return AppConfig.model_validate(data)

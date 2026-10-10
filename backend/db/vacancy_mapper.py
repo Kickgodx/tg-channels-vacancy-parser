@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import uuid
 
-from tg_jobs_parser.models.vacancy import Vacancy
-
 from backend.db.models import VacancyRow
+from tg_jobs_parser.models.vacancy import Vacancy
 
 
 def _clip(value: str | None, max_len: int) -> str | None:

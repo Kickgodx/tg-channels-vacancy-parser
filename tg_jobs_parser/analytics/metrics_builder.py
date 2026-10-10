@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from statistics import mean, median
-from typing import Iterable
 
 import pandas as pd
 
 from tg_jobs_parser.extraction.grade_extractor import GRADE_RANK
-from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta, SalaryStats, TimeSeriesBucket
+from tg_jobs_parser.models.metrics import (
+    MetricsSummary,
+    SalaryDisplayMeta,
+    SalaryStats,
+    TimeSeriesBucket,
+)
 from tg_jobs_parser.models.vacancy import Vacancy
 
 
@@ -101,11 +106,7 @@ def build_metrics(
     for spec in by_spec:
         for grade in by_grade:
             key = f"{spec} / {grade}"
-            vs = [
-                v
-                for v in vacancies_unique
-                if spec in v.detected_specializations and v.detected_grade == grade
-            ]
+            vs = [v for v in vacancies_unique if spec in v.detected_specializations and v.detected_grade == grade]
             st = stats_for(vs)
             if st.count_with_salary or vs:
                 ms.salary_by_specialization_grade[key] = st
@@ -120,10 +121,7 @@ def build_metrics(
         if v.post_date:
             dates.append(v.post_date)
     if dates:
-        naive = [
-            d.astimezone(timezone.utc).replace(tzinfo=None) if getattr(d, "tzinfo", None) else d
-            for d in dates
-        ]
+        naive = [d.astimezone(UTC).replace(tzinfo=None) if getattr(d, "tzinfo", None) else d for d in dates]
         idx = pd.DatetimeIndex(naive)
         daily = idx.floor("D").value_counts().sort_index()
         ms.daily = [TimeSeriesBucket(period=str(i.date()), count=int(c)) for i, c in daily.items()]

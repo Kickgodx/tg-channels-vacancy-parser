@@ -103,9 +103,7 @@ def score_extraction(
         elif isinstance(exp_val, bool) or name == "is_job_post":
             ok = bool(act_val) is bool(exp_val)
         elif exp_val is None:
-            ok = act_val is None or (
-                isinstance(act_val, str) and not str(act_val).strip()
-            )
+            ok = act_val is None or (isinstance(act_val, str) and not str(act_val).strip())
         else:
             ok = _norm_str(act_val) == _norm_str(exp_val)
         field_results[name] = ok
@@ -133,9 +131,7 @@ def aggregate_scores(case_scores: list[dict[str, Any]]) -> dict[str, Any]:
         }
 
     exact = sum(1 for s in case_scores if s.get("all_matched"))
-    mean_acc = sum(float(s.get("accuracy") or 0) for s in case_scores) / len(
-        case_scores
-    )
+    mean_acc = sum(float(s.get("accuracy") or 0) for s in case_scores) / len(case_scores)
 
     field_hits: dict[str, list[bool]] = {}
     for s in case_scores:
@@ -143,8 +139,7 @@ def aggregate_scores(case_scores: list[dict[str, Any]]) -> dict[str, Any]:
             field_hits.setdefault(fname, []).append(bool(ok))
 
     per_field = {
-        name: (sum(1 for x in hits if x) / len(hits) if hits else 1.0)
-        for name, hits in sorted(field_hits.items())
+        name: (sum(1 for x in hits if x) / len(hits) if hits else 1.0) for name, hits in sorted(field_hits.items())
     }
     return {
         "cases": len(case_scores),

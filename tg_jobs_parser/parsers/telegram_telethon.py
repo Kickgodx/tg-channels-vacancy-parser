@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import resolve_search_date_from, resolve_search_date_to
@@ -45,7 +44,9 @@ def telegram_api_credentials() -> tuple[int, str]:
 
 
 def _asyncio_run(coro):
-    from tg_jobs_parser.utils.asyncio_windows import install_windows_asyncio_cleanup_helpers
+    from tg_jobs_parser.utils.asyncio_windows import (
+        install_windows_asyncio_cleanup_helpers,
+    )
 
     install_windows_asyncio_cleanup_helpers()
     return asyncio.run(coro)
@@ -61,8 +62,8 @@ async def _disconnect_client(client) -> None:
 
 def _combine_utc(d, end_of_day: bool = False) -> datetime:
     if end_of_day:
-        return datetime(d.year, d.month, d.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
-    return datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=timezone.utc)
+        return datetime(d.year, d.month, d.day, 23, 59, 59, 999999, tzinfo=UTC)
+    return datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=UTC)
 
 
 class TelegramTelethonParser(BaseChannelParser):
@@ -78,9 +79,7 @@ class TelegramTelethonParser(BaseChannelParser):
 
     def fetch_posts(self, channel_username: str) -> tuple[list[RawPost], str | None]:
         if err := telethon_import_error():
-            raise RuntimeError(
-                "Пакет telethon не установлен. Установите: poetry install"
-            ) from err
+            raise RuntimeError("Пакет telethon не установлен. Установите: poetry install") from err
 
         username = normalize_channel_username(channel_username)
         if not username:
@@ -90,17 +89,13 @@ class TelegramTelethonParser(BaseChannelParser):
             return _asyncio_run(self._fetch_single_with_own_client(username))
         except RuntimeError:
             raise
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             _LOG.exception("Telethon: ошибка для @%s: %s", username, e)
             return [], f"@{username}: Telethon — {e}"
 
-    def fetch_posts_many(
-        self, channel_usernames: list[str]
-    ) -> list[tuple[str, list[RawPost], str | None]]:
+    def fetch_posts_many(self, channel_usernames: list[str]) -> list[tuple[str, list[RawPost], str | None]]:
         if err := telethon_import_error():
-            raise RuntimeError(
-                "Пакет telethon не установлен. Установите: poetry install"
-            ) from err
+            raise RuntimeError("Пакет telethon не установлен. Установите: poetry install") from err
 
         usernames: list[str] = []
         out_placeholder: list[tuple[str, list[RawPost], str | None]] = []
@@ -118,9 +113,7 @@ class TelegramTelethonParser(BaseChannelParser):
         results = _asyncio_run(self._fetch_many_async(usernames))
         return out_placeholder + results
 
-    async def _fetch_single_with_own_client(
-        self, username: str
-    ) -> tuple[list[RawPost], str | None]:
+    async def _fetch_single_with_own_client(self, username: str) -> tuple[list[RawPost], str | None]:
         """Старый одиночный путь: свой клиент на один канал (используется fetch_posts)."""
         from telethon import TelegramClient
 
@@ -135,9 +128,7 @@ class TelegramTelethonParser(BaseChannelParser):
         finally:
             await _disconnect_client(client)
 
-    async def _fetch_many_async(
-        self, usernames: list[str]
-    ) -> list[tuple[str, list[RawPost], str | None]]:
+    async def _fetch_many_async(self, usernames: list[str]) -> list[tuple[str, list[RawPost], str | None]]:
         """Один клиент + asyncio.gather с ограничением конкурентности."""
         from telethon import TelegramClient
 
@@ -167,7 +158,7 @@ class TelegramTelethonParser(BaseChannelParser):
                     try:
                         posts, warn = await self._iter_channel(client, u)
                         return u, posts, warn
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
                         _LOG.exception("Telethon: ошибка для @%s: %s", u, e)
                         return u, [], f"@{u}: Telethon — {e}"
 
@@ -188,7 +179,7 @@ class TelegramTelethonParser(BaseChannelParser):
                                 continue
                             try:
                                 results.append(t.result())
-                            except Exception as e:  # noqa: BLE001
+                            except Exception as e:
                                 u = task_to_user.get(t, "?")
                                 results.append((u, [], f"@{u}: Telethon — {e}"))
                         break
@@ -204,7 +195,7 @@ class TelegramTelethonParser(BaseChannelParser):
                             results.append(t.result())
                         except asyncio.CancelledError:
                             continue
-                        except Exception as e:  # noqa: BLE001
+                        except Exception as e:
                             u = task_to_user.get(t, "?")
                             results.append((u, [], f"@{u}: Telethon — {e}"))
                 return results
@@ -270,10 +261,7 @@ class TelegramTelethonParser(BaseChannelParser):
             if md is None:
                 continue
             msg_dt = md
-            if msg_dt.tzinfo is None:
-                msg_dt = msg_dt.replace(tzinfo=timezone.utc)
-            else:
-                msg_dt = msg_dt.astimezone(timezone.utc)
+            msg_dt = msg_dt.replace(tzinfo=UTC) if msg_dt.tzinfo is None else msg_dt.astimezone(UTC)
 
             if use_date_window:
                 if msg_dt > dt_end:
@@ -295,7 +283,7 @@ class TelegramTelethonParser(BaseChannelParser):
                 )
             )
 
-        posts.sort(key=lambda p: p.post_date or datetime.min.replace(tzinfo=timezone.utc))
+        posts.sort(key=lambda p: p.post_date or datetime.min.replace(tzinfo=UTC))
         cnt = len(posts)
         _LOG.info(
             "Telethon: @%s — текстовых сообщений в выборке: %s (просмотрено сообщений API: %s, лимит сканирования: %s)",
@@ -307,4 +295,8 @@ class TelegramTelethonParser(BaseChannelParser):
         return posts, None
 
 
-__all__ = ["TelegramTelethonParser", "telethon_import_error", "telegram_api_credentials"]
+__all__ = [
+    "TelegramTelethonParser",
+    "telegram_api_credentials",
+    "telethon_import_error",
+]

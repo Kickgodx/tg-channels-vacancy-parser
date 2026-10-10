@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -67,9 +67,7 @@ class Vacancy(BaseModel):
     vacancy_score: int = 0
     vacancy_substantive_score: int = Field(
         default=0,
-        description=(
-            "Сумма heuristic-баллов без бонуса за email/@; см. vacancy_min_substantive_score в конфиге"
-        ),
+        description=("Сумма heuristic-баллов без бонуса за email/@; см. vacancy_min_substantive_score в конфиге"),
     )
 
     is_duplicate: bool = False
@@ -85,7 +83,7 @@ class Vacancy(BaseModel):
         description="Пояснение LLM к match_score.",
     )
 
-    parsed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    parsed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     archived_at: datetime | None = Field(
         default=None,
         description="Soft delete: вакансия старше TTL скрыта из выдачи, но не удалена.",

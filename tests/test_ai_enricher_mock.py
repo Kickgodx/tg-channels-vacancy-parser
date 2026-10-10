@@ -1,12 +1,11 @@
 """Мок OpenRouter для enricher."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
-from tg_jobs_parser.ai.enricher import AIEnrichmentService
-from tg_jobs_parser.ai.rate_limit import LlmQuotaExhausted
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
 from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+from tg_jobs_parser.ai.enricher import AIEnrichmentService
+from tg_jobs_parser.ai.schema import VacancyAIExtraction
 from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.models.vacancy import Vacancy
 
@@ -20,7 +19,7 @@ def _vacancy() -> Vacancy:
         raw_text="Senior Go dev remote 400k https://example.com/job",
         cleaned_text="Senior Go dev remote 400k https://example.com/job",
         vacancy_score=4,
-        parsed_at=datetime.now(timezone.utc),
+        parsed_at=datetime.now(UTC),
     )
 
 
@@ -30,7 +29,11 @@ def test_enrich_skips_low_vacancy_score(monkeypatch):
     cfg = cfg.model_copy(
         update={
             "ai": cfg.ai.model_copy(
-                update={"enabled": True, "skip_if_vacancy_score_below": 3, "use_cache": False}
+                update={
+                    "enabled": True,
+                    "skip_if_vacancy_score_below": 3,
+                    "use_cache": False,
+                }
             ),
         }
     )

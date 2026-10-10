@@ -72,10 +72,7 @@ def test_russian_phone_not_salary():
 
 def test_job_url_id_is_not_salary():
     """Регресс: id вакансии в URL не должен быть зарплатой."""
-    text = (
-        "Golang backend developer. Контакты: https://job.2gis.ru/software/76348/ "
-        "Опыт от 5 лет."
-    )
+    text = "Golang backend developer. Контакты: https://job.2gis.ru/software/76348/ Опыт от 5 лет."
     r = extract_salary(text)
     assert r.min_value is None
     assert r.max_value is None
@@ -104,10 +101,7 @@ def test_hourly_rub_slash_chas_text():
 
 
 def test_hourly_usd_range_in_text():
-    text = (
-        "Условия и з.п. от $15 до $30 в час. "
-        "Формат: Фриланс, почасовая оплата раз в месяц."
-    )
+    text = "Условия и з.п. от $15 до $30 в час. Формат: Фриланс, почасовая оплата раз в месяц."
     r = extract_salary(text)
     assert r.min_value == 15.0
     assert r.max_value == 30.0
@@ -122,10 +116,7 @@ def test_experience_range_is_not_salary():
 
 
 def test_monthly_tr_range_not_hourly():
-    text = (
-        "Вилка: от 200 тр до 300 тр. "
-        "критерии перевода в регресс) в части контроля качества"
-    )
+    text = "Вилка: от 200 тр до 300 тр. критерии перевода в регресс) в части контроля качества"
     r = extract_salary(text)
     assert r.min_value == 200_000.0
     assert r.max_value == 300_000.0

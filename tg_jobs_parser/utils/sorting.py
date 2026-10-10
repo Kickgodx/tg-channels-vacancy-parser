@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import UTC
 
 from tg_jobs_parser.models.vacancy import Vacancy
 
 
 def vacancy_has_salary(v: Vacancy) -> bool:
-    return (
-        v.detected_salary_min is not None
-        or v.detected_salary_max is not None
-        or v.detected_salary_avg is not None
-    )
+    return v.detected_salary_min is not None or v.detected_salary_max is not None or v.detected_salary_avg is not None
 
 
 def vacancy_post_timestamp(v: Vacancy) -> float:
@@ -21,8 +17,8 @@ def vacancy_post_timestamp(v: Vacancy) -> float:
         return float("-inf")
     d = v.post_date
     if d.tzinfo is None:
-        d = d.replace(tzinfo=timezone.utc)
-    return d.astimezone(timezone.utc).timestamp()
+        d = d.replace(tzinfo=UTC)
+    return d.astimezone(UTC).timestamp()
 
 
 def vacancy_data_richness(v: Vacancy) -> int:

@@ -6,18 +6,12 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, func, literal_column, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from tg_jobs_parser.models.metrics import MetricsSummary
-from tg_jobs_parser.models.parse_result import ParseResult
-from tg_jobs_parser.models.vacancy import Vacancy
-
-from backend.fx.apply import apply_salary_rub_for_vacancy, preload_fx_rates_for_vacancies
-from backend.observability import record_vacancies_archived, record_vacancy_upsert
 from backend.db.models import (
     CoverLetterRow,
     ParseRunRow,
@@ -27,12 +21,21 @@ from backend.db.models import (
     VacancyMatchRow,
     VacancyRow,
 )
+from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
+from backend.db.vacancy_mapper import row_to_vacancy, vacancy_to_row
+from backend.fx.apply import (
+    apply_salary_rub_for_vacancy,
+    preload_fx_rates_for_vacancies,
+)
+from backend.observability import record_vacancies_archived, record_vacancy_upsert
+from backend.schemas import RunStatus, VacancyQuery, VacancySortField
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import FxConfig
-from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
-from backend.db.vacancy_mapper import row_to_vacancy, vacancy_to_row
-from backend.schemas import RunStatus, VacancyQuery, VacancySortField
+from tg_jobs_parser.models.metrics import MetricsSummary
+from tg_jobs_parser.models.parse_result import ParseResult
+from tg_jobs_parser.models.vacancy import Vacancy
+
 
 @dataclass(frozen=True)
 class VacancyUpsertStats:
@@ -54,6 +57,7 @@ def _vacancy_ttl_days() -> int:
         return load_config(get_settings().config_path).retention.vacancy_ttl_days
     except Exception:
         return VACANCY_TTL_DAYS
+
 
 _SORT_COLUMNS: dict[VacancySortField, object] = {
     "post_date": VacancyRow.post_date,
@@ -93,12 +97,7 @@ def get_parse_run(session: Session, run_id: uuid.UUID) -> ParseRunRow | None:
 
 
 def list_parse_runs(session: Session, *, limit: int = 50, offset: int = 0) -> list[ParseRunRow]:
-    stmt = (
-        select(ParseRunRow)
-        .order_by(ParseRunRow.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+    stmt = select(ParseRunRow).order_by(ParseRunRow.created_at.desc()).limit(limit).offset(offset)
     return list(session.scalars(stmt))
 
 
@@ -114,20 +113,26 @@ def set_run_status(
         return
     row.status = status
     if status == "running" and row.started_at is None:
-        row.started_at = datetime.now(timezone.utc)
+        row.started_at = datetime.now(UTC)
     if status in ("completed", "cancelled", "failed"):
-        row.finished_at = datetime.now(timezone.utc)
+        row.finished_at = datetime.now(UTC)
     if error_message is not None:
         row.error_message = error_message
 
 
-def finalize_parse_run(session: Session, run_id: uuid.UUID, result: ParseResult, *, status: str = "completed") -> None:
+def finalize_parse_run(
+    session: Session,
+    run_id: uuid.UUID,
+    result: ParseResult,
+    *,
+    status: str = "completed",
+) -> None:
     """Сохранить метаданные прогона (отдельно от вакансий — чтобы статус не зависал при ошибке UPSERT)."""
     row = session.get(ParseRunRow, run_id)
     if row is None:
         return
     row.status = status
-    row.finished_at = datetime.now(timezone.utc)
+    row.finished_at = datetime.now(UTC)
     row.posts_fetched = result.posts_fetched
     row.parse_warnings = result.parse_warnings
     row.run_params = result.run_params
@@ -178,11 +183,9 @@ def upsert_vacancies(
     if not vacancies:
         return VacancyUpsertStats()
     started = time.monotonic()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ids = [v.id for v in vacancies]
-    existing_ids = set(
-        session.scalars(select(VacancyRow.id).where(VacancyRow.id.in_(ids))).all()
-    )
+    existing_ids = set(session.scalars(select(VacancyRow.id).where(VacancyRow.id.in_(ids))).all())
     fx = _fx_config(fx_config)
     _LOG.info("Сохранение %s вакансий в БД (уже есть %s)…", len(vacancies), len(existing_ids))
     rates_cache = preload_fx_rates_for_vacancies(session, vacancies, fx)
@@ -192,9 +195,7 @@ def upsert_vacancies(
     updated_existing = 0
     for v in vacancies:
         is_existing = v.id in existing_ids
-        apply_salary_rub_for_vacancy(
-            v, session, fx, rates_cache=rates_cache, force=is_existing
-        )
+        apply_salary_rub_for_vacancy(v, session, fx, rates_cache=rates_cache, force=is_existing)
         row = vacancy_to_row(v, parse_run_id=parse_run_id)
         data = {c.name: getattr(row, c.name) for c in VacancyRow.__table__.columns}
         data.pop("updated_at", None)
@@ -241,7 +242,7 @@ def archive_expired_vacancies(
     ttl = ttl_days if ttl_days is not None else _vacancy_ttl_days()
     if ttl <= 0:
         return 0
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     cutoff = now - timedelta(days=ttl)
     result = session.execute(
         update(VacancyRow)
@@ -257,7 +258,11 @@ def archive_expired_vacancies(
     )
     archived = result.rowcount or 0
     if archived:
-        _LOG.info("TTL вакансий: архивировано %s записей старше %s", archived, cutoff.isoformat())
+        _LOG.info(
+            "TTL вакансий: архивировано %s записей старше %s",
+            archived,
+            cutoff.isoformat(),
+        )
         record_vacancies_archived(archived)
     return archived
 
@@ -282,18 +287,14 @@ def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[Vacancy]
     offset = (query.page - 1) * query.page_size
     order = [*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc()]
     if query.resume_id is not None:
-        stmt = apply_vacancy_filters(
-            select(VacancyRow, VacancyMatchRow), query, dialect=dialect
-        ).outerjoin(
+        stmt = apply_vacancy_filters(select(VacancyRow, VacancyMatchRow), query, dialect=dialect).outerjoin(
             VacancyMatchRow,
             and_(
                 VacancyMatchRow.vacancy_id == VacancyRow.id,
                 VacancyMatchRow.resume_id == query.resume_id,
             ),
         )
-        pairs = session.execute(
-            stmt.order_by(*order).offset(offset).limit(query.page_size)
-        ).all()
+        pairs = session.execute(stmt.order_by(*order).offset(offset).limit(query.page_size)).all()
         items: list[Vacancy] = []
         for vrow, mrow in pairs:
             v = row_to_vacancy(vrow)
@@ -303,9 +304,7 @@ def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[Vacancy]
             items.append(v)
         return items, total
     stmt = apply_vacancy_filters(select(VacancyRow), query, dialect=dialect)
-    rows = session.scalars(
-        stmt.order_by(*order).offset(offset).limit(query.page_size)
-    ).all()
+    rows = session.scalars(stmt.order_by(*order).offset(offset).limit(query.page_size)).all()
     return [row_to_vacancy(r) for r in rows], total
 
 
@@ -320,9 +319,7 @@ def list_run_vacancies(
         VacancyRow.archived_at.is_(None),
     ]
     stmt = select(VacancyRow).where(*conditions)
-    total = int(
-        session.scalar(select(func.count(VacancyRow.id)).where(*conditions)) or 0
-    )
+    total = int(session.scalar(select(func.count(VacancyRow.id)).where(*conditions)) or 0)
     dialect = session.get_bind().dialect.name
     offset = (query.page - 1) * query.page_size
     rows = session.scalars(
@@ -385,9 +382,7 @@ def count_users(session: Session) -> int:
     return int(session.scalar(select(func.count(UserRow.id))) or 0)
 
 
-def create_user(
-    session: Session, *, email: str, password_hash: str, is_admin: bool = False
-) -> UserRow:
+def create_user(session: Session, *, email: str, password_hash: str, is_admin: bool = False) -> UserRow:
     row = UserRow(
         email=email.lower(),
         password_hash=password_hash,
@@ -401,14 +396,10 @@ def create_user(
 def claim_legacy_rows(session: Session, user_id: int) -> None:
     """Привязать ещё ничьи строки (user_id IS NULL) к пользователю — backfill миграции 007."""
     for model in (ResumeRow, SavedFilterRow):
-        session.execute(
-            update(model).where(model.user_id.is_(None)).values(user_id=user_id)
-        )
+        session.execute(update(model).where(model.user_id.is_(None)).values(user_id=user_id))
 
 
-def list_saved_filters(
-    session: Session, user_id: int | None = None
-) -> list[SavedFilterRow]:
+def list_saved_filters(session: Session, user_id: int | None = None) -> list[SavedFilterRow]:
     """user_id=None — без скоупа (тесты/служебные вызовы); роуты всегда передают id."""
     stmt = select(SavedFilterRow).order_by(SavedFilterRow.name.asc())
     if user_id is not None:
@@ -416,18 +407,14 @@ def list_saved_filters(
     return list(session.scalars(stmt))
 
 
-def create_saved_filter(
-    session: Session, *, name: str, params: dict, user_id: int | None = None
-) -> SavedFilterRow:
+def create_saved_filter(session: Session, *, name: str, params: dict, user_id: int | None = None) -> SavedFilterRow:
     row = SavedFilterRow(name=name, params=params, user_id=user_id)
     session.add(row)
     session.flush()
     return row
 
 
-def delete_saved_filter(
-    session: Session, filter_id: int, user_id: int | None = None
-) -> bool:
+def delete_saved_filter(session: Session, filter_id: int, user_id: int | None = None) -> bool:
     row = session.get(SavedFilterRow, filter_id)
     if row is None or (user_id is not None and row.user_id != user_id):
         return False
@@ -495,9 +482,7 @@ def get_vacancy_row(session: Session, vacancy_id: str) -> VacancyRow | None:
     return session.get(VacancyRow, vacancy_id)
 
 
-def get_vacancy_match(
-    session: Session, *, resume_id: int, vacancy_id: str
-) -> VacancyMatchRow | None:
+def get_vacancy_match(session: Session, *, resume_id: int, vacancy_id: str) -> VacancyMatchRow | None:
     return session.get(VacancyMatchRow, (resume_id, vacancy_id))
 
 
@@ -543,14 +528,12 @@ def upsert_vacancy_match(
         row.strengths = strengths
         row.risks = risks
         row.model = model
-        row.created_at = datetime.now(timezone.utc)
+        row.created_at = datetime.now(UTC)
     session.flush()
     return row
 
 
-def get_cover_letter(
-    session: Session, *, resume_id: int, vacancy_id: str
-) -> CoverLetterRow | None:
+def get_cover_letter(session: Session, *, resume_id: int, vacancy_id: str) -> CoverLetterRow | None:
     return session.get(CoverLetterRow, (resume_id, vacancy_id))
 
 
@@ -578,20 +561,15 @@ def upsert_cover_letter(
         row.text = text
         row.tone = tone
         row.model = model
-        row.created_at = datetime.now(timezone.utc)
+        row.created_at = datetime.now(UTC)
     session.flush()
     return row
 
 
-def delete_cover_letter(
-    session: Session, *, resume_id: int, vacancy_id: str
-) -> bool:
+def delete_cover_letter(session: Session, *, resume_id: int, vacancy_id: str) -> bool:
     row = session.get(CoverLetterRow, (resume_id, vacancy_id))
     if row is None:
         return False
     session.delete(row)
     session.flush()
     return True
-
-
-

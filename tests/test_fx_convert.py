@@ -1,6 +1,6 @@
 """Конвертация зарплат в RUB."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from tg_jobs_parser.fx.convert import (
     HOURS_PER_MONTH,
@@ -81,7 +81,7 @@ def test_enrich_vacancy_salary_rub_with_mocked_rates(monkeypatch):
         cleaned_text="t",
         detected_salary_avg=5000,
         salary_currency="USD",
-        post_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        post_date=datetime(2026, 5, 1, tzinfo=UTC),
     )
     enrich_vacancy_salary_rub(v)
     assert v.detected_salary_avg_rub == 500000.0

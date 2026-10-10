@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-
 from tests.test_api_health import client as client_fixture  # noqa: F401
 
 
@@ -17,12 +16,16 @@ def client(client_fixture):  # noqa: F811
 
 
 def _seed_run_with_vacancy(client: TestClient) -> uuid.UUID:
+    from backend.db.repository import (
+        create_parse_run,
+        finalize_parse_run,
+        upsert_vacancies,
+    )
     from backend.db.session import get_session_factory
-    from backend.db.repository import create_parse_run, upsert_vacancies, finalize_parse_run
+    from tg_jobs_parser.models.metrics import MetricsSummary
+    from tg_jobs_parser.models.parse_result import ParseResult
     from tg_jobs_parser.models.vacancy import Vacancy
     from tg_jobs_parser.utils.hashing import vacancy_content_id
-    from tg_jobs_parser.models.parse_result import ParseResult
-    from tg_jobs_parser.models.metrics import MetricsSummary
 
     factory = get_session_factory()
     session = factory()
@@ -36,7 +39,7 @@ def _seed_run_with_vacancy(client: TestClient) -> uuid.UUID:
             source_channel="export_chan",
             source_url="https://t.me/s/export_chan",
             post_url="https://t.me/export_chan/1",
-            post_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+            post_date=datetime(2026, 3, 1, tzinfo=UTC),
             raw_text=cleaned,
             cleaned_text=cleaned,
             detected_specializations=["Python"],

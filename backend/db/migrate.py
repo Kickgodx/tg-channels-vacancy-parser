@@ -8,8 +8,8 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
-from backend.db.base import Base
 from backend.db import models  # noqa: F401
+from backend.db.base import Base
 from backend.db.session import get_engine
 from backend.settings import project_root
 

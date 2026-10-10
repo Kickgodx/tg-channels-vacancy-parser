@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import signal
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 
 class ParseCancelled(Exception):
@@ -49,10 +50,8 @@ class ParseCancellationToken:
                 if not task.done():
                     task.cancel()
 
-        try:
+        with contextlib.suppress(RuntimeError):
             loop.call_soon_threadsafe(_cancel_all)
-        except RuntimeError:
-            pass
 
     def is_cancelled(self) -> bool:
         return self._event.is_set()
@@ -81,7 +80,5 @@ def install_sigint_cancel_handler(
         if log is not None:
             log("Запрошена остановка. Повторите Ctrl+C для немедленного выхода.")
 
-    try:
+    with contextlib.suppress(ValueError, OSError):
         signal.signal(signal.SIGINT, _handler)
-    except (ValueError, OSError):
-        pass

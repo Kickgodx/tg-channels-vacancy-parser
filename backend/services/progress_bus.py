@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -47,10 +48,8 @@ class ProgressBus:
         ch = self._channel(run_id)
         with ch.lock:
             for q in ch.subscribers:
-                try:
+                with contextlib.suppress(asyncio.QueueFull):
                     q.put_nowait(None)
-                except asyncio.QueueFull:
-                    pass
 
     def get_last(self, run_id: uuid.UUID) -> Snapshot | None:
         ch = self._channel(run_id)

@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 from tg_jobs_parser.ai.prompts import (
+    COVER_LETTER_PROMPT_VERSION,
     EXTRACT_PROMPT_VERSION,
     MATCH_PROMPT_VERSION,
-    COVER_LETTER_PROMPT_VERSION,
     resolve_extract_prompt_version,
 )
 from tg_jobs_parser.evals.golden import load_extraction_cases

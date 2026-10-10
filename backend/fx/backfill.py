@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 from datetime import date
 
 from sqlalchemy import func, select
@@ -11,14 +10,14 @@ from sqlalchemy.orm import Session
 
 from backend.db import fx_repository as fx_repo
 from backend.db.models import VacancyRow
-from backend.fx.apply import apply_salary_rub_for_vacancy
 from backend.db.vacancy_mapper import row_to_vacancy, vacancy_to_row
+from backend.fx.apply import apply_salary_rub_for_vacancy
+from tg_jobs_parser.config.schema import FxConfig
 from tg_jobs_parser.extraction.salary_period import (
     apply_hourly_currency_from_text,
     normalize_annual_salary_to_monthly,
     sanitize_salary_currency_period,
 )
-from tg_jobs_parser.config.schema import FxConfig
 
 
 def _has_salary_condition():

@@ -105,6 +105,4 @@ def apply_post_filters(
         return False
     if not matches_work_format_policy(v, config.filters.work_formats):
         return False
-    if not matches_location_policy(v, config.filters.countries, config.filters.cities):
-        return False
-    return True
+    return matches_location_policy(v, config.filters.countries, config.filters.cities)

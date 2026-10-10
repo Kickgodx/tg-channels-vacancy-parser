@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import json
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
@@ -35,7 +36,7 @@ def _vacancy(vid: str, text: str, score: int = 0) -> VacancyRow:
         source_post_key=f"ch-{vid}",
         source_channel="ch",
         source_url="https://t.me/s/ch",
-        post_date=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        post_date=datetime(2026, 9, 1, tzinfo=UTC),
         raw_text=text,
         cleaned_text=text,
         vacancy_score=score,
@@ -70,7 +71,11 @@ def _match_kwargs(score: int, **over) -> dict:
         },
         explanation="Совпадение",
         matching_skills=[
-            {"skill": "python", "importance": "critical", "evidence": "В резюме есть Python."}
+            {
+                "skill": "python",
+                "importance": "critical",
+                "evidence": "В резюме есть Python.",
+            }
         ],
         missing_skills=[
             {
@@ -90,23 +95,29 @@ def _match_kwargs(score: int, **over) -> dict:
 def test_match_upsert_and_join_in_list_vacancies(db_session):
     resume = repo.create_resume(db_session, name="r", text="python")
     db_session.add_all(
-        [_vacancy("a", "Python dev", 10), _vacancy("b", "Java dev", 5), _vacancy("c", "Go dev", 1)]
+        [
+            _vacancy("a", "Python dev", 10),
+            _vacancy("b", "Java dev", 5),
+            _vacancy("c", "Go dev", 1),
+        ]
     )
     db_session.commit()
 
     repo.upsert_vacancy_match(
-        db_session, resume_id=resume.id, vacancy_id="a",
+        db_session,
+        resume_id=resume.id,
+        vacancy_id="a",
         **_match_kwargs(88, explanation="Сильное совпадение"),
     )
     repo.upsert_vacancy_match(
-        db_session, resume_id=resume.id, vacancy_id="c",
+        db_session,
+        resume_id=resume.id,
+        vacancy_id="c",
         **_match_kwargs(40, explanation="Слабое"),
     )
     db_session.commit()
 
-    items, total = repo.list_vacancies(
-        db_session, VacancyQuery(resume_id=resume.id, sort_by="match_score")
-    )
+    items, total = repo.list_vacancies(db_session, VacancyQuery(resume_id=resume.id, sort_by="match_score"))
     assert total == 3
     assert [v.id for v in items] == ["a", "c", "b"]  # nulls last
     assert items[0].match_score == 88
@@ -115,7 +126,9 @@ def test_match_upsert_and_join_in_list_vacancies(db_session):
 
     # upsert обновляет существующую пару
     repo.upsert_vacancy_match(
-        db_session, resume_id=resume.id, vacancy_id="a",
+        db_session,
+        resume_id=resume.id,
+        vacancy_id="a",
         **_match_kwargs(55, explanation="Переоценено", model="m2"),
     )
     db_session.commit()
@@ -155,7 +168,7 @@ def test_match_prompt_and_parse():
     assert fenced.confidence == 30
     assert fenced.matching_skills == []
 
-    with pytest.raises(Exception):
+    with pytest.raises(json.JSONDecodeError):
         _parse_match("not json")
 
 
@@ -186,13 +199,15 @@ def test_match_extraction_tolerates_sloppy_llm_output():
 def test_calculate_overall_score_weights():
     from tg_jobs_parser.ai.schema import (
         MatchBreakdown,
-        SkillMatch,
         calculate_overall_score,
     )
 
     breakdown = MatchBreakdown(
-        role_match=90, skills_match=75, seniority_match=85,
-        domain_match=70, work_format_match=100,
+        role_match=90,
+        skills_match=75,
+        seniority_match=85,
+        domain_match=70,
+        work_format_match=100,
     )
     # 90*0.3 + 75*0.35 + 85*0.2 + 70*0.1 + 100*0.05 = 82.25 → 82
     assert calculate_overall_score(breakdown, []) == 82
@@ -206,11 +221,14 @@ def test_calculate_overall_score_critical_penalty():
     )
 
     strong = MatchBreakdown(
-        role_match=95, skills_match=95, seniority_match=95,
-        domain_match=100, work_format_match=100,
+        role_match=95,
+        skills_match=95,
+        seniority_match=95,
+        domain_match=100,
+        work_format_match=100,
     )
     one_critical = [SkillMatch(skill="Java", importance="critical")]
-    two_critical = one_critical + [SkillMatch(skill="Spring Boot", importance="critical")]
+    two_critical = [*one_critical, SkillMatch(skill="Spring Boot", importance="critical")]
     important_only = [SkillMatch(skill="Kubernetes", importance="important")]
 
     assert calculate_overall_score(strong, important_only) == 96

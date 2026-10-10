@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +53,7 @@ def save_partial_batch(
 ) -> Path:
     """Сохраняет JSON с вакансиями на текущий момент (инкрементальный батч)."""
     directory.mkdir(parents=True, exist_ok=True)
-    rid = run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    rid = run_id or datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     path = directory / f"partial_{rid}_{snapshot.posts_processed:05d}.json"
     payload = {
         "posts_processed": snapshot.posts_processed,
@@ -62,7 +62,7 @@ def save_partial_batch(
         "phase": snapshot.phase,
         "ai_llm_disabled": snapshot.ai_llm_disabled,
         "ai_llm_disabled_reason": snapshot.ai_llm_disabled_reason,
-        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "saved_at": datetime.now(UTC).isoformat(),
         "vacancies": [v.model_dump(mode="json") for v in snapshot.vacancies],
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from prometheus_client import REGISTRY, Counter, Gauge, Histogram
 from prometheus_client.core import GaugeMetricFamily
@@ -58,9 +58,7 @@ def mark_parse_run_stopped() -> None:
     PARSE_RUN_STARTED_TIMESTAMP.set(0.0)
 
 
-def record_parse_run_finished(
-    *, status: str, posts_fetched: int, duration_seconds: float
-) -> None:
+def record_parse_run_finished(*, status: str, posts_fetched: int, duration_seconds: float) -> None:
     PARSE_RUNS.labels(status=status or "unknown").inc()
     PARSE_RUN_DURATION.observe(max(duration_seconds, 0.0))
     if posts_fetched > 0:
@@ -127,9 +125,7 @@ MATCH_SCORE = Histogram(
 )
 
 
-def record_match(
-    *, outcome: str, duration_seconds: float | None = None, score: float | None = None
-) -> None:
+def record_match(*, outcome: str, duration_seconds: float | None = None, score: float | None = None) -> None:
     MATCH_CALLS.labels(outcome=outcome).inc()
     if duration_seconds is not None:
         MATCH_DURATION.observe(max(duration_seconds, 0.0))
@@ -163,7 +159,10 @@ def record_cover_letter(*, outcome: str, duration_seconds: float | None = None) 
 AUTH_EVENTS = Counter(
     "auth_events_total",
     "События аутентификации",
-    labelnames=("event", "outcome"),  # register|login × success|closed|conflict|invalid|disabled
+    labelnames=(
+        "event",
+        "outcome",
+    ),  # register|login × success|closed|conflict|invalid|disabled
 )
 
 
@@ -182,6 +181,66 @@ FX_CBR_REQUESTS = Counter(
 
 def record_fx_fetch(outcome: str) -> None:
     FX_CBR_REQUESTS.labels(outcome=outcome).inc()
+
+
+# --- HH.ru sync --------------------------------------------------------------
+
+HH_SYNCS = Counter(
+    "hh_syncs_total",
+    "Завершённые синхронизации HH",
+    labelnames=("outcome",),  # success | api_error | not_configured | error
+)
+
+HH_SYNC_DURATION = Histogram(
+    "hh_sync_duration_seconds",
+    "Длительность HH sync (wall time)",
+    buckets=(5.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1200.0, 3600.0),
+)
+
+HH_SEARCHED = Counter(
+    "hh_vacancies_searched_total",
+    "Вакансий получено из поиска HH",
+)
+
+HH_DETAILS = Counter(
+    "hh_details_total",
+    "Запросы detail к HH API",
+    labelnames=("result",),  # fetched | skipped
+)
+
+HH_API_ERRORS = Counter(
+    "hh_api_errors_total",
+    "Ошибки HH API",
+    labelnames=("status",),
+)
+
+HH_LISTINGS_PURGED = Counter(
+    "hh_listings_purged_total",
+    "Строк hh_listings удалено по TTL",
+)
+
+
+def record_hh_sync_finished(*, outcome: str, duration_seconds: float, searched: int) -> None:
+    HH_SYNCS.labels(outcome=outcome or "unknown").inc()
+    HH_SYNC_DURATION.observe(max(duration_seconds, 0.0))
+    if searched > 0:
+        HH_SEARCHED.inc(searched)
+
+
+def record_hh_details(*, fetched: int, skipped: int) -> None:
+    if fetched > 0:
+        HH_DETAILS.labels(result="fetched").inc(fetched)
+    if skipped > 0:
+        HH_DETAILS.labels(result="skipped").inc(skipped)
+
+
+def record_hh_api_error(*, status: str) -> None:
+    HH_API_ERRORS.labels(status=status or "unknown").inc()
+
+
+def record_hh_listings_purged(count: int) -> None:
+    if count > 0:
+        HH_LISTINGS_PURGED.inc(count)
 
 
 # --- Агрегаты БД на scrape ---------------------------------------------------
@@ -212,22 +271,24 @@ class _DBStatsCollector:
             "db_parse_posts_fetched_24h",
             "Сумма posts_fetched у прогонов, завершённых за 24 ч",
         )
-        yield GaugeMetricFamily(
-            "fx_latest_rate_timestamp_seconds", "Дата последнего курса ЦБ (unix time)"
-        )
+        yield GaugeMetricFamily("fx_latest_rate_timestamp_seconds", "Дата последнего курса ЦБ (unix time)")
+        yield GaugeMetricFamily("db_hh_listings", "Кэш HH listings", labels=["state"])
 
     def collect(self):
         try:
-            counts, runs_by_status, runs_finished_24h, posts_fetched_24h, fx_latest_ts = (
-                self._read_db()
-            )
+            (
+                counts,
+                runs_by_status,
+                runs_finished_24h,
+                posts_fetched_24h,
+                fx_latest_ts,
+                hh_listings,
+            ) = self._read_db()
         except Exception as e:
             _LOG.debug("DBStatsCollector: БД недоступна: %s", e)
             return
 
-        fam = GaugeMetricFamily(
-            "db_vacancies", "Вакансии в БД", labels=["state"]
-        )
+        fam = GaugeMetricFamily("db_vacancies", "Вакансии в БД", labels=["state"])
         fam.add_metric(["active"], counts["vacancies_active"])
         fam.add_metric(["archived"], counts["vacancies_archived"])
         yield fam
@@ -235,18 +296,18 @@ class _DBStatsCollector:
         yield GaugeMetricFamily("db_resumes", "Резюме в БД", value=counts["resumes"])
         yield GaugeMetricFamily("db_users", "Пользователи в БД", value=counts["users"])
         yield GaugeMetricFamily(
-            "db_vacancy_matches", "Сохранённые оценки резюме↔вакансия", value=counts["matches"]
+            "db_vacancy_matches",
+            "Сохранённые оценки резюме↔вакансия",
+            value=counts["matches"],
         )
         yield GaugeMetricFamily(
-            "db_cover_letters", "Сохранённые сопроводительные письма", value=counts["cover_letters"]
+            "db_cover_letters",
+            "Сохранённые сопроводительные письма",
+            value=counts["cover_letters"],
         )
-        yield GaugeMetricFamily(
-            "db_ai_cache_entries", "Записи LLM-кэша в БД", value=counts["ai_cache"]
-        )
+        yield GaugeMetricFamily("db_ai_cache_entries", "Записи LLM-кэша в БД", value=counts["ai_cache"])
 
-        fam = GaugeMetricFamily(
-            "db_parse_runs", "Прогоны в БД по статусу", labels=["status"]
-        )
+        fam = GaugeMetricFamily("db_parse_runs", "Прогоны в БД по статусу", labels=["status"])
         for status, n in runs_by_status.items():
             fam.add_metric([status], n)
         yield fam
@@ -273,9 +334,20 @@ class _DBStatsCollector:
                 value=fx_latest_ts,
             )
 
+        fam = GaugeMetricFamily("db_hh_listings", "Кэш HH listings", labels=["state"])
+        fam.add_metric(["total"], hh_listings["total"])
+        fam.add_metric(["with_detail"], hh_listings["with_detail"])
+        fam.add_metric(["without_detail"], hh_listings["without_detail"])
+        yield fam
+
     @staticmethod
     def _read_db() -> tuple[
-        dict[str, int], dict[str, int], dict[str, int], int, float | None
+        dict[str, int],
+        dict[str, int],
+        dict[str, int],
+        int,
+        float | None,
+        dict[str, int],
     ]:
         from datetime import timedelta
 
@@ -285,6 +357,7 @@ class _DBStatsCollector:
             AIExtractionCacheRow,
             CoverLetterRow,
             ExchangeRateRow,
+            HhListingRow,
             ParseRunRow,
             ResumeRow,
             UserRow,
@@ -298,44 +371,23 @@ class _DBStatsCollector:
         runs_finished_24h: dict[str, int] = {}
         posts_fetched_24h = 0
         fx_latest_ts: float | None = None
-        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        hh_listings = {"total": 0, "with_detail": 0, "without_detail": 0}
+        since = datetime.now(UTC) - timedelta(hours=24)
 
         with session_scope() as s:
             counts["vacancies_active"] = int(
-                s.scalar(
-                    select(func.count())
-                    .select_from(VacancyRow)
-                    .where(VacancyRow.archived_at.is_(None))
-                )
-                or 0
+                s.scalar(select(func.count()).select_from(VacancyRow).where(VacancyRow.archived_at.is_(None))) or 0
             )
             counts["vacancies_archived"] = int(
-                s.scalar(
-                    select(func.count())
-                    .select_from(VacancyRow)
-                    .where(VacancyRow.archived_at.is_not(None))
-                )
-                or 0
+                s.scalar(select(func.count()).select_from(VacancyRow).where(VacancyRow.archived_at.is_not(None))) or 0
             )
-            counts["resumes"] = int(
-                s.scalar(select(func.count()).select_from(ResumeRow)) or 0
-            )
-            counts["users"] = int(
-                s.scalar(select(func.count()).select_from(UserRow)) or 0
-            )
-            counts["matches"] = int(
-                s.scalar(select(func.count()).select_from(VacancyMatchRow)) or 0
-            )
-            counts["cover_letters"] = int(
-                s.scalar(select(func.count()).select_from(CoverLetterRow)) or 0
-            )
-            counts["ai_cache"] = int(
-                s.scalar(select(func.count()).select_from(AIExtractionCacheRow)) or 0
-            )
+            counts["resumes"] = int(s.scalar(select(func.count()).select_from(ResumeRow)) or 0)
+            counts["users"] = int(s.scalar(select(func.count()).select_from(UserRow)) or 0)
+            counts["matches"] = int(s.scalar(select(func.count()).select_from(VacancyMatchRow)) or 0)
+            counts["cover_letters"] = int(s.scalar(select(func.count()).select_from(CoverLetterRow)) or 0)
+            counts["ai_cache"] = int(s.scalar(select(func.count()).select_from(AIExtractionCacheRow)) or 0)
 
-            for status, n in s.execute(
-                select(ParseRunRow.status, func.count()).group_by(ParseRunRow.status)
-            ):
+            for status, n in s.execute(select(ParseRunRow.status, func.count()).group_by(ParseRunRow.status)):
                 runs_by_status[str(status)] = int(n)
 
             for status, n in s.execute(
@@ -358,11 +410,29 @@ class _DBStatsCollector:
 
             latest = s.scalar(select(func.max(ExchangeRateRow.rate_date)))
             if latest is not None:
-                fx_latest_ts = datetime(
-                    latest.year, latest.month, latest.day, tzinfo=timezone.utc
-                ).timestamp()
+                fx_latest_ts = datetime(latest.year, latest.month, latest.day, tzinfo=UTC).timestamp()
 
-        return counts, runs_by_status, runs_finished_24h, posts_fetched_24h, fx_latest_ts
+            hh_total = int(s.scalar(select(func.count()).select_from(HhListingRow)) or 0)
+            hh_with = int(
+                s.scalar(
+                    select(func.count()).select_from(HhListingRow).where(HhListingRow.detail_fetched_at.is_not(None))
+                )
+                or 0
+            )
+            hh_listings = {
+                "total": hh_total,
+                "with_detail": hh_with,
+                "without_detail": hh_total - hh_with,
+            }
+
+        return (
+            counts,
+            runs_by_status,
+            runs_finished_24h,
+            posts_fetched_24h,
+            fx_latest_ts,
+            hh_listings,
+        )
 
 
 REGISTRY.register(_DBStatsCollector())

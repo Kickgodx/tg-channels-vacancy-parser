@@ -63,10 +63,7 @@ class TokenCostEstimate:
             f"output={format_usd(self.usd_output)}, всего={format_usd(self.usd_total)}"
         )
         if self.unpriced_tokens_in or self.unpriced_tokens_out:
-            line += (
-                f" (без тарифа в каталоге: in={self.unpriced_tokens_in}, "
-                f"out={self.unpriced_tokens_out})"
-            )
+            line += f" (без тарифа в каталоге: in={self.unpriced_tokens_in}, out={self.unpriced_tokens_out})"
         return line
 
     def to_dict(self) -> dict[str, float | int]:

@@ -49,10 +49,7 @@ def list_fx_rates(db: Session = Depends(get_db)) -> FxRatesResponse:
     """Актуальные курсы из БД (последняя дата в ``exchange_rates``)."""
     cfg = load_config(get_settings().config_path)
     rate_date, rates = fx_repo.get_latest_rates(db)
-    items = [
-        FxRateItem(currency=c, rate_to_rub=r)
-        for c, r in sorted(rates.items(), key=lambda x: x[0])
-    ]
+    items = [FxRateItem(currency=c, rate_to_rub=r) for c, r in sorted(rates.items(), key=lambda x: x[0])]
     return FxRatesResponse(
         rate_date=rate_date,
         source=cfg.fx.provider,

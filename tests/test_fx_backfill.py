@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -48,14 +48,12 @@ def test_backfill_db_rates_only_uses_latest_in_db(db_session, monkeypatch):
         cleaned_text=text,
         detected_salary_avg=1000.0,
         salary_currency="USD",
-        post_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        post_date=datetime(2026, 5, 1, tzinfo=UTC),
         detected_salary_avg_rub=None,
     )
     # UPSERT сам подтягивает «последний курс»: без подмены он сходил бы в ЦБ
     # и положил в БД сегодняшний курс, который перебил бы засеянный выше.
-    monkeypatch.setattr(
-        fx_repo, "ensure_latest_rates", lambda *_a, **_k: (d, {"RUB": 1.0, "USD": 80.0})
-    )
+    monkeypatch.setattr(fx_repo, "ensure_latest_rates", lambda *_a, **_k: (d, {"RUB": 1.0, "USD": 80.0}))
     upsert_vacancies(db_session, [v], parse_run_id=uuid.uuid4(), fx_config=fx_cfg)
     db_session.commit()
 
@@ -92,12 +90,10 @@ def test_backfill_converts_annual_jpy_to_monthly(db_session, monkeypatch):
         detected_salary_max=12_000_000.0,
         detected_salary_avg=9_000_000.0,
         salary_currency="JPY",
-        post_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        post_date=datetime(2026, 5, 1, tzinfo=UTC),
         detected_salary_avg_rub=4_855_041.0,
     )
-    monkeypatch.setattr(
-        fx_repo, "ensure_latest_rates", lambda *_a, **_k: (d, {"RUB": 1.0, "JPY": 0.54})
-    )
+    monkeypatch.setattr(fx_repo, "ensure_latest_rates", lambda *_a, **_k: (d, {"RUB": 1.0, "JPY": 0.54}))
     upsert_vacancies(db_session, [v], parse_run_id=uuid.uuid4(), fx_config=fx_cfg)
     db_session.commit()
 

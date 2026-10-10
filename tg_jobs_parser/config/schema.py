@@ -51,7 +51,11 @@ DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
     ],
     "Android": ["android", "андроид"],
     "iOS": ["ios", "swift developer", "apple developer"],
-    "Software Engineer": ["software engineer", "software developer", "инженер-программист"],
+    "Software Engineer": [
+        "software engineer",
+        "software developer",
+        "инженер-программист",
+    ],
     "Go": ["go", "golang", "go developer", "golang developer"],
     "Golang": ["golang", "go lang"],
     "Frontend": ["frontend", "front-end", "front end", "фронтенд", "react developer"],
@@ -173,10 +177,7 @@ class AiConfig(BaseModel):
     )
     match_model: str = Field(
         default="",
-        description=(
-            "Модель для матчинга резюме к вакансиям (обычно reasoning). "
-            "Пусто — берётся ``model``."
-        ),
+        description=("Модель для матчинга резюме к вакансиям (обычно reasoning). Пусто — берётся ``model``."),
     )
     match_reasoning_enabled: bool = Field(
         default=False,
@@ -193,10 +194,7 @@ class AiConfig(BaseModel):
     )
     cover_letter_model: str = Field(
         default="",
-        description=(
-            "Модель для генерации сопроводительных писем. "
-            "Пусто — берётся ``match_model``, затем ``model``."
-        ),
+        description=("Модель для генерации сопроводительных писем. Пусто — берётся ``match_model``, затем ``model``."),
     )
     base_url: str = Field(default="https://openrouter.ai/api/v1")
     max_input_chars: int = Field(default=6000, ge=500, le=32000)
@@ -332,9 +330,7 @@ class SearchConfig(BaseModel):
     )
     date_to: str | None = Field(
         default=None,
-        description=(
-            "Верхняя граница: ISO-дата, либо today/сегодня, либо пусто — при запуске подставляется сегодня."
-        ),
+        description=("Верхняя граница: ISO-дата, либо today/сегодня, либо пусто — при запуске подставляется сегодня."),
     )
     max_days: int = 365
 
@@ -443,10 +439,52 @@ class RetentionConfig(BaseModel):
         default=40,
         ge=0,
         description=(
-            "Через сколько дней архивировать вакансию (по post_date, "
-            "а без неё — по parsed_at). 0 — не архивировать."
+            "Через сколько дней архивировать вакансию (по post_date, а без неё — по parsed_at). 0 — не архивировать."
         ),
     )
+
+
+DEFAULT_HH_SEARCH_TEXT = (
+    'Python AND (автотест* OR AQA OR "QA Automation" OR pytest OR QAA OR QA Auto '
+    'OR "Fullstack QA" OR Automation QA OR SDET OR автоматизатор)'
+)
+
+
+class HhSearchConfig(BaseModel):
+    """Параметры GET /vacancies для HH sync."""
+
+    text: str = Field(default=DEFAULT_HH_SEARCH_TEXT)
+    professional_role: list[str] = Field(default_factory=lambda: ["124", "96"])
+    per_page: int = Field(default=100, ge=1, le=100)
+
+
+class HhConfig(BaseModel):
+    """Парсинг вакансий с HH.ru (admin-only sync, без LLM)."""
+
+    enabled: bool = True
+    listing_ttl_days: int = Field(
+        default=40,
+        ge=0,
+        description=(
+            "TTL кэша короткой выдачи hh_listings (по last_seen_at). "
+            "0 — не чистить. Протухшая строка → detail снова запросится."
+        ),
+    )
+    search: HhSearchConfig = Field(default_factory=HhSearchConfig)
+    max_rps: float = Field(default=3.0, gt=0, description="Лимит запросов к HH API.")
+    db_flush_batch_size: int = Field(
+        default=30,
+        ge=1,
+        le=500,
+        description=(
+            "Сколько Vacancy копить в памяти перед UPSERT+commit. "
+            "Меньше — меньше RAM и потеря при обрыве; больше — меньше round-trip к БД."
+        ),
+    )
+    api_base: str = Field(default="https://api.hh.ru")
+    host: str = Field(default="hh.ru")
+    app_name: str = Field(default="PersonalJobSearch")
+    app_version: str = Field(default="1.0")
 
 
 class OutputConfig(BaseModel):
@@ -493,6 +531,7 @@ class AppConfig(BaseModel):
     parser: ParserConfig = Field(default_factory=ParserConfig)
     fx: FxConfig = Field(default_factory=FxConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
+    hh: HhConfig = Field(default_factory=HhConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     dictionaries: DictionariesConfig = Field(default_factory=DictionariesConfig)

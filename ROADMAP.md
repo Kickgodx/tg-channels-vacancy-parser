@@ -12,7 +12,7 @@
 
 | # | Ветка | Фича | Изменение схемы БД |
 |---|-------|------|--------------------|
-| 1 | `feature/application-tracker` | Трекер откликов | да (миграция 010+) |
+| 1 | `feature/application-tracker` | Трекер откликов | да (миграция 011+) |
 | 2 | `feature/external-export` | Экспорт в Google Sheets / Notion | нет |
 | 3 | `feature/admin-vacancies` | CMS-админка: редактирование/удаление вакансий | нет |
 | 4 | `feature/webauthn` | Вход по passkey (WebAuthn/FIDO2) поверх пароля | да (таблица `webauthn_credentials`) |
@@ -90,7 +90,8 @@ backend без `down -v`.
 
 **Backend**
 
-- Зависимость `require_admin` (поверх `get_current_user`, 403 для не-админов).
+- Зависимость `require_admin` уже есть (`backend/api/deps.py`, используется
+  HH sync); для CMS — те же эндпоинты `/admin/vacancies`.
 - `GET /api/v1/admin/vacancies` — тот же `VacancyQuery`, но
   `include_archived`/`is_duplicate` по умолчанию включены.
 - `PATCH /api/v1/admin/vacancies/{id}` — частичное редактирование полей

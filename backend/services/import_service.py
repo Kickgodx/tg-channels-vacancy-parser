@@ -14,21 +14,20 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from backend.db import repository as repo
+from backend.db.models import VacancyRow
+from backend.db.vacancy_mapper import row_to_vacancy
+from backend.observability import record_import_item
+from backend.settings import get_settings
+from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_runner import raw_post_to_vacancy_rules
 from tg_jobs_parser.parsers.base import RawPost
-
-from backend.db import repository as repo
-from backend.db.models import VacancyRow
-from backend.observability import record_import_item
-from backend.db.vacancy_mapper import row_to_vacancy
-from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
 
 _LOG = logging.getLogger(__name__)
 
@@ -56,7 +55,7 @@ def _text_to_vacancy(text: str, config: AppConfig, *, source_url: str | None) ->
         channel_username=MANUAL_CHANNEL,
         post_id=uuid.uuid4().hex,
         text=text,
-        post_date=datetime.now(timezone.utc),
+        post_date=datetime.now(UTC),
         post_url=source_url,
     )
     v = raw_post_to_vacancy_rules(post, config)
@@ -64,9 +63,7 @@ def _text_to_vacancy(text: str, config: AppConfig, *, source_url: str | None) ->
     return v.model_copy(update={"source_url": source_url or ""})
 
 
-def _enrich_one(
-    ai_service, vacancy: Vacancy, *, skip_below: int
-) -> tuple[Vacancy | None, str | None, str | None]:
+def _enrich_one(ai_service, vacancy: Vacancy, *, skip_below: int) -> tuple[Vacancy | None, str | None, str | None]:
     """
     Один LLM-разбор. Возвращает (vacancy|None, reject_status|None, save_warning|None):
     reject_status — 'not_vacancy'/'error', если сохранять нечего.
@@ -85,7 +82,7 @@ def _enrich_one(
         stats.errors,
         stats.rate_limit_skipped,
     )
-    d_score, d_notjob, d_err, d_rl = (a - b for a, b in zip(after, before))
+    d_score, d_notjob, d_err, d_rl = (a - b for a, b in zip(after, before, strict=False))
 
     if enriched is None:
         if d_notjob:
@@ -120,11 +117,7 @@ def import_vacancy_texts(
 
         # Ручной импорт: score-гейт перед LLM отключён — реальные вакансии
         # с низким rules-score не должны отсекаться до модели.
-        ai_config = config.model_copy(
-            update={
-                "ai": config.ai.model_copy(update={"skip_if_vacancy_score_below": 0})
-            }
-        )
+        ai_config = config.model_copy(update={"ai": config.ai.model_copy(update={"skip_if_vacancy_score_below": 0})})
         try:
             ai_service = AIEnrichmentService(ai_config)
             ai_service.begin_batch(len(texts))
@@ -137,9 +130,7 @@ def import_vacancy_texts(
         for i, raw in enumerate(texts):
             text = raw.strip()
             if not text:
-                result.items.append(
-                    ImportItemResult(index=i, status="error", message="Пустой текст")
-                )
+                result.items.append(ImportItemResult(index=i, status="error", message="Пустой текст"))
                 continue
 
             v = _text_to_vacancy(text, config, source_url=source_url)
@@ -163,17 +154,13 @@ def import_vacancy_texts(
                     ai_service, v, skip_below=config.ai.skip_if_vacancy_score_below
                 )
                 if reject_status is not None:
-                    result.items.append(
-                        ImportItemResult(index=i, status=reject_status, message=message)
-                    )
+                    result.items.append(ImportItemResult(index=i, status=reject_status, message=message))
                     continue
                 if enriched is not None:
                     v = enriched
 
             repo.upsert_vacancies(session, [v], parse_run_id=None)
-            result.items.append(
-                ImportItemResult(index=i, status="created", message=message, vacancy=v)
-            )
+            result.items.append(ImportItemResult(index=i, status="created", message=message, vacancy=v))
             _LOG.info("Импорт: вакансия %s сохранена (AI=%s)", v.id, result.ai_enabled)
     finally:
         if ai_service is not None:

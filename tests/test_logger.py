@@ -25,9 +25,7 @@ def test_records_are_written_by_listener_thread(isolated_logging):
     assert [type(h) for h in root.handlers] == [QueueHandler]
 
     emit_threads: list[str] = []
-    file_handler = next(
-        h for h in logger_mod._listener.handlers if isinstance(h, logging.FileHandler)
-    )
+    file_handler = next(h for h in logger_mod._listener.handlers if isinstance(h, logging.FileHandler))
     original_emit = file_handler.emit
 
     def spy(record):

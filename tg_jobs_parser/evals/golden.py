@@ -25,8 +25,6 @@ def load_extraction_cases(path: Path | None = None) -> list[dict[str, Any]]:
             except json.JSONDecodeError as e:
                 raise ValueError(f"{p}:{line_no}: invalid JSON: {e}") from e
             if not isinstance(obj, dict) or "id" not in obj or "expected" not in obj:
-                raise ValueError(
-                    f"{p}:{line_no}: case must be an object with id and expected"
-                )
+                raise ValueError(f"{p}:{line_no}: case must be an object with id and expected")
             cases.append(obj)
     return cases

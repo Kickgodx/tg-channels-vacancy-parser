@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import typer
 
 from tg_jobs_parser.analytics.charts import save_matplotlib_charts
+from tg_jobs_parser.cli.db import db_app
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import (
     AiConfig,
@@ -20,13 +20,12 @@ from tg_jobs_parser.config.schema import (
     TelegramConfig,
 )
 from tg_jobs_parser.exporters.excel_exporter import export_excel
-from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
 from tg_jobs_parser.exporters.json_exporter import export_json, load_parse_result_json
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_cancel import ParseCancellationToken
 from tg_jobs_parser.parse_runner import run_parse
-from tg_jobs_parser.cli.db import db_app
 from tg_jobs_parser.utils.logger import get_logger, setup_logging
+from tg_jobs_parser.utils.sorting import sort_vacancies_for_report
 
 app = typer.Typer(help="Парсер IT-вакансий из Telegram-каналов через Telethon (MVP).")
 app.add_typer(db_app, name="db")
@@ -97,7 +96,7 @@ def _build_config_from_cli(
 
 @app.command()
 def parse(
-    config_path: Optional[Path] = typer.Option(
+    config_path: Path | None = typer.Option(
         Path("config.yaml"),
         "--config",
         "-c",
@@ -106,21 +105,21 @@ def parse(
         readable=True,
         help="Путь к config.yaml",
     ),
-    channels: Optional[str] = typer.Option(None, "--channels", help="Список каналов через запятую"),
-    date_from: Optional[str] = typer.Option(None, "--date-from"),
-    date_to: Optional[str] = typer.Option(None, "--date-to"),
-    specializations: Optional[str] = typer.Option(None, "--specializations", help="Через запятую"),
-    exclude_keywords: Optional[str] = typer.Option(None, "--exclude-keywords"),
-    countries: Optional[str] = typer.Option(None, "--countries"),
-    cities: Optional[str] = typer.Option(None, "--cities"),
-    work_formats: Optional[str] = typer.Option(
+    channels: str | None = typer.Option(None, "--channels", help="Список каналов через запятую"),
+    date_from: str | None = typer.Option(None, "--date-from"),
+    date_to: str | None = typer.Option(None, "--date-to"),
+    specializations: str | None = typer.Option(None, "--specializations", help="Через запятую"),
+    exclude_keywords: str | None = typer.Option(None, "--exclude-keywords"),
+    countries: str | None = typer.Option(None, "--countries"),
+    cities: str | None = typer.Option(None, "--cities"),
+    work_formats: str | None = typer.Option(
         None,
         "--work-formats",
         help="Через запятую: remote,hybrid,office,relocation,any,exclude_office",
     ),
-    output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o"),
-    threshold: Optional[int] = typer.Option(None, "--threshold"),
-    telegram_session: Optional[str] = typer.Option(
+    output_dir: str | None = typer.Option(None, "--output-dir", "-o"),
+    threshold: int | None = typer.Option(None, "--threshold"),
+    telegram_session: str | None = typer.Option(
         None,
         "--telegram-session",
         help="Путь к файлу сессии Telethon (переопределение конфига).",

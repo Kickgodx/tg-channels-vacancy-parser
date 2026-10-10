@@ -1,6 +1,9 @@
 """Тесты цепочки fallback_models."""
 
-from tg_jobs_parser.ai.llm_models_registry import apply_ai_defaults_from_registry, load_llm_models_registry
+from tg_jobs_parser.ai.llm_models_registry import (
+    apply_ai_defaults_from_registry,
+    load_llm_models_registry,
+)
 from tg_jobs_parser.config.schema import AiConfig
 
 

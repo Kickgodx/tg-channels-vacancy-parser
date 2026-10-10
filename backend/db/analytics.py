@@ -151,14 +151,19 @@ def _group_stats(
     from_clause=None,
 ) -> list[SalaryGroupStats]:
     fn = _group_stats_pg if dialect == "postgresql" else _group_stats_generic
-    rows = fn(session, query, group_expr, dialect=dialect, table=table, from_clause=from_clause)
+    rows = fn(
+        session,
+        query,
+        group_expr,
+        dialect=dialect,
+        table=table,
+        from_clause=from_clause,
+    )
     rows.sort(key=lambda r: (-r.count, r.group))
     return rows
 
 
-def _salary_by_spec(
-    session: Session, query: VacancyQuery, *, dialect: str
-) -> list[SalaryGroupStats]:
+def _salary_by_spec(session: Session, query: VacancyQuery, *, dialect: str) -> list[SalaryGroupStats]:
     if dialect == "postgresql":
         v = _vacancies_alias()
         spec_lat = _pg_spec_lateral(v)
@@ -171,9 +176,7 @@ def _salary_by_spec(
             from_clause=v.join(spec_lat, true()),
         )
     else:
-        je = func.json_each(VacancyRow.detected_specializations).table_valued(
-            "value", with_ordinality=False
-        )
+        je = func.json_each(VacancyRow.detected_specializations).table_valued("value", with_ordinality=False)
         rows = _group_stats_generic(
             session,
             query,
@@ -185,9 +188,7 @@ def _salary_by_spec(
     return rows[:_TOP_SALARY_SPECS]
 
 
-def _salary_monthly(
-    session: Session, query: VacancyQuery, *, dialect: str
-) -> list[SalaryMonthlyBucket]:
+def _salary_monthly(session: Session, query: VacancyQuery, *, dialect: str) -> list[SalaryMonthlyBucket]:
     sal = _salary_rub_expr()
     if dialect == "postgresql":
         month = func.date_trunc("month", VacancyRow.post_date)
@@ -215,9 +216,7 @@ def _salary_monthly(
             if m is not None
         ]
     stmt = apply_vacancy_filters(
-        select(VacancyRow.post_date, sal.label("sal")).where(
-            VacancyRow.post_date.isnot(None), sal.isnot(None)
-        ),
+        select(VacancyRow.post_date, sal.label("sal")).where(VacancyRow.post_date.isnot(None), sal.isnot(None)),
         query,
         dialect=dialect,
     )
@@ -239,26 +238,19 @@ def _salary_monthly(
     return out
 
 
-def _salary_distribution(
-    session: Session, query: VacancyQuery, *, dialect: str
-) -> list[SalaryDistributionBucket]:
+def _salary_distribution(session: Session, query: VacancyQuery, *, dialect: str) -> list[SalaryDistributionBucket]:
     sal = _salary_rub_expr()
     band = case(
         *[(sal < edge, literal(label)) for edge, label in _SALARY_BANDS[:-1]],
         else_=literal(_SALARY_BANDS[-1][1]),
     )
     stmt = apply_vacancy_filters(
-        select(band.label("band"), func.count())
-        .where(sal.isnot(None))
-        .group_by(band),
+        select(band.label("band"), func.count()).where(sal.isnot(None)).group_by(band),
         query,
         dialect=dialect,
     )
     counts = {str(b): int(c) for b, c in session.execute(stmt).all()}
-    return [
-        SalaryDistributionBucket(range=label, count=counts.get(label, 0))
-        for _, label in _SALARY_BANDS
-    ]
+    return [SalaryDistributionBucket(range=label, count=counts.get(label, 0)) for _, label in _SALARY_BANDS]
 
 
 def salary_analytics(session: Session, query: VacancyQuery) -> SalaryAnalytics:
@@ -309,9 +301,7 @@ def source_quality(session: Session, query: VacancyQuery) -> list[SourceStats]:
             channel=ch,
             vacancies=d["unique"],
             duplicates=d["dups"],
-            unique_share=(
-                d["unique"] / (d["unique"] + d["dups"]) if (d["unique"] + d["dups"]) else 1.0
-            ),
+            unique_share=(d["unique"] / (d["unique"] + d["dups"]) if (d["unique"] + d["dups"]) else 1.0),
             avg_score=d["avg_score"],
             with_salary_share=d["sal_share"],
         )
@@ -321,9 +311,7 @@ def source_quality(session: Session, query: VacancyQuery) -> list[SourceStats]:
     return out
 
 
-def top_companies(
-    session: Session, query: VacancyQuery, *, limit: int = _TOP_COMPANIES
-) -> list[CompanyStats]:
+def top_companies(session: Session, query: VacancyQuery, *, limit: int = _TOP_COMPANIES) -> list[CompanyStats]:
     """Топ работодателей по числу вакансий."""
     dialect = _dialect_name(session)
     sal = _salary_rub_expr()

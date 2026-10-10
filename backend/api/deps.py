@@ -10,12 +10,20 @@ from backend.db.session import get_db
 from backend.services import auth_service
 from backend.settings import get_settings
 
-__all__ = ["get_db", "verify_api_key", "get_current_user", "get_optional_user"]
+__all__ = [
+    "get_current_user",
+    "get_db",
+    "get_optional_user",
+    "require_admin",
+    "verify_api_key",
+]
 
 _LOG = logging.getLogger(__name__)
 
 
-def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
+def verify_api_key(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> None:
     settings = get_settings()
     if not settings.api_key:
         return
@@ -70,3 +78,10 @@ def get_optional_user(
 ) -> UserRow | None:
     """Тот же разбор JWT, но без 401 — для общих эндпоинтов с per-user ветками."""
     return _user_from_token(db, _extract_token(authorization, access_token))
+
+
+def require_admin(user: UserRow = Depends(get_current_user)) -> UserRow:
+    """JWT + ``users.is_admin``; иначе 403."""
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    return user

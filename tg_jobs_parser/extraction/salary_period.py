@@ -15,9 +15,7 @@ _HOURLY_IN_HOUR_PHRASE = r"в\s+час\b"
 
 # Хвост ставки «за час» (₽/час, руб/час, $/hr, …).
 _HOURLY_RATE_TAIL = (
-    r"(?:"
-    + _HOURLY_IN_HOUR_PHRASE
-    + r"|"
+    r"(?:" + _HOURLY_IN_HOUR_PHRASE + r"|"
     r"(?:₽|руб\.?|rub|rur|\$|usd|€|eur)\s*/\s*(?:час|ч)\b|"
     r"/\s*h(?:r|our)?s?\b|"
     r"per\s+hour|"
@@ -28,13 +26,9 @@ _HOURLY_RATE_TAIL = (
 
 # Маркеры почасовой оплаты в тексте вакансии.
 _HOURLY_IN_TEXT = re.compile(
-    r"(?:"
-    + _HOURLY_RATE_TAIL
-    + r"|ставка\s+за\s+час|"
+    r"(?:" + _HOURLY_RATE_TAIL + r"|ставка\s+за\s+час|"
     r"(?:от|from)\s*(?:\$|₽|руб\.?|rub)?\s*\d[\d\s.,]*\s*(?:до|[-–])\s*"
-    r"(?:\$|₽|руб\.?|rub)?\s*\d[\d\s.,]*\s*(?:\$|usd|₽|руб\.?|rub)?\s*(?:"
-    + _HOURLY_RATE_TAIL
-    + r")"
+    r"(?:\$|₽|руб\.?|rub)?\s*\d[\d\s.,]*\s*(?:\$|usd|₽|руб\.?|rub)?\s*(?:" + _HOURLY_RATE_TAIL + r")"
     r")",
     re.I,
 )
@@ -90,9 +84,7 @@ def hourly_markers_in_text(text: str) -> bool:
     low = text.lower()
     if not _HOURLY_IN_TEXT.search(low):
         return False
-    if monthly_salary_markers_in_text(text):
-        return False
-    return True
+    return not monthly_salary_markers_in_text(text)
 
 
 def currency_with_hourly_suffix(currency: str | None, *, hourly: bool) -> str | None:

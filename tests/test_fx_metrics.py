@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.db.base import Base
 from backend.db import fx_repository as fx_repo
+from backend.db.base import Base
 from backend.db.repository import upsert_vacancies
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
 from backend.schemas import VacancyQuery
@@ -37,9 +37,7 @@ def test_metrics_avg_salary_in_rub(db_session, monkeypatch):
     monkeypatch.setattr(fx_repo, "sync_recent_days", lambda *a, **k: 0)
     monkeypatch.setattr(
         "backend.db.vacancy_metrics._prepare_fx",
-        lambda _session: SalaryDisplayMeta(
-            display_currency="RUB", rates_as_of="2026-05-10", rates_source="cbr"
-        ),
+        lambda _session: SalaryDisplayMeta(display_currency="RUB", rates_as_of="2026-05-10", rates_source="cbr"),
     )
     d = date(2026, 5, 10)
     fx_cfg = FxConfig(enabled=True)
@@ -58,7 +56,7 @@ def test_metrics_avg_salary_in_rub(db_session, monkeypatch):
         cleaned_text=t_rub,
         detected_salary_avg=200000.0,
         salary_currency="RUB",
-        post_date=datetime(2026, 5, 10, tzinfo=timezone.utc),
+        post_date=datetime(2026, 5, 10, tzinfo=UTC),
         detected_salary_avg_rub=200000.0,
     )
     v2 = Vacancy(
@@ -70,7 +68,7 @@ def test_metrics_avg_salary_in_rub(db_session, monkeypatch):
         cleaned_text=t_usd,
         detected_salary_avg=5000.0,
         salary_currency="USD",
-        post_date=datetime(2026, 5, 10, tzinfo=timezone.utc),
+        post_date=datetime(2026, 5, 10, tzinfo=UTC),
         detected_salary_avg_rub=500000.0,
     )
     upsert_vacancies(db_session, [v1, v2], parse_run_id=run_id, fx_config=fx_cfg)

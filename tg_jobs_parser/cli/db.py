@@ -57,7 +57,10 @@ def import_cmd(
     """Импорт дампа в текущую БД (DATABASE_URL из .env)."""
     try_load_dotenv()
     if mode not in ("merge", "replace"):
-        typer.echo(typer.style("mode должен быть merge или replace", fg=typer.colors.RED), err=True)
+        typer.echo(
+            typer.style("mode должен быть merge или replace", fg=typer.colors.RED),
+            err=True,
+        )
         raise typer.Exit(2)
     if mode == "replace":
         typer.confirm(

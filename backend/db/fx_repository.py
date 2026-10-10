@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -20,9 +20,7 @@ _LOG = logging.getLogger(__name__)
 
 
 def get_rates(session: Session, rate_date: date) -> dict[str, float]:
-    rows = session.scalars(
-        select(ExchangeRateRow).where(ExchangeRateRow.rate_date == rate_date)
-    ).all()
+    rows = session.scalars(select(ExchangeRateRow).where(ExchangeRateRow.rate_date == rate_date)).all()
     if not rows:
         return {}
     return {r.currency: float(r.rate_to_rub) for r in rows}
@@ -74,7 +72,7 @@ def upsert_rates(
 ) -> int:
     if not rates:
         return 0
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     count = 0
     for currency, rate in rates.items():
         if not currency or rate is None:
@@ -156,14 +154,14 @@ def ensure_latest_rates(session: Session, config: FxConfig) -> tuple[date | None
     """
     if not config.enabled:
         return None, {}
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     ensure_rates(session, today, config)
     return get_latest_rates(session)
 
 
 def refresh_rates_from_api(session: Session, config: FxConfig) -> tuple[date, dict[str, float], int]:
     """Принудительно загружает курсы ЦБ на сегодня и сохраняет в БД."""
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     if not config.enabled:
         upsert_rates(session, today, {"RUB": 1.0}, source=config.provider)
         return today, {"RUB": 1.0}, 1
@@ -185,7 +183,7 @@ def sync_recent_days(session: Session, config: FxConfig, *, days: int | None = N
     n = days if days is not None else config.sync_days_on_startup
     if n <= 0:
         return 0
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     total = 0
     for i in range(n):
         d = today - timedelta(days=i)

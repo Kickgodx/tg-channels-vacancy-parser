@@ -9,7 +9,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace
+from prometheus_fastapi_instrumentator import Instrumentator
 
+import backend.observability  # noqa: F401 — регистрация доменных метрик и db_* gauges в /metrics
+import tg_jobs_parser.observability.llm_metrics  # noqa: F401 — регистрация llm_* в /metrics
 from backend.api.routes import (
     ai_cache,
     analytics,
@@ -19,20 +22,19 @@ from backend.api.routes import (
     filters,
     fx,
     health,
+    hh,
     resumes,
     runs,
     vacancies,
 )
 from backend.db import fx_repository as fx_repo
+from backend.db import hh_repository as hh_repo
 from backend.db import repository as repo
-import backend.observability  # noqa: F401 — регистрация доменных метрик и db_* gauges в /metrics
 from backend.db.session import init_db, session_scope
 from backend.http_logging import HttpLoggingMiddleware
-from backend.tracing import setup_tracing, shutdown_tracing
 from backend.settings import get_settings
-from prometheus_fastapi_instrumentator import Instrumentator
+from backend.tracing import setup_tracing, shutdown_tracing
 from tg_jobs_parser.config.loader import load_config
-import tg_jobs_parser.observability.llm_metrics  # noqa: F401 — регистрация llm_* в /metrics
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
 from tg_jobs_parser.utils.logger import setup_logging
 
@@ -63,12 +65,13 @@ def _sync_fx_on_startup() -> None:
 
 
 def _cleanup_expired_vacancies() -> None:
-    """Применить TTL вакансий (архивацию) в отдельной транзакции."""
+    """Применить TTL вакансий (архивацию) и кэша HH listings."""
     try:
         with session_scope() as session:
             repo.archive_expired_vacancies(session)
+            hh_repo.purge_expired_listings(session)
     except Exception as e:
-        logging.getLogger(__name__).warning("TTL вакансий не применён: %s", e)
+        logging.getLogger(__name__).warning("TTL вакансий/HH listings не применён: %s", e)
 
 
 def _vacancy_retention_worker(stop_event: threading.Event) -> None:
@@ -113,7 +116,12 @@ app = FastAPI(
     # FastAPI >= 0.142 трассирует сам и добавляет свой OTLP-экспортёр к глобальному
     # provider'у — с нашей инструментацией (backend/tracing.py) это дубли span'ов
     # и трассы без исключений путей. Старые версии кладут параметр в app.extra.
-    telemetry={"tracing": False, "metrics": False, "logs": False, "auto_configure": False},
+    telemetry={
+        "tracing": False,
+        "metrics": False,
+        "logs": False,
+        "auto_configure": False,
+    },
 )
 
 settings = get_settings()
@@ -139,6 +147,7 @@ app.include_router(config.router, prefix="/api/v1")
 app.include_router(channels.router, prefix="/api/v1")
 app.include_router(runs.router, prefix="/api/v1")
 app.include_router(vacancies.router, prefix="/api/v1")
+app.include_router(hh.router, prefix="/api/v1")
 app.include_router(ai_cache.router, prefix="/api/v1")
 app.include_router(fx.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")

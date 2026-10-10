@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -51,7 +51,9 @@ def test_saved_filters_crud(db_session):
 
 def test_fts_condition_compiles_for_postgresql():
     stmt = apply_vacancy_filters(
-        select(VacancyRow.id), VacancyQuery(q="python разработчик"), dialect="postgresql"
+        select(VacancyRow.id),
+        VacancyQuery(q="python разработчик"),
+        dialect="postgresql",
     )
     sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
     assert "to_tsvector" in sql
@@ -68,7 +70,7 @@ def test_q_filter_falls_back_to_ilike_on_sqlite(db_session):
                 source_post_key="ch-1",
                 source_channel="ch",
                 source_url="https://t.me/s/ch",
-                post_date=datetime(2026, 9, 1, tzinfo=timezone.utc),
+                post_date=datetime(2026, 9, 1, tzinfo=UTC),
                 raw_text="Senior Python developer needed",
                 cleaned_text="Senior Python developer needed",
             ),
@@ -77,7 +79,7 @@ def test_q_filter_falls_back_to_ilike_on_sqlite(db_session):
                 source_post_key="ch-2",
                 source_channel="ch",
                 source_url="https://t.me/s/ch",
-                post_date=datetime(2026, 9, 1, tzinfo=timezone.utc),
+                post_date=datetime(2026, 9, 1, tzinfo=UTC),
                 raw_text="Java backend engineer",
                 cleaned_text="Java backend engineer",
             ),

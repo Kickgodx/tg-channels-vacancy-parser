@@ -38,11 +38,17 @@ MASK = "***"
 REQUEST_ID_HEADER = "x-request-id"
 
 DEFAULT_EXCLUDE_PATHS = frozenset({"/metrics"})
-_SENSITIVE_HEADERS = frozenset(
-    {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"}
-)
+_SENSITIVE_HEADERS = frozenset({"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"})
 _SENSITIVE_KEYS_EXACT = frozenset(
-    {"token", "accesstoken", "refreshtoken", "idtoken", "authorization", "cookie", "sessionstring"}
+    {
+        "token",
+        "accesstoken",
+        "refreshtoken",
+        "idtoken",
+        "authorization",
+        "cookie",
+        "sessionstring",
+    }
 )
 _SENSITIVE_KEYS_SUBSTR = ("password", "secret", "apikey", "apihash")
 _TEXT_TYPES = frozenset(
@@ -65,10 +71,7 @@ def is_sensitive_key(key: str) -> bool:
 
 def redact(data: Any) -> Any:
     if isinstance(data, dict):
-        return {
-            k: MASK if isinstance(k, str) and is_sensitive_key(k) else redact(v)
-            for k, v in data.items()
-        }
+        return {k: MASK if isinstance(k, str) and is_sensitive_key(k) else redact(v) for k, v in data.items()}
     if isinstance(data, list):
         return [redact(v) for v in data]
     return data
@@ -82,12 +85,7 @@ def is_loggable_type(content_type: str | None) -> bool:
     mt = _media_type(content_type)
     if mt == "text/event-stream":
         return False
-    return (
-        mt in _TEXT_TYPES
-        or mt.startswith("text/")
-        or mt.endswith("+json")
-        or mt.endswith("+xml")
-    )
+    return mt in _TEXT_TYPES or mt.startswith("text/") or mt.endswith("+json") or mt.endswith("+xml")
 
 
 def redact_query(query: str) -> str:
@@ -121,9 +119,7 @@ def _truncate(text: str, limit: int, total_bytes: int) -> str:
     return f"{text[:limit]}…[truncated, {total_bytes} bytes]"
 
 
-def render_body(
-    raw: bytes, content_type: str | None, *, total_bytes: int, limit: int
-) -> Any:
+def render_body(raw: bytes, content_type: str | None, *, total_bytes: int, limit: int) -> Any:
     """Тело для лога: dict/list для целого JSON в пределах лимита, иначе строка."""
     if not raw:
         return None
@@ -142,16 +138,14 @@ def render_body(
         text = redact_query(text)
     else:
         text = _JSON_STR_PAIR.sub(
-            lambda m: f'"{m.group(1)}"{m.group(2)}"{MASK}"'
-            if is_sensitive_key(m.group(1))
-            else m.group(0),
+            lambda m: f'"{m.group(1)}"{m.group(2)}"{MASK}"' if is_sensitive_key(m.group(1)) else m.group(0),
             text,
         )
     return _truncate(text, limit, total_bytes)
 
 
 class _BodyCapture:
-    __slots__ = ("enabled", "chunks", "size", "total")
+    __slots__ = ("chunks", "enabled", "size", "total")
 
     def __init__(self, enabled: bool) -> None:
         self.enabled = enabled
@@ -211,8 +205,10 @@ class HttpLoggingMiddleware:
         if self.log_bodies and is_loggable_type(req_headers.get("content-type")):
             pending, req_body, complete = await _read_request_body(receive)
             content_length = req_headers.get("content-length", "")
-            total = req_body.total if complete else (
-                int(content_length) if content_length.isdigit() else req_body.total + 1
+            total = (
+                req_body.total
+                if complete
+                else (int(content_length) if content_length.isdigit() else req_body.total + 1)
             )
         else:
             req_body, total = _BodyCapture(False), 0
@@ -227,7 +223,10 @@ class HttpLoggingMiddleware:
             "headers": req_headers,
         }
         body = render_body(
-            req_body.data, req_headers.get("content-type"), total_bytes=total, limit=self.body_limit
+            req_body.data,
+            req_headers.get("content-type"),
+            total_bytes=total,
+            limit=self.body_limit,
         )
         if body is not None:
             request["body"] = body
@@ -284,11 +283,15 @@ class HttpLoggingMiddleware:
         )
         if body is not None:
             response["body"] = body
-        level = (
-            logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO
-        )
+        level = logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO
         _LOG.log(
-            level, "RESPONSE %s %s %s %sms %s", method, path, status, duration_ms, _dumps(response)
+            level,
+            "RESPONSE %s %s %s %sms %s",
+            method,
+            path,
+            status,
+            duration_ms,
+            _dumps(response),
         )
 
 

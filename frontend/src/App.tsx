@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { api, getToken } from "./api/client";
 import DashboardPage from "./pages/DashboardPage";
+import HhPage from "./pages/HhPage";
 import ImportPage from "./pages/ImportPage";
 import LoginPage from "./pages/LoginPage";
 import ResumesPage from "./pages/ResumesPage";
@@ -28,6 +29,12 @@ function UserBadge() {
   );
 }
 
+function AdminNavLink({ to, children }: { to: string; children: string }) {
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
+  if (!meQ.data?.is_admin) return null;
+  return <NavLink to={to}>{children}</NavLink>;
+}
+
 export default function App() {
   useLocation(); // перерисовка при навигации — nav появляется сразу после логина
   const authed = Boolean(getToken());
@@ -40,6 +47,7 @@ export default function App() {
             Парсинг
           </NavLink>
           <NavLink to="/import">Импорт</NavLink>
+          <AdminNavLink to="/hh">HH</AdminNavLink>
           <NavLink to="/vacancies">Вакансии</NavLink>
           <NavLink to="/resumes">Резюме</NavLink>
           <UserBadge />
@@ -68,6 +76,14 @@ export default function App() {
           element={
             <RequireAuth>
               <ImportPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/hh"
+          element={
+            <RequireAuth>
+              <HhPage />
             </RequireAuth>
           }
         />

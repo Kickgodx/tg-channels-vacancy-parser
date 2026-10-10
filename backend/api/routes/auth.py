@@ -64,9 +64,7 @@ def register(body: AuthCredentials, db: Session = Depends(get_db)) -> TokenRespo
 @router.post("/login", response_model=TokenResponse)
 def login(body: AuthCredentials, db: Session = Depends(get_db)) -> TokenResponse:
     user = repo.get_user_by_email(db, body.email.strip())
-    if user is None or not auth_service.verify_password(
-        body.password, user.password_hash
-    ):
+    if user is None or not auth_service.verify_password(body.password, user.password_hash):
         record_auth_event("login", "invalid")
         _LOG.warning("Неудачный вход: %s", body.email.strip().lower())
         raise HTTPException(status_code=401, detail="Invalid email or password")

@@ -36,9 +36,7 @@ def test_effort_normalized_and_validated():
 
 
 def test_match_sends_effort(monkeypatch):
-    client, captured = _client(
-        monkeypatch, match_reasoning_enabled=True, match_reasoning_effort="high"
-    )
+    client, captured = _client(monkeypatch, match_reasoning_enabled=True, match_reasoning_effort="high")
     client.match(resume_text="python", vacancy_text="нужен python")
     assert captured["extra_body"] == {"reasoning": {"effort": "high"}}
     assert captured["model"] == "m"
@@ -58,9 +56,7 @@ def test_effort_ignored_when_reasoning_disabled(monkeypatch):
 
 
 def test_cover_letter_shares_match_effort(monkeypatch):
-    client, captured = _client(
-        monkeypatch, match_reasoning_enabled=True, match_reasoning_effort="xhigh"
-    )
+    client, captured = _client(monkeypatch, match_reasoning_enabled=True, match_reasoning_effort="xhigh")
     client.cover_letter(resume_text="python", vacancy_text="нужен python")
     assert captured["extra_body"] == {"reasoning": {"effort": "xhigh"}}
 

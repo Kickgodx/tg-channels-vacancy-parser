@@ -6,7 +6,6 @@ from contextlib import contextmanager
 import sqlalchemy
 from sqlalchemy.orm import Session, sessionmaker
 
-from backend.db.base import Base
 from backend.settings import get_settings
 
 _engine = None
