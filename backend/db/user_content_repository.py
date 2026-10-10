@@ -1,0 +1,219 @@
+"""Репозиторий per-user контента: users, filters, resumes, matches, letters."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session
+
+from backend.db.models import (
+    CoverLetterRow,
+    ResumeRow,
+    SavedFilterRow,
+    UserRow,
+    VacancyMatchRow,
+)
+
+
+def get_user(session: Session, user_id: int) -> UserRow | None:
+    return session.get(UserRow, user_id)
+
+
+def get_user_by_email(session: Session, email: str) -> UserRow | None:
+    return session.scalar(select(UserRow).where(UserRow.email == email.lower()))
+
+
+def count_users(session: Session) -> int:
+    return int(session.scalar(select(func.count(UserRow.id))) or 0)
+
+
+def create_user(session: Session, *, email: str, password_hash: str, is_admin: bool = False) -> UserRow:
+    row = UserRow(
+        email=email.lower(),
+        password_hash=password_hash,
+        is_admin=is_admin,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def claim_legacy_rows(session: Session, user_id: int) -> None:
+    """Привязать ещё ничьи строки (user_id IS NULL) к пользователю — backfill миграции 007."""
+    for model in (ResumeRow, SavedFilterRow):
+        session.execute(update(model).where(model.user_id.is_(None)).values(user_id=user_id))
+
+
+def list_saved_filters(session: Session, user_id: int | None = None) -> list[SavedFilterRow]:
+    """user_id=None — без скоупа (тесты/служебные вызовы); роуты всегда передают id."""
+    stmt = select(SavedFilterRow).order_by(SavedFilterRow.name.asc())
+    if user_id is not None:
+        stmt = stmt.where(SavedFilterRow.user_id == user_id)
+    return list(session.scalars(stmt))
+
+
+def create_saved_filter(session: Session, *, name: str, params: dict, user_id: int | None = None) -> SavedFilterRow:
+    row = SavedFilterRow(name=name, params=params, user_id=user_id)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def delete_saved_filter(session: Session, filter_id: int, user_id: int | None = None) -> bool:
+    row = session.get(SavedFilterRow, filter_id)
+    if row is None or (user_id is not None and row.user_id != user_id):
+        return False
+    session.delete(row)
+    session.flush()
+    return True
+
+
+def list_resumes(session: Session, user_id: int | None = None) -> list[ResumeRow]:
+    stmt = select(ResumeRow).order_by(ResumeRow.created_at.desc(), ResumeRow.id.desc())
+    if user_id is not None:
+        stmt = stmt.where(ResumeRow.user_id == user_id)
+    return list(session.scalars(stmt))
+
+
+def get_resume(session: Session, resume_id: int) -> ResumeRow | None:
+    return session.get(ResumeRow, resume_id)
+
+
+def create_resume(
+    session: Session,
+    *,
+    name: str,
+    text: str,
+    skills: list | None = None,
+    user_id: int | None = None,
+) -> ResumeRow:
+    row = ResumeRow(name=name, text=text, skills_json=skills, user_id=user_id)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def update_resume(
+    session: Session,
+    resume_id: int,
+    *,
+    user_id: int | None = None,
+    name: str | None = None,
+    text: str | None = None,
+) -> ResumeRow | None:
+    row = session.get(ResumeRow, resume_id)
+    if row is None or (user_id is not None and row.user_id != user_id):
+        return None
+    if name is not None:
+        row.name = name
+    if text is not None:
+        row.text = text
+    session.flush()
+    return row
+
+
+def delete_resume(session: Session, resume_id: int, user_id: int | None = None) -> bool:
+    row = session.get(ResumeRow, resume_id)
+    if row is None or (user_id is not None and row.user_id != user_id):
+        return False
+    session.query(VacancyMatchRow).filter(VacancyMatchRow.resume_id == resume_id).delete()
+    session.query(CoverLetterRow).filter(CoverLetterRow.resume_id == resume_id).delete()
+    session.delete(row)
+    session.flush()
+    return True
+
+
+def get_vacancy_match(session: Session, *, resume_id: int, vacancy_id: str) -> VacancyMatchRow | None:
+    return session.get(VacancyMatchRow, (resume_id, vacancy_id))
+
+
+def upsert_vacancy_match(
+    session: Session,
+    *,
+    resume_id: int,
+    vacancy_id: str,
+    overall_score: int,
+    confidence: int,
+    breakdown: dict | None,
+    explanation: str | None,
+    matching_skills: list | None,
+    missing_skills: list | None,
+    strengths: list | None,
+    risks: list | None,
+    model: str,
+) -> VacancyMatchRow:
+    """Записать/обновить оценку пары (resume, vacancy) — кэш матчинга по PK."""
+    row = session.get(VacancyMatchRow, (resume_id, vacancy_id))
+    if row is None:
+        row = VacancyMatchRow(
+            resume_id=resume_id,
+            vacancy_id=vacancy_id,
+            overall_score=overall_score,
+            confidence=confidence,
+            breakdown=breakdown,
+            explanation=explanation,
+            matching_skills=matching_skills,
+            missing_skills=missing_skills,
+            strengths=strengths,
+            risks=risks,
+            model=model,
+        )
+        session.add(row)
+    else:
+        row.overall_score = overall_score
+        row.confidence = confidence
+        row.breakdown = breakdown
+        row.explanation = explanation
+        row.matching_skills = matching_skills
+        row.missing_skills = missing_skills
+        row.strengths = strengths
+        row.risks = risks
+        row.model = model
+        row.created_at = datetime.now(UTC)
+    session.flush()
+    return row
+
+
+def get_cover_letter(session: Session, *, resume_id: int, vacancy_id: str) -> CoverLetterRow | None:
+    return session.get(CoverLetterRow, (resume_id, vacancy_id))
+
+
+def upsert_cover_letter(
+    session: Session,
+    *,
+    resume_id: int,
+    vacancy_id: str,
+    text: str,
+    tone: str,
+    model: str,
+) -> CoverLetterRow:
+    """Записать/обновить письмо пары (resume, vacancy) — кэш генерации по PK."""
+    row = session.get(CoverLetterRow, (resume_id, vacancy_id))
+    if row is None:
+        row = CoverLetterRow(
+            resume_id=resume_id,
+            vacancy_id=vacancy_id,
+            text=text,
+            tone=tone,
+            model=model,
+        )
+        session.add(row)
+    else:
+        row.text = text
+        row.tone = tone
+        row.model = model
+        row.created_at = datetime.now(UTC)
+    session.flush()
+    return row
+
+
+def delete_cover_letter(session: Session, *, resume_id: int, vacancy_id: str) -> bool:
+    row = session.get(CoverLetterRow, (resume_id, vacancy_id))
+    if row is None:
+        return False
+    session.delete(row)
+    session.flush()
+    return True
+
+

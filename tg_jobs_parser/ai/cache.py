@@ -1,4 +1,4 @@
-"""Кэш ответов LLM: PostgreSQL (по умолчанию) или файлы."""
+"""Кэш ответов LLM: PostgreSQL (через registered adapter) или файлы."""
 
 from __future__ import annotations
 
@@ -111,8 +111,12 @@ class FileAIExtractionCache:
 class AIExtractionCache:
     """Фасад: делегирует в выбранный backend по ``AiConfig``."""
 
-    def __init__(self, ai: AiConfig) -> None:
-        self._backend = build_extraction_cache(ai)
+    def __init__(
+        self,
+        ai: AiConfig,
+        backend: AIExtractionCacheBackend | None = None,
+    ) -> None:
+        self._backend = backend if backend is not None else build_extraction_cache(ai)
 
     def get(
         self,
@@ -154,7 +158,14 @@ def build_extraction_cache(ai: AiConfig) -> AIExtractionCacheBackend:
     if backend == "file":
         return FileAIExtractionCache(Path(ai.cache_path))
     if backend == "postgres":
-        from backend.db.ai_cache import DbAIExtractionCache
+        from tg_jobs_parser.ai.cache_registry import get_postgres_cache_factory
 
-        return DbAIExtractionCache(ai)
+        factory = get_postgres_cache_factory()
+        if factory is None:
+            raise ValueError(
+                "ai.cache_backend='postgres', но Postgres-адаптер не зарегистрирован. "
+                "Вызовите register_postgres_cache_factory() при старте backend/CLI "
+                "(например backend.db.ai_cache.register_db_ai_cache)."
+            )
+        return factory(ai)
     raise ValueError(f"ai.cache_backend must be 'postgres' or 'file', got {ai.cache_backend!r}")

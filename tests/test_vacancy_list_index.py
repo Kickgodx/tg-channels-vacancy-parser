@@ -87,7 +87,7 @@ def test_list_default_filter_can_use_partial_index_sqlite(db_session):
 
 
 def test_vacancy_count_cache_reuses_total(db_session, monkeypatch):
-    from backend.db import repository as repo
+    from backend.db import vacancy_repository as repo
 
     monkeypatch.setattr(repo, "_COUNT_CACHE_TTL_S", 60.0)
     upsert_vacancies(
