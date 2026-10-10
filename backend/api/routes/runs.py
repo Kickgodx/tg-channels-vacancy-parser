@@ -105,7 +105,7 @@ def get_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> RunDetail:
 @router.post("/{run_id}/cancel")
 def cancel_run(run_id: uuid.UUID) -> dict:
     if not run_service.cancel_run(run_id):
-        raise HTTPException(status_code=404, detail="Run not running or not found")
+        raise HTTPException(status_code=404, detail="Run not cancellable or not found")
     _LOG.info("Прогон %s: отмена запрошена через API", run_id)
     return {"ok": True, "run_id": str(run_id)}
 

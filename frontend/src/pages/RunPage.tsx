@@ -263,7 +263,8 @@ export default function RunPage() {
                 {progress?.phase === "post_processing_done" && run.data.status === "running" && (
                   <p>Сохранение в базу…</p>
                 )}
-                {run.data.status === "running" && progress?.phase !== "post_processing_done" && (
+                {(run.data.status === "queued" || run.data.status === "pending" ||
+                  (run.data.status === "running" && progress?.phase !== "post_processing_done")) && (
                   <>
                     <button className="secondary" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
                       {cancel.isPending ? "Отмена…" : "Отменить"}

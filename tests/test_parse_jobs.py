@@ -190,3 +190,32 @@ def test_start_parse_run_inprocess_completes(api_client, monkeypatch):
             break
         time.sleep(0.05)
     assert status == "completed"
+
+
+def test_cancel_queued_run(api_client):
+    with session_scope() as session:
+        rid = pr.create_parse_run(session, config_snapshot={}).id
+    r = api_client.post(f"/api/v1/runs/{rid}/cancel")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    got = api_client.get(f"/api/v1/runs/{rid}")
+    assert got.status_code == 200
+    body = got.json()
+    assert body["status"] == "cancelled"
+    assert body["cancel_requested"] is True
+
+
+def test_cancel_running_sets_flag():
+    from backend.services import run_service
+
+    with session_scope() as session:
+        rid = pr.create_parse_run(session, config_snapshot={}).id
+    with session_scope() as session:
+        claimed = pr.claim_parse_run(session, rid)
+        assert claimed is not None and claimed.status == "running"
+    assert run_service.cancel_run(rid) is True
+    with session_scope() as session:
+        row = pr.get_parse_run(session, rid)
+        assert row is not None
+        assert row.cancel_requested is True
+        assert row.status == "running"

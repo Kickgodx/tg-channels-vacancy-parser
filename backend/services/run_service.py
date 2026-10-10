@@ -13,7 +13,7 @@ from backend.config_builder import config_snapshot_dict
 from backend.db import repository as repo
 from backend.db.session import session_scope
 from backend.schemas import RunCreateRequest
-from backend.services.run_registry import run_registry
+from backend.services.parse_run_events import publish_parse_run_event
 from backend.settings import get_settings
 from backend.workers.parse_tasks import run_parse_job
 from tg_jobs_parser.config.schema import AppConfig
@@ -83,10 +83,23 @@ def start_parse_run(config: AppConfig, _body: RunCreateRequest) -> uuid.UUID:
 
 
 def cancel_run(run_id: uuid.UUID) -> bool:
-    """In-memory cancel bridge (до durable cancel в Task 8)."""
-    active = run_registry.get(run_id)
-    if active is None or active.status != "running":
-        return False
-    active.cancel_token.request_cancel()
-    _LOG.info("Прогон %s: запрошена отмена", run_id)
+    """Durable cancel: queued → cancelled; running → cancel_requested (worker polls)."""
+    with session_scope() as session:
+        row = repo.request_parse_run_cancel(session, run_id)
+        if row is None:
+            return False
+        rq_job_id = row.rq_job_id
+        status = row.status
+    if status == "cancelled":
+        if rq_job_id:
+            try:
+                from rq.job import Job
+
+                from backend.queue.rq_conn import get_redis_connection
+
+                Job.fetch(rq_job_id, connection=get_redis_connection()).cancel()
+            except Exception:
+                pass
+        publish_parse_run_event(run_id, event="done", payload={})
+    _LOG.info("Прогон %s: запрошена отмена (status=%s)", run_id, status)
     return True
