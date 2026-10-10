@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -51,17 +50,18 @@ def test_build_postgres_with_registry_returns_stub():
 
 def test_import_ai_cache_does_not_load_backend():
     # Убедиться, что модуль кэша не тянет backend при импорте.
-    mods_before = {k for k in sys.modules if k == "backend" or k.startswith("backend.")}
     # Перезагрузка не нужна: проверяем исходник модуля.
     import tg_jobs_parser.ai.cache as cache_mod
 
     src = Path(cache_mod.__file__).read_text(encoding="utf-8")
     assert "from backend" not in src
     assert "import backend" not in src
-    mods_after = {k for k in sys.modules if k == "backend" or k.startswith("backend.")}
-    # Импорт cache сам по себе не обязан чистить уже загруженный backend (conftest),
-    # но не должен добавлять новых backend.* сверх уже известных.
-    assert mods_after >= mods_before
+
+
+def test_parse_worker_entrypoint_registers_postgres_cache():
+    """Parse идёт в RQ-воркере — без registry AI с cache_backend=postgres отключается."""
+    src = (Path(__file__).resolve().parents[1] / "backend" / "workers" / "parse_worker.py").read_text(encoding="utf-8")
+    assert "register_db_ai_cache()" in src
 
 
 def test_null_cache_when_use_cache_false():

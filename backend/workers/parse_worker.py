@@ -47,8 +47,12 @@ def main() -> None:
         log.warning("Не удалось стартовать metrics HTTP: %s", e)
 
     import backend.observability  # noqa: F401
+    from backend.db.ai_cache import register_db_ai_cache
     from backend.queue.rq_conn import PARSE_QUEUE_NAME, get_redis_connection
     from backend.workers.recover_parse import recover_stuck_parse_runs
+
+    # Парсинг с ai.cache_backend=postgres идёт в этом процессе, не в API.
+    register_db_ai_cache()
 
     if settings.parse_job_backend_normalized != "rq":
         log.warning(
