@@ -32,7 +32,13 @@ class Settings(BaseSettings):
     otel_enabled: bool = Field(default=False, alias="OTEL_ENABLED")
     otel_traces_sample_ratio: float = Field(default=1.0, alias="OTEL_TRACES_SAMPLE_RATIO")
     http_log_exclude_paths: str = Field(
-        default="/metrics,/api/v1/health,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico",
+        # Агрегаты (vacancies/metrics, analytics/*) — крупные JSON; под polling/ab
+        # заливают Loki (default ingestion 4MB/s → 429) и раздувают docker-логи.
+        default=(
+            "/metrics,/api/v1/health,/api/v1/vacancies/metrics,"
+            "/api/v1/analytics/salaries,/api/v1/analytics/sources,/api/v1/analytics/companies,"
+            "/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico"
+        ),
         alias="HTTP_LOG_EXCLUDE_PATHS",
     )
     # HH.ru: готовый Bearer-токен (без client_credentials). Email — для User-Agent.

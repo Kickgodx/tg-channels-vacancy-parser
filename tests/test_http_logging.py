@@ -153,6 +153,9 @@ def test_noisy_endpoints_and_preflight_are_not_logged(api_client, caplog):
     assert api_client.get("/api/v1/health").status_code == 200
     assert api_client.get("/metrics").status_code == 200
     assert api_client.get("/openapi.json").status_code == 200
+    # Агрегаты с крупным JSON: под ab/UI polling иначе заливают Loki (ingestion 4MB/s).
+    assert api_client.get("/api/v1/vacancies/metrics").status_code == 200
+    assert api_client.get("/api/v1/analytics/salaries").status_code == 200
     preflight = api_client.options(
         "/api/v1/auth/me",
         headers={
