@@ -32,6 +32,23 @@ def db_session(tmp_path):
     session.close()
 
 
+def test_ensure_latest_rates_prefers_db_without_network(db_session, monkeypatch):
+    d = date(2026, 5, 19)
+    fx_cfg = FxConfig(enabled=True)
+    fx_repo.upsert_rates(db_session, d, {"RUB": 1.0, "USD": 80.0})
+    db_session.commit()
+
+    def _forbid(*_a, **_k):
+        raise AssertionError("ensure_latest_rates(prefer_db) must not call CBR")
+
+    monkeypatch.setattr(fx_repo, "ensure_rates", _forbid)
+    monkeypatch.setattr("tg_jobs_parser.fx.cbr.fetch_cbr_rates", _forbid)
+
+    rate_date, rates = fx_repo.ensure_latest_rates(db_session, fx_cfg)
+    assert rate_date == d
+    assert rates["USD"] == 80.0
+
+
 def test_backfill_db_rates_only_uses_latest_in_db(db_session, monkeypatch):
     d = date(2026, 5, 19)
     fx_cfg = FxConfig(enabled=True)

@@ -163,7 +163,9 @@ def match_single_vacancy(
             force=force,
         )
     except LlmJobUserLimitError as e:
-        raise HTTPException(status_code=429, detail=str(e)) from e
+        from backend.errors import CODE_RATE_LIMITED, http_error
+
+        raise http_error(429, CODE_RATE_LIMITED, str(e), retryable=True) from e
     body = LlmJobAccepted(job_id=result.job_id, status="queued")
     return JSONResponse(status_code=202, content=body.model_dump(mode="json"))
 
@@ -233,7 +235,9 @@ def generate_cover_letter(
             params={"tone": tone, "extra_notes": extra_notes},
         )
     except LlmJobUserLimitError as e:
-        raise HTTPException(status_code=429, detail=str(e)) from e
+        from backend.errors import CODE_RATE_LIMITED, http_error
+
+        raise http_error(429, CODE_RATE_LIMITED, str(e), retryable=True) from e
     accepted = LlmJobAccepted(job_id=result.job_id, status="queued")
     return JSONResponse(status_code=202, content=accepted.model_dump(mode="json"))
 

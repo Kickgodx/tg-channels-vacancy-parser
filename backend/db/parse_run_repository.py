@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
@@ -15,10 +15,12 @@ from backend.db.vacancy_repository import (
     upsert_vacancies,
 )
 from backend.schemas import RunStatus
+from backend.settings import get_settings
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.parse_result import ParseResult
 
 _ACTIVE_PARSE_STATUSES = frozenset({"queued", "running"})
+_TERMINAL_PARSE_STATUSES = frozenset({"completed", "cancelled", "failed"})
 
 
 def create_parse_run(session: Session, *, config_snapshot: dict, status: str = "queued") -> ParseRunRow:
@@ -35,12 +37,34 @@ def has_active_parse_run(session: Session) -> bool:
     return int(n or 0) > 0
 
 
-def claim_parse_run(session: Session, run_id: uuid.UUID) -> ParseRunRow | None:
+def _lease_deadline(now: datetime | None = None) -> datetime:
+    base = now or datetime.now(UTC)
+    seconds = max(30, get_settings().parse_job_lease_seconds)
+    return base + timedelta(seconds=seconds)
+
+
+def new_lease_owner(prefix: str = "w") -> str:
+    """Уникальный fencing-token владельца lease (≤64)."""
+    return f"{prefix}-{uuid.uuid4().hex}"[:64]
+
+
+def claim_parse_run(
+    session: Session,
+    run_id: uuid.UUID,
+    *,
+    lease_owner: str | None = None,
+) -> ParseRunRow | None:
     now = datetime.now(UTC)
+    owner = (lease_owner or new_lease_owner("parse")).strip()[:64] or new_lease_owner("parse")
     result = session.execute(
         update(ParseRunRow)
         .where(ParseRunRow.id == run_id, ParseRunRow.status == "queued")
-        .values(status="running", started_at=now)
+        .values(
+            status="running",
+            started_at=now,
+            lease_owner=owner,
+            lease_until=_lease_deadline(now),
+        )
     )
     if (result.rowcount or 0) != 1:
         return None
@@ -48,12 +72,184 @@ def claim_parse_run(session: Session, run_id: uuid.UUID) -> ParseRunRow | None:
     return session.get(ParseRunRow, run_id)
 
 
-def patch_run_progress(session: Session, run_id: uuid.UUID, progress: dict) -> None:
+def touch_parse_run_lease(
+    session: Session,
+    run_id: uuid.UUID,
+    *,
+    lease_owner: str,
+) -> bool:
+    """Продлить lease только если ``lease_owner`` совпадает (fencing)."""
+    now = datetime.now(UTC)
+    owner = lease_owner.strip()[:64]
+    result = session.execute(
+        update(ParseRunRow)
+        .where(
+            ParseRunRow.id == run_id,
+            ParseRunRow.status == "running",
+            ParseRunRow.lease_owner == owner,
+        )
+        .values(lease_until=_lease_deadline(now))
+    )
+    session.flush()
+    return (result.rowcount or 0) == 1
+
+
+def reclaim_expired_parse_run(
+    session: Session,
+    run_id: uuid.UUID,
+    *,
+    now: datetime | None = None,
+) -> str | None:
+    """Атомарно running(expired lease) → queued|cancelled. None если не удалось.
+
+    Возвращает итоговый статус ``queued`` / ``cancelled``.
+    """
+    ts = now or datetime.now(UTC)
+    row = session.get(ParseRunRow, run_id)
+    if row is None or row.status != "running":
+        return None
+    cancel = bool(row.cancel_requested)
+    if row.lease_until is not None:
+        until = row.lease_until if row.lease_until.tzinfo else row.lease_until.replace(tzinfo=UTC)
+        if until >= ts:
+            return None
+    # legacy без lease_until: не reclaim здесь (recover отфильтрует по older_than)
+    if row.lease_until is None:
+        return None
+
+    # synchronize_session=False: SQLite отдаёт naive datetime, evaluate ломается на aware ts.
+    if cancel:
+        result = session.execute(
+            update(ParseRunRow)
+            .where(
+                ParseRunRow.id == run_id,
+                ParseRunRow.status == "running",
+                ParseRunRow.lease_until.is_not(None),
+                ParseRunRow.lease_until < ts,
+            )
+            .values(
+                status="cancelled",
+                finished_at=ts,
+                started_at=None,
+                rq_job_id=None,
+                lease_owner=None,
+                lease_until=None,
+                error_message=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        session.expire_all()
+        return "cancelled" if (result.rowcount or 0) == 1 else None
+
+    result = session.execute(
+        update(ParseRunRow)
+        .where(
+            ParseRunRow.id == run_id,
+            ParseRunRow.status == "running",
+            ParseRunRow.lease_until.is_not(None),
+            ParseRunRow.lease_until < ts,
+        )
+        .values(
+            status="queued",
+            started_at=None,
+            finished_at=None,
+            rq_job_id=None,
+            lease_owner=None,
+            lease_until=None,
+            error_message=None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    session.expire_all()
+    return "queued" if (result.rowcount or 0) == 1 else None
+
+
+def reclaim_legacy_stale_parse_run(
+    session: Session,
+    run_id: uuid.UUID,
+    *,
+    older_than: datetime,
+) -> str | None:
+    """Атомарно reclaim running без lease_until (legacy) по wall-clock."""
+    row = session.get(ParseRunRow, run_id)
+    if row is None or row.status != "running" or row.lease_until is not None:
+        return None
+    cancel = bool(row.cancel_requested)
+    heartbeat = row.started_at or row.created_at
+    if heartbeat is None:
+        return None
+    hb = heartbeat if heartbeat.tzinfo else heartbeat.replace(tzinfo=UTC)
+    if hb >= older_than:
+        return None
+    now = datetime.now(UTC)
+    if cancel:
+        result = session.execute(
+            update(ParseRunRow)
+            .where(
+                ParseRunRow.id == run_id,
+                ParseRunRow.status == "running",
+                ParseRunRow.lease_until.is_(None),
+            )
+            .values(
+                status="cancelled",
+                finished_at=now,
+                started_at=None,
+                rq_job_id=None,
+                lease_owner=None,
+                lease_until=None,
+                error_message=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        session.expire_all()
+        return "cancelled" if (result.rowcount or 0) == 1 else None
+    result = session.execute(
+        update(ParseRunRow)
+        .where(
+            ParseRunRow.id == run_id,
+            ParseRunRow.status == "running",
+            ParseRunRow.lease_until.is_(None),
+        )
+        .values(
+            status="queued",
+            started_at=None,
+            finished_at=None,
+            rq_job_id=None,
+            lease_owner=None,
+            lease_until=None,
+            error_message=None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    session.expire_all()
+    return "queued" if (result.rowcount or 0) == 1 else None
+
+
+def clear_parse_run_lease(session: Session, run_id: uuid.UUID) -> None:
     row = session.get(ParseRunRow, run_id)
     if row is None:
         return
+    row.lease_owner = None
+    row.lease_until = None
+    session.flush()
+
+
+def patch_run_progress(
+    session: Session,
+    run_id: uuid.UUID,
+    progress: dict,
+    *,
+    lease_owner: str | None = None,
+) -> None:
+    row = session.get(ParseRunRow, run_id)
+    if row is None:
+        return
+    now = datetime.now(UTC)
     row.progress = progress
-    row.progress_updated_at = datetime.now(UTC)
+    row.progress_updated_at = now
+    # Lease продлевает только heartbeat с fencing; progress не трогает lease_until.
+    if lease_owner and row.status == "running" and row.lease_owner == lease_owner.strip()[:64]:
+        row.lease_until = _lease_deadline(now)
     session.flush()
 
 
@@ -61,12 +257,14 @@ def request_parse_run_cancel(session: Session, run_id: uuid.UUID) -> ParseRunRow
     row = session.get(ParseRunRow, run_id)
     if row is None:
         return None
-    if row.status in ("completed", "failed", "cancelled"):
+    if row.status in _TERMINAL_PARSE_STATUSES:
         return None
     row.cancel_requested = True
     if row.status == "queued":
         row.status = "cancelled"
         row.finished_at = datetime.now(UTC)
+        row.lease_owner = None
+        row.lease_until = None
     session.flush()
     return row
 
@@ -93,6 +291,8 @@ def reset_parse_run_to_queued(session: Session, run_id: uuid.UUID) -> None:
     row.finished_at = None
     row.rq_job_id = None
     row.error_message = None
+    row.lease_owner = None
+    row.lease_until = None
     if row.cancel_requested:
         row.status = "cancelled"
         row.finished_at = datetime.now(UTC)
@@ -106,10 +306,22 @@ def list_parse_runs_by_status(
     stmt = select(ParseRunRow).where(ParseRunRow.status == status)
     if older_than is not None:
         if status == "running":
-            heartbeat = func.coalesce(ParseRunRow.progress_updated_at, ParseRunRow.started_at, ParseRunRow.created_at)
+            # Lease-based stuck: без lease_until — fallback на started/created.
+            heartbeat = func.coalesce(ParseRunRow.lease_until, ParseRunRow.started_at, ParseRunRow.created_at)
             stmt = stmt.where(heartbeat < older_than)
         else:
             stmt = stmt.where(ParseRunRow.created_at < older_than)
+    return list(session.scalars(stmt))
+
+
+def list_parse_runs_with_expired_lease(session: Session, *, now: datetime | None = None) -> list[ParseRunRow]:
+    """Running с истёкшим lease (или без lease и старым started_at — через older_than в recover)."""
+    ts = now or datetime.now(UTC)
+    stmt = select(ParseRunRow).where(
+        ParseRunRow.status == "running",
+        ParseRunRow.lease_until.is_not(None),
+        ParseRunRow.lease_until < ts,
+    )
     return list(session.scalars(stmt))
 
 
@@ -128,17 +340,50 @@ def set_run_status(
     status: RunStatus,
     *,
     error_message: str | None = None,
-) -> None:
+    lease_owner: str | None = None,
+) -> bool:
+    """Сменить статус. С ``lease_owner`` — только если lease ещё наш (fencing).
+
+    Возвращает True, если запись обновлена.
+    """
+    now = datetime.now(UTC)
+    if lease_owner and status in _TERMINAL_PARSE_STATUSES:
+        owner = lease_owner.strip()[:64]
+        values: dict = {
+            "status": status,
+            "finished_at": now,
+            "lease_owner": None,
+            "lease_until": None,
+        }
+        if error_message is not None:
+            values["error_message"] = error_message
+        result = session.execute(
+            update(ParseRunRow)
+            .where(
+                ParseRunRow.id == run_id,
+                ParseRunRow.status == "running",
+                ParseRunRow.lease_owner == owner,
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        session.expire_all()
+        return (result.rowcount or 0) == 1
+
     row = session.get(ParseRunRow, run_id)
     if row is None:
-        return
+        return False
     row.status = status
     if status == "running" and row.started_at is None:
-        row.started_at = datetime.now(UTC)
-    if status in ("completed", "cancelled", "failed"):
-        row.finished_at = datetime.now(UTC)
+        row.started_at = now
+    if status in _TERMINAL_PARSE_STATUSES:
+        row.finished_at = now
+        row.lease_owner = None
+        row.lease_until = None
     if error_message is not None:
         row.error_message = error_message
+    session.flush()
+    return True
 
 
 def finalize_parse_run(
@@ -147,17 +392,51 @@ def finalize_parse_run(
     result: ParseResult,
     *,
     status: str = "completed",
-) -> None:
-    """Сохранить метаданные прогона (отдельно от вакансий — чтобы статус не зависал при ошибке UPSERT)."""
+    lease_owner: str | None = None,
+) -> bool:
+    """Сохранить метаданные прогона. С ``lease_owner`` — conditional UPDATE (fencing).
+
+    Возвращает True, если запись обновлена. False = lease уже чужой / не running.
+    """
+    now = datetime.now(UTC)
+    values = {
+        "status": status,
+        "finished_at": now,
+        "lease_owner": None,
+        "lease_until": None,
+        "posts_fetched": result.posts_fetched,
+        "parse_warnings": result.parse_warnings,
+        "run_params": result.run_params,
+        "metrics": result.metrics.model_dump(mode="json"),
+    }
+    if lease_owner:
+        owner = lease_owner.strip()[:64]
+        exec_result = session.execute(
+            update(ParseRunRow)
+            .where(
+                ParseRunRow.id == run_id,
+                ParseRunRow.status == "running",
+                ParseRunRow.lease_owner == owner,
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        session.expire_all()
+        return (exec_result.rowcount or 0) == 1
+
     row = session.get(ParseRunRow, run_id)
     if row is None:
-        return
+        return False
     row.status = status
-    row.finished_at = datetime.now(UTC)
+    row.finished_at = now
+    row.lease_owner = None
+    row.lease_until = None
     row.posts_fetched = result.posts_fetched
     row.parse_warnings = result.parse_warnings
     row.run_params = result.run_params
-    row.metrics = result.metrics.model_dump(mode="json")
+    row.metrics = values["metrics"]
+    session.flush()
+    return True
 
 
 def save_parse_result(session: Session, run_id: uuid.UUID, result: ParseResult) -> None:

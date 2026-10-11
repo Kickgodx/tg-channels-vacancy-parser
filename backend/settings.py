@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     parse_worker_metrics_port: int = Field(default=9102, alias="PARSE_WORKER_METRICS_PORT")
     parse_job_stuck_minutes: int = Field(default=30, alias="PARSE_JOB_STUCK_MINUTES")
     parse_rq_job_timeout_seconds: int = Field(default=43200, alias="PARSE_RQ_JOB_TIMEOUT_SECONDS")
+    parse_job_lease_seconds: int = Field(default=120, alias="PARSE_JOB_LEASE_SECONDS")
+    llm_job_lease_seconds: int = Field(default=120, alias="LLM_JOB_LEASE_SECONDS")
+    job_recover_interval_seconds: int = Field(default=60, alias="JOB_RECOVER_INTERVAL_SECONDS")
 
     @property
     def llm_job_backend_normalized(self) -> str:

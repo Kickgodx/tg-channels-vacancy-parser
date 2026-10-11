@@ -184,3 +184,29 @@ def test_vacancies_preview_dedupes_by_id():
     ids = [p["id"] for p in preview]
     assert ids == ["dup", "uniq"]
     assert len(ids) == len(set(ids))
+
+
+def test_run_events_accepts_api_key_query(api_client, monkeypatch):
+    """EventSource не шлёт заголовки — api_key в query при API_KEY."""
+    from backend.settings import get_settings
+
+    monkeypatch.setenv("API_KEY", "sse-secret")
+    get_settings.cache_clear()
+    try:
+        with session_scope() as session:
+            rid = pr.create_parse_run(session, config_snapshot={}, status="completed").id
+
+        bad = api_client.get(f"/api/v1/runs/{rid}/events")
+        assert bad.status_code == 401
+
+        # Обычный REST не принимает ?api_key= (только X-API-Key).
+        rest = api_client.get(f"/api/v1/runs/{rid}?api_key=sse-secret")
+        assert rest.status_code == 401
+
+        with api_client.stream("GET", f"/api/v1/runs/{rid}/events?api_key=sse-secret") as resp:
+            assert resp.status_code == 200
+            body = b"".join(resp.iter_bytes()).decode("utf-8", errors="replace")
+        assert "event: done" in body
+    finally:
+        monkeypatch.delenv("API_KEY", raising=False)
+        get_settings.cache_clear()

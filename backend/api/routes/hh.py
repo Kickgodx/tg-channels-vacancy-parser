@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -12,7 +13,15 @@ from backend.api.deps import require_admin, verify_api_key
 from backend.db import hh_repository as hh_repo
 from backend.db.models import UserRow
 from backend.db.session import get_db
-from backend.services import hh_sync_service
+from backend.errors import (
+    CODE_CONFLICT_ACTIVE_RUN,
+    CODE_IDEMPOTENCY_IN_PROGRESS,
+    CODE_UPSTREAM_UNAVAILABLE,
+    CODE_VALIDATION,
+    AppError,
+    http_error,
+)
+from backend.services import hh_sync_service, idempotency
 from backend.services.hh_sync_service import HhSyncConflict, HhSyncNotConfigured
 from backend.services.hh_sync_window import HhSyncWindowError, resolve_hh_search_window
 from backend.settings import Settings, get_settings
@@ -91,41 +100,62 @@ def hh_status(
 def hh_sync(
     body: HhSyncRequest = HhSyncRequest(),
     db: Session = Depends(get_db),
-    _admin: UserRow = Depends(require_admin),
+    admin: UserRow = Depends(require_admin),
     settings: Settings = Depends(get_settings),
-) -> HhSyncResponse:
-    try:
-        resolved = resolve_hh_search_window(
-            window=body.window,
-            date_from=body.date_from,
-            date_to=body.date_to,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> HhSyncResponse | JSONResponse:
+    actor = idempotency.actor_for_user(admin.id)
+    scope = idempotency.SCOPE_HH_SYNC
+    req_hash = idempotency.request_fingerprint(body.model_dump(mode="json"))
+    begun = idempotency.begin(key=idempotency_key, scope=scope, actor=actor, request_hash=req_hash)
+    if begun.cached is not None:
+        return JSONResponse(status_code=begun.cached.status_code, content=begun.cached.body)
+    if begun.in_progress:
+        raise AppError(
+            CODE_IDEMPOTENCY_IN_PROGRESS,
+            "Запрос с этим Idempotency-Key ещё выполняется",
+            status_code=409,
+            retryable=True,
         )
-    except HhSyncWindowError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    cfg = load_config(settings.config_path)
-    try:
-        hh_sync_service.ensure_hh_ready(settings, cfg.hh)
-    except HhSyncNotConfigured as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     try:
-        result = hh_sync_service.run_hh_sync(db, config=cfg, settings=settings, search_window=resolved)
-    except HhSyncConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except HhSyncNotConfigured as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except HHApiError as exc:
-        _LOG.exception("HH sync API error")
-        raise HTTPException(
-            status_code=502,
-            detail=f"HH API error: HTTP {exc.status_code}",
-        ) from exc
-    except Exception as exc:
-        _LOG.exception("HH sync failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        try:
+            resolved = resolve_hh_search_window(
+                window=body.window,
+                date_from=body.date_from,
+                date_to=body.date_to,
+            )
+        except HhSyncWindowError as exc:
+            raise http_error(422, CODE_VALIDATION, str(exc)) from exc
 
-    return HhSyncResponse(
+        cfg = load_config(settings.config_path)
+        try:
+            hh_sync_service.ensure_hh_ready(settings, cfg.hh)
+        except HhSyncNotConfigured as exc:
+            raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, str(exc), retryable=True) from exc
+
+        try:
+            result = hh_sync_service.run_hh_sync(db, config=cfg, settings=settings, search_window=resolved)
+        except HhSyncConflict as exc:
+            raise http_error(409, CODE_CONFLICT_ACTIVE_RUN, str(exc), retryable=False) from exc
+        except HhSyncNotConfigured as exc:
+            raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, str(exc), retryable=True) from exc
+        except HHApiError as exc:
+            _LOG.exception("HH sync API error")
+            raise http_error(
+                502,
+                CODE_UPSTREAM_UNAVAILABLE,
+                f"HH API error: HTTP {exc.status_code}",
+                retryable=True,
+            ) from exc
+        except Exception as exc:
+            _LOG.exception("HH sync failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception:
+        idempotency.abandon(key=idempotency_key, scope=scope, actor=actor)
+        raise
+
+    resp = HhSyncResponse(
         searched=result.searched,
         listings_upserted=result.listings_upserted,
         unique=result.unique,
@@ -144,3 +174,12 @@ def hh_sync(
         date_from=result.date_from,
         date_to=result.date_to,
     )
+    idempotency.complete(
+        key=idempotency_key,
+        scope=scope,
+        actor=actor,
+        status_code=200,
+        body=resp.model_dump(mode="json"),
+        request_hash=req_hash,
+    )
+    return resp

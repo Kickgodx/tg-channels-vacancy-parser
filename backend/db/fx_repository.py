@@ -148,12 +148,24 @@ def get_latest_rates(session: Session) -> tuple[date | None, dict[str, float]]:
     return latest, get_rates(session, latest)
 
 
-def ensure_latest_rates(session: Session, config: FxConfig) -> tuple[date | None, dict[str, float]]:
-    """
-    Курсы для лайв-отображения: догрузить сегодня в БД при необходимости, вернуть последнюю дату в кэше.
+def ensure_latest_rates(
+    session: Session,
+    config: FxConfig,
+    *,
+    prefer_db: bool = True,
+) -> tuple[date | None, dict[str, float]]:
+    """Курсы для upsert / метрик прогона.
+
+    По умолчанию ``prefer_db=True``: взять последний снимок из ``exchange_rates``
+    без HTTP. В ЦБ идём только если в БД ещё нет ни одной даты (холодный старт).
+    ``prefer_db=False`` — как раньше: попытаться догрузить «сегодня», затем latest.
     """
     if not config.enabled:
         return None, {}
+    if prefer_db:
+        latest_date, rates = get_latest_rates(session)
+        if latest_date is not None and rates:
+            return latest_date, rates
     today = datetime.now(UTC).date()
     ensure_rates(session, today, config)
     return get_latest_rates(session)

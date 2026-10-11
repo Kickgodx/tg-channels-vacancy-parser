@@ -13,9 +13,11 @@ cd frontend && npm run build                   # tsc -b + vite build
   а не `.venv/Scripts/pip.exe` (последний указывает на устаревший путь).
 - Тесты офлайновые: `tests/conftest.py` подставляет `CONFIG_PATH` на конфиг с
   `fx.enabled: false`. Агрегаты (`_prepare_fx`) курсы из сети не тянут — только
-  БД; сеть остаётся в startup-sync / upsert / `ensure_latest_rates`. Тест,
-  которому нужен курс, должен подменять `fx_repository.ensure_latest_rates`,
-  а не полагаться на сеть.
+  БД. `ensure_latest_rates` по умолчанию тоже предпочитает БД; HTTP к ЦБ —
+  только если `exchange_rates` пуст (`prefer_db=False` — догрузить «сегодня»).
+  Startup-sync и `refresh_rates_from_api` по-прежнему ходят в сеть. Тест,
+  которому нужен курс, должен подменять `fx_repository.ensure_latest_rates`
+  или класть строки в БД, а не полагаться на сеть.
 - LLM live evals помечены `@pytest.mark.llm` — **не** входят в обычный
   `pytest -q`. Опционально:
   `pytest -m llm` или

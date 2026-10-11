@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, type VacancyQueryParams } from "../api/client";
 import AnalyticsPanel from "../components/AnalyticsPanel";
@@ -83,6 +83,8 @@ export default function VacanciesPage() {
 
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presetName, setPresetName] = useState("");
+  const [qInput, setQInput] = useState(q);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const updateParams = (patch: Record<string, string | number | string[] | null>) => {
     const next = new URLSearchParams(searchParams);
@@ -100,6 +102,19 @@ export default function VacanciesPage() {
     });
     setSearchParams(next, { replace: true });
   };
+
+  useEffect(() => {
+    setQInput(q);
+  }, [q]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      if (qInput === q) return;
+      updateParams({ q: qInput || null, page: 1 });
+    }, 300);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- debounce q only
+  }, [qInput, q]);
 
   const filterParams = useMemo(
     () =>
@@ -135,6 +150,7 @@ export default function VacanciesPage() {
         ...(resumeId != null ? { resume_id: resumeId } : {}),
         ...filterParams,
       }),
+    placeholderData: keepPreviousData,
   });
 
   const presetsQ = useQuery({
@@ -268,8 +284,8 @@ export default function VacanciesPage() {
         <input
           type="search"
           placeholder="Поиск по тексту…"
-          value={q}
-          onChange={(e) => updateParams({ q: e.target.value })}
+          value={qInput}
+          onChange={(e) => setQInput(e.target.value)}
         />
         <input
           placeholder="Канал (@name)"
@@ -332,9 +348,19 @@ export default function VacanciesPage() {
       </div>
 
       <div className="export-links vacancies-export">
-        <a href={api.exportVacanciesUrl(filterParams)} download>
+        <button
+          type="button"
+          className="btn-link"
+          onClick={() => {
+            setExportError(null);
+            void api
+              .downloadExport(api.exportVacanciesUrl(filterParams), "vacancies.xlsx")
+              .catch((e: Error) => setExportError(e.message));
+          }}
+        >
           Скачать Excel (все по фильтрам)
-        </a>
+        </button>
+        {exportError && <p className="error">{exportError}</p>}
         <button
           type="button"
           className="btn-secondary"

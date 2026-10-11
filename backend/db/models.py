@@ -31,6 +31,17 @@ def _utcnow() -> datetime:
 
 class ParseRunRow(Base):
     __tablename__ = "parse_runs"
+    __table_args__ = (
+        # Один active parse: partial UNIQUE. Postgres — expression ((true));
+        # SQLite — (1). См. миграцию 015.
+        Index(
+            "uq_parse_runs_one_active",
+            text("(true)"),
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running')"),
+            sqlite_where=text("status IN ('queued', 'running')"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
@@ -47,6 +58,8 @@ class ParseRunRow(Base):
     progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     progress_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ExchangeRateRow(Base):
@@ -250,6 +263,22 @@ class LlmJobRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class IdempotencyKeyRow(Base):
+    """Кэш ответов мутаций по Idempotency-Key (TTL)."""
+
+    __tablename__ = "idempotency_keys"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    scope: Mapped[str] = mapped_column(String(64), primary_key=True)
+    actor: Mapped[str] = mapped_column(String(128), primary_key=True)
+    status_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    body: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
 class AIExtractionCacheRow(Base):

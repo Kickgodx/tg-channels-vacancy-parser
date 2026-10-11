@@ -6,15 +6,21 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_db, verify_api_key
+from backend.api.deps import get_db, verify_api_key, verify_api_key_sse
 from backend.config_builder import build_config
 from backend.db import repository as repo
 from backend.db.repository import metrics_from_run
 from backend.db.session import session_scope
+from backend.errors import (
+    CODE_IDEMPOTENCY_IN_PROGRESS,
+    CODE_VALIDATION,
+    AppError,
+    http_error,
+)
 from backend.schemas import (
     RunCreateRequest,
     RunCreateResponse,
@@ -25,7 +31,7 @@ from backend.schemas import (
     VacancySortField,
     VacancySortOrder,
 )
-from backend.services import run_service
+from backend.services import idempotency, run_service
 from backend.services.parse_run_events import channel_for
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import ConfigLoadError
@@ -36,6 +42,8 @@ from tg_jobs_parser.models.parse_result import ParseResult
 _LOG = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/runs", tags=["runs"], dependencies=[Depends(verify_api_key)])
+# SSE отдельно: ``?api_key=`` только здесь, не на всём /runs.
+sse_router = APIRouter(prefix="/runs", tags=["runs"])
 
 
 def _row_to_summary(row) -> RunSummary:
@@ -54,23 +62,52 @@ def _row_to_summary(row) -> RunSummary:
 
 
 @router.post("", response_model=RunCreateResponse, status_code=202)
-def create_run(body: RunCreateRequest, db: Session = Depends(get_db)) -> RunCreateResponse:
+def create_run(
+    body: RunCreateRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> RunCreateResponse | JSONResponse:
+    actor = idempotency.ACTOR_API
+    scope = idempotency.SCOPE_PARSE_RUN
+    req_hash = idempotency.request_fingerprint(body.model_dump(mode="json"))
+    begun = idempotency.begin(key=idempotency_key, scope=scope, actor=actor, request_hash=req_hash)
+    if begun.cached is not None:
+        return JSONResponse(status_code=begun.cached.status_code, content=begun.cached.body)
+    if begun.in_progress:
+        raise AppError(
+            CODE_IDEMPOTENCY_IN_PROGRESS,
+            "Запрос с этим Idempotency-Key ещё выполняется",
+            status_code=409,
+            retryable=True,
+        )
+
     settings = get_settings()
     try:
-        config = build_config(settings.config_path, body)
-    except ConfigLoadError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    try:
+        try:
+            config = build_config(settings.config_path, body)
+        except ConfigLoadError as e:
+            raise http_error(400, CODE_VALIDATION, str(e)) from e
         run_id = run_service.start_parse_run(config, body)
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
+    except Exception:
+        idempotency.abandon(key=idempotency_key, scope=scope, actor=actor)
+        raise
+
     _LOG.info(
         "Создан прогон %s: каналов=%s, AI=%s",
         run_id,
         len(body.channels) if body.channels else len(config.sources.channels),
         config.ai.enabled,
     )
-    return RunCreateResponse(run_id=run_id, status="queued")
+    payload = RunCreateResponse(run_id=run_id, status="queued")
+    body_out = payload.model_dump(mode="json")
+    idempotency.complete(
+        key=idempotency_key,
+        scope=scope,
+        actor=actor,
+        status_code=202,
+        body=body_out,
+        request_hash=req_hash,
+    )
+    return payload
 
 
 @router.get("", response_model=list[RunSummary])
@@ -228,9 +265,9 @@ async def _sse_done_only() -> AsyncIterator[str]:
     yield "event: done\ndata: {}\n\n"
 
 
-@router.get("/{run_id}/events")
+@sse_router.get("/{run_id}/events", dependencies=[Depends(verify_api_key_sse)])
 async def run_events(run_id: uuid.UUID) -> StreamingResponse:
-    """SSE прогресса прогона. Auth: X-API-Key (router). Сессия БД не держится на время стрима."""
+    """SSE прогресса прогона. Auth: X-API-Key или ``?api_key=``. Сессия БД не держится на стриме."""
     with session_scope() as session:
         row = repo.get_parse_run(session, run_id)
         if row is None:

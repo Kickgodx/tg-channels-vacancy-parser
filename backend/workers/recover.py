@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
+from backend.db import llm_job_repository as lj
 from backend.db import repository as repo
 from backend.db.session import session_scope
 from backend.observability import record_llm_jobs_recover
@@ -27,26 +29,73 @@ def _rq_job_still_live(rq_job_id: str, connection) -> bool:
 
 
 def recover_stuck_llm_jobs() -> int:
-    """Сбросить stuck ``running`` и старые ``queued`` → снова в RQ/inprocess.
-
-    Возвращает число задач, отправленных в очередь снова.
-    """
+    """Сбросить stuck ``running`` (expired lease) и старые ``queued`` → снова в RQ/inprocess."""
     settings = get_settings()
     backend = settings.llm_job_backend_normalized
-    stuck_after = datetime.now(UTC) - timedelta(minutes=max(1, settings.llm_job_stuck_minutes))
+    now = datetime.now(UTC)
+    stuck_queued_after = now - timedelta(minutes=max(1, settings.llm_job_stuck_minutes))
+    legacy_cutoff = stuck_queued_after
     requeued = 0
+    to_requeue: list[UUID] = []
+    seen: set[UUID] = set()
 
     with session_scope() as session:
-        stuck_running = repo.list_llm_jobs_by_status(session, status="running", older_than=stuck_after)
-        for row in stuck_running:
-            repo.reset_llm_job_to_queued(session, row.id)
+        expired = lj.list_llm_jobs_with_expired_lease(session, now=now)
+        for row in expired:
+            if row.id in seen:
+                continue
+            if not lj.reclaim_expired_llm_job(session, row.id, now=now):
+                continue
+            seen.add(row.id)
             record_llm_jobs_recover(from_status="running")
-            _LOG.warning("LLM job %s: recover running→queued (stuck)", row.id)
+            _LOG.warning("LLM job %s: recover running→queued (lease expired)", row.id)
+            to_requeue.append(row.id)
 
-        stale_queued = repo.list_llm_jobs_by_status(session, status="queued", older_than=stuck_after)
-        candidates = [(row.id, row.rq_job_id) for row in stale_queued]
+        from sqlalchemy import update
 
-    if not candidates:
+        from backend.db.models import LlmJobRow
+
+        legacy_running = [
+            r
+            for r in repo.list_llm_jobs_by_status(session, status="running", older_than=legacy_cutoff)
+            if r.lease_until is None
+        ]
+        for row in legacy_running:
+            if row.id in seen:
+                continue
+            result = session.execute(
+                update(LlmJobRow)
+                .where(
+                    LlmJobRow.id == row.id,
+                    LlmJobRow.status == "running",
+                    LlmJobRow.lease_until.is_(None),
+                )
+                .values(
+                    status="queued",
+                    started_at=None,
+                    finished_at=None,
+                    error_message=None,
+                    rq_job_id=None,
+                    lease_owner=None,
+                    lease_until=None,
+                )
+            )
+            if (result.rowcount or 0) != 1:
+                continue
+            session.flush()
+            seen.add(row.id)
+            record_llm_jobs_recover(from_status="running")
+            _LOG.warning("LLM job %s: recover legacy running→queued", row.id)
+            to_requeue.append(row.id)
+
+        stale_queued = repo.list_llm_jobs_by_status(session, status="queued", older_than=stuck_queued_after)
+        for row in stale_queued:
+            if row.id in seen:
+                continue
+            seen.add(row.id)
+            to_requeue.append(row.id)
+
+    if not to_requeue:
         return 0
 
     from backend.workers.llm_tasks import run_llm_job
@@ -57,8 +106,15 @@ def recover_stuck_llm_jobs() -> int:
 
         redis_conn = get_redis_connection()
 
-    for jid, rq_job_id in candidates:
+    for jid in to_requeue:
         try:
+            rq_job_id: str | None = None
+            with session_scope() as session:
+                row = repo.get_llm_job(session, jid)
+                if row is None or row.status != "queued":
+                    continue
+                rq_job_id = row.rq_job_id
+
             if backend == "rq":
                 assert redis_conn is not None
                 if rq_job_id and _rq_job_still_live(rq_job_id, redis_conn):

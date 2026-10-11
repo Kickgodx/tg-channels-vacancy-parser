@@ -204,7 +204,11 @@ def test_second_post_runs_while_queued_returns_409(api_client, monkeypatch):
 
     r = api_client.post("/api/v1/runs", json={})
     assert r.status_code == 409
-    assert "прогон" in r.json()["detail"].lower()
+    detail = r.json()["detail"]
+    assert isinstance(detail, dict)
+    assert detail["code"] == "CONFLICT_ACTIVE_RUN"
+    assert "прогон" in detail["message"].lower()
+    assert detail["retryable"] is False
 
 
 def test_enqueue_failure_marks_run_failed(api_client, monkeypatch):
@@ -314,6 +318,7 @@ def test_recover_stuck_running(fake_redis_for_parse, monkeypatch):
         claimed.created_at = old
         claimed.started_at = old
         claimed.progress_updated_at = old
+        claimed.lease_until = old
         session.flush()
 
     q = Queue("parse", connection=fake_redis_for_parse)
@@ -343,6 +348,7 @@ def test_recover_skips_cancel_requested(fake_redis_for_parse, monkeypatch):
         claimed.created_at = old
         claimed.started_at = old
         claimed.progress_updated_at = old
+        claimed.lease_until = old
         pr.request_parse_run_cancel(session, rid)
 
     q = Queue("parse", connection=fake_redis_for_parse)

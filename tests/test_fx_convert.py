@@ -85,3 +85,65 @@ def test_enrich_vacancy_salary_rub_with_mocked_rates(monkeypatch):
     )
     enrich_vacancy_salary_rub(v)
     assert v.detected_salary_avg_rub == 500000.0
+
+
+def test_enrich_vacancies_salary_rub_one_network_call_on_cbr_failure(monkeypatch):
+    """При недоступном ЦБ — один timeout, не N×timeout на каждую вакансию."""
+    from tg_jobs_parser.fx import vacancy_rub as vr
+    from tg_jobs_parser.fx.vacancy_rub import enrich_vacancies_salary_rub
+
+    vr.clear_rates_cache()
+    calls = {"n": 0}
+
+    def _fail(d, timeout=20.0):
+        calls["n"] += 1
+        return None
+
+    monkeypatch.setattr(vr, "_rates_for_date", _fail)
+    vacancies = [
+        Vacancy(
+            id=f"v{i}",
+            source_post_key=f"ch-{i}",
+            source_channel="ch",
+            source_url="https://t.me/s/ch",
+            raw_text="t",
+            cleaned_text="t",
+            detected_salary_avg=1000.0 * (i + 1),
+            salary_currency="USD",
+            post_date=datetime(2026, 5, 1, tzinfo=UTC),
+        )
+        for i in range(10)
+    ]
+    enrich_vacancies_salary_rub(vacancies, request_timeout_seconds=20.0)
+    assert calls["n"] == 1
+    assert all(v.detected_salary_avg_rub is None for v in vacancies)
+
+
+def test_enrich_vacancies_salary_rub_uses_preloaded_rates_without_network(monkeypatch):
+    from datetime import date
+
+    from tg_jobs_parser.fx import vacancy_rub as vr
+    from tg_jobs_parser.fx.vacancy_rub import enrich_vacancies_salary_rub
+
+    vr.clear_rates_cache()
+
+    def _forbid(*_a, **_k):
+        raise AssertionError("must not call CBR when rates_for_date provided")
+
+    monkeypatch.setattr(vr, "_rates_for_date", _forbid)
+    v = Vacancy(
+        id="x",
+        source_post_key="ch-1",
+        source_channel="ch",
+        source_url="https://t.me/s/ch",
+        raw_text="t",
+        cleaned_text="t",
+        detected_salary_avg=10.0,
+        salary_currency="USD",
+        post_date=datetime(2026, 5, 1, tzinfo=UTC),
+    )
+    enrich_vacancies_salary_rub(
+        [v],
+        rates_for_date={date(2026, 5, 10): {"RUB": 1.0, "USD": 90.0}},
+    )
+    assert v.detected_salary_avg_rub == 900.0

@@ -170,6 +170,9 @@ export default function RunPage() {
     return () => window.clearInterval(id);
   }, [run.data?.started_at, run.data?.status]);
 
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
   useEffect(() => {
     const status = run.data?.status;
     if (
@@ -178,6 +181,7 @@ export default function RunPage() {
     ) {
       return;
     }
+    setStreamError(null);
     return api.subscribeRunEvents(
       runId,
       (snap) => {
@@ -190,7 +194,9 @@ export default function RunPage() {
         qc.invalidateQueries({ queryKey: ["run", runId] });
         qc.invalidateQueries({ queryKey: ["run-vacancies", runId] });
       },
-      () => {},
+      (err) => {
+        setStreamError(err.message || "Ошибка подписки на прогресс");
+      },
     );
   }, [runId, run.data?.status, qc]);
 
@@ -270,6 +276,7 @@ export default function RunPage() {
                       {cancel.isPending ? "Отмена…" : "Отменить"}
                     </button>
                     {cancelError && <p className="error">{cancelError}</p>}
+                    {streamError && <p className="error">{streamError}</p>}
                   </>
                 )}
               </>
@@ -283,13 +290,32 @@ export default function RunPage() {
                 </p>
                 <AiStats runParams={run.data.run_params} />
                 <div className="export-links">
-                  <a href={api.exportRunUrl(runId, "xlsx")} download>
+                  <button
+                    type="button"
+                    className="btn-link"
+                    onClick={() => {
+                      setExportError(null);
+                      void api
+                        .downloadExport(api.exportRunUrl(runId, "xlsx"), `run-${runId.slice(0, 8)}.xlsx`)
+                        .catch((e: Error) => setExportError(e.message));
+                    }}
+                  >
                     Скачать Excel
-                  </a>
-                  <a href={api.exportRunUrl(runId, "json")} download>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-link"
+                    onClick={() => {
+                      setExportError(null);
+                      void api
+                        .downloadExport(api.exportRunUrl(runId, "json"), `run-${runId.slice(0, 8)}.json`)
+                        .catch((e: Error) => setExportError(e.message));
+                    }}
+                  >
                     Скачать JSON
-                  </a>
+                  </button>
                 </div>
+                {exportError && <p className="error">{exportError}</p>}
               </>
             )}
           </>

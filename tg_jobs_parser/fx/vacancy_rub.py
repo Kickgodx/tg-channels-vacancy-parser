@@ -64,16 +64,23 @@ def enrich_vacancy_salary_rub(
     request_timeout_seconds: float = 20.0,
     rates_for_date: dict[date, dict[str, float]] | None = None,
 ) -> None:
-    """Заполняет ``detected_salary_avg_rub`` по последнему курсу (сегодня), не по дате поста."""
+    """Заполняет ``detected_salary_avg_rub`` по последнему курсу (сегодня), не по дате поста.
+
+    ``rates_for_date``:
+    - ``None`` — один live-запрос ЦБ (одиночный enrich);
+    - ``{}`` — сеть уже пробовали, курсов нет (не ходить в ЦБ снова);
+    - непустой dict — взять последний снимок из него.
+    """
     amount = effective_salary_amount_for_vacancy(v)
     if amount is None:
         v.detected_salary_avg_rub = None
         return
     rates: dict[str, float] | None = None
-    if rates_for_date and rates_for_date:
-        latest = max(rates_for_date)
-        rates = rates_for_date[latest]
-    if rates is None:
+    if rates_for_date is not None:
+        if rates_for_date:
+            rates = rates_for_date[max(rates_for_date)]
+        # пустой dict: явный «без курсов», без повторного HTTP
+    else:
         rates = _live_rates(timeout=request_timeout_seconds)
     if rates is None:
         v.detected_salary_avg_rub = None
@@ -91,15 +98,25 @@ def enrich_vacancies_salary_rub(
     *,
     default_currency_if_missing: str = "RUB",
     request_timeout_seconds: float = 20.0,
+    rates_for_date: dict[date, dict[str, float]] | None = None,
 ) -> None:
-    """Один снимок курса на сегодня, затем enrich всех вакансий."""
-    today = rate_date_for_live_display()
-    shared: dict[date, dict[str, float]] = {}
-    r = _rates_for_date(today, timeout=request_timeout_seconds)
-    if r is not None:
-        shared[today] = r
-    elif _rates_cache:
-        shared[max(_rates_cache)] = _rates_cache[max(_rates_cache)]
+    """Один снимок курса, затем enrich всех вакансий (без N×HTTP при фейле).
+
+    ``rates_for_date`` — готовые курсы (например из БД); если передан, ЦБ не вызываем.
+    Если ``None`` — один запрос ЦБ на сегодня (CLI / холодный путь).
+    """
+    if rates_for_date is not None:
+        shared = rates_for_date
+    else:
+        today = rate_date_for_live_display()
+        shared = {}
+        r = _rates_for_date(today, timeout=request_timeout_seconds)
+        if r is not None:
+            shared[today] = r
+        elif _rates_cache:
+            shared[max(_rates_cache)] = _rates_cache[max(_rates_cache)]
+    # Всегда передаём dict (возможно пустой): иначе при фейле ЦБ каждая вакансия
+    # снова била бы сеть на request_timeout_seconds (~20с × N).
     for v in vacancies:
         enrich_vacancy_salary_rub(
             v,

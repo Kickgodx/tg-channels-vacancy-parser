@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db, get_optional_user, verify_api_key
@@ -9,6 +9,7 @@ from backend.api.params import vacancy_query_from_params
 from backend.db import repository as repo
 from backend.db.models import UserRow
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
+from backend.errors import CODE_IDEMPOTENCY_IN_PROGRESS, CODE_VALIDATION, AppError, http_error
 from backend.schemas import (
     VacancyImportItemResult,
     VacancyImportRequest,
@@ -17,7 +18,7 @@ from backend.schemas import (
     VacancySortField,
     VacancySortOrder,
 )
-from backend.services import import_service
+from backend.services import idempotency, import_service
 from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -30,18 +31,38 @@ def import_vacancies(
     body: VacancyImportRequest,
     db: Session = Depends(get_db),
     user: UserRow = Depends(get_current_user),
-) -> VacancyImportResponse:
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> VacancyImportResponse | JSONResponse:
     """Импорт вакансий из текста: rules + LLM-разбор и запись в БД (как в прогоне)."""
-    texts = [t.strip() for t in body.texts]
-    if not any(texts):
-        raise HTTPException(status_code=400, detail="Пустой текст вакансии")
-    source_url = (body.source_url or "").strip() or None
-    result = import_service.import_vacancy_texts(db, texts, source_url=source_url)
+    actor = idempotency.actor_for_user(user.id)
+    scope = idempotency.SCOPE_IMPORT
+    req_hash = idempotency.request_fingerprint(body.model_dump(mode="json"))
+    begun = idempotency.begin(key=idempotency_key, scope=scope, actor=actor, request_hash=req_hash)
+    if begun.cached is not None:
+        return JSONResponse(status_code=begun.cached.status_code, content=begun.cached.body)
+    if begun.in_progress:
+        raise AppError(
+            CODE_IDEMPOTENCY_IN_PROGRESS,
+            "Запрос с этим Idempotency-Key ещё выполняется",
+            status_code=409,
+            retryable=True,
+        )
+
+    try:
+        texts = [t.strip() for t in body.texts]
+        if not any(texts):
+            raise http_error(400, CODE_VALIDATION, "Пустой текст вакансии")
+        source_url = (body.source_url or "").strip() or None
+        result = import_service.import_vacancy_texts(db, texts, source_url=source_url)
+    except Exception:
+        idempotency.abandon(key=idempotency_key, scope=scope, actor=actor)
+        raise
+
     items = [
         VacancyImportItemResult(index=it.index, status=it.status, message=it.message, vacancy=it.vacancy)
         for it in result.items
     ]
-    return VacancyImportResponse(
+    resp = VacancyImportResponse(
         items=items,
         created=sum(1 for it in items if it.status == "created"),
         existing=sum(1 for it in items if it.status == "exists"),
@@ -49,6 +70,15 @@ def import_vacancies(
         ai_enabled=result.ai_enabled,
         warning=result.warning,
     )
+    idempotency.complete(
+        key=idempotency_key,
+        scope=scope,
+        actor=actor,
+        status_code=200,
+        body=resp.model_dump(mode="json"),
+        request_hash=req_hash,
+    )
+    return resp
 
 
 @router.get("/export.xlsx")

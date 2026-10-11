@@ -31,6 +31,7 @@ const API_BASE =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8000/api/v1";
 
 const TOKEN_KEY = "tgjp_token";
+const VITE_API_KEY = (import.meta.env.VITE_API_KEY as string | undefined)?.trim() || "";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -41,9 +42,38 @@ export function setToken(token: string | null) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly retryable: boolean;
+
+  constructor(
+    message: string,
+    opts: { status: number; code?: string; retryable?: boolean },
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.status = opts.status;
+    this.code = opts.code ?? "INTERNAL";
+    this.retryable = opts.retryable ?? false;
+  }
+}
+
 function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
   const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (VITE_API_KEY) headers["X-API-Key"] = VITE_API_KEY;
+  return headers;
+}
+
+/** Query только для EventSource — не для обычного REST (логи/Referer). */
+function sseAuthQuery(): string {
+  const parts: string[] = [];
+  const token = getToken();
+  if (token) parts.push(`access_token=${encodeURIComponent(token)}`);
+  if (VITE_API_KEY) parts.push(`api_key=${encodeURIComponent(VITE_API_KEY)}`);
+  return parts.length ? `?${parts.join("&")}` : "";
 }
 
 function handleUnauthorized(path: string) {
@@ -51,6 +81,31 @@ function handleUnauthorized(path: string) {
   if (path.startsWith("/auth/")) return;
   setToken(null);
   window.location.assign("/login");
+}
+
+function parseErrorDetail(
+  status: number,
+  detail: unknown,
+  fallback: string,
+): ApiError {
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const d = detail as { code?: unknown; message?: unknown; retryable?: unknown };
+    const message =
+      typeof d.message === "string"
+        ? d.message
+        : typeof detail === "string"
+          ? detail
+          : fallback;
+    return new ApiError(message, {
+      status,
+      code: typeof d.code === "string" ? d.code : "INTERNAL",
+      retryable: d.retryable === true,
+    });
+  }
+  if (typeof detail === "string") {
+    return new ApiError(detail, { status, code: "INTERNAL" });
+  }
+  return new ApiError(fallback, { status, code: "INTERNAL" });
 }
 
 export interface RunSummary {
@@ -98,23 +153,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (res.status === 401) handleUnauthorized(path);
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail: unknown = res.statusText;
     try {
       const j = await res.json();
-      detail = j.detail ?? JSON.stringify(j);
+      detail = j.detail ?? j;
     } catch {
       detail = await res.text();
     }
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    throw parseErrorDetail(res.status, detail, res.statusText);
   }
   return res.json() as Promise<T>;
 }
 
 const LLM_JOB_POLL_MS = 1000;
-const LLM_JOB_POLL_MAX_MS = 5 * 60 * 1000;
-
-const RUN_SSE_MAX_MS = 5 * 60 * 1000;
 const RUN_POLL_MS = 2000;
+/** Как часто SSE переключается на poll при долгом молчании (не hard-fail). */
+const SSE_FALLBACK_IDLE_MS = 5 * 60 * 1000;
 
 const RUN_TERMINAL: ReadonlySet<RunStatus> = new Set([
   "completed",
@@ -125,15 +179,15 @@ const RUN_TERMINAL: ReadonlySet<RunStatus> = new Set([
 async function pollRunUntilTerminal(
   runId: string,
   onProgress?: (data: ProgressEvent) => void,
+  signal?: { cancelled: boolean },
 ): Promise<RunDetail> {
-  const deadline = Date.now() + RUN_SSE_MAX_MS;
-  while (Date.now() < deadline) {
+  while (!signal?.cancelled) {
     const run = await request<RunDetail>(`/runs/${runId}`);
     if (run.progress) onProgress?.(run.progress);
     if (RUN_TERMINAL.has(run.status)) return run;
     await sleep(RUN_POLL_MS);
   }
-  throw new Error("Прогон не завершился вовремя");
+  throw new ApiError("Подписка на прогон отменена", { status: 499, code: "CANCELLED" });
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -141,31 +195,24 @@ async function sleep(ms: number): Promise<void> {
 }
 
 async function pollLlmJob(jobId: string): Promise<LlmJob> {
-  const deadline = Date.now() + LLM_JOB_POLL_MAX_MS;
-  while (Date.now() < deadline) {
+  for (;;) {
     const job = await request<LlmJob>(`/llm-jobs/${jobId}`);
     if (job.status === "done" || job.status === "error") return job;
     await sleep(LLM_JOB_POLL_MS);
   }
-  throw new Error("LLM-задача не завершилась вовремя");
 }
 
-/** Ждать завершения через SSE; при обрыве — poll. */
+/** Ждать завершения через SSE; при обрыве — poll до terminal (без hard timeout). */
 function waitLlmJobSse(jobId: string): Promise<LlmJob> {
-  const token = getToken();
-  const q = token ? `?access_token=${encodeURIComponent(token)}` : "";
-  const url = `${API_BASE}/llm-jobs/${jobId}/events${q}`;
+  const url = `${API_BASE}/llm-jobs/${jobId}/events${sseAuthQuery()}`;
 
   return new Promise((resolve, reject) => {
     let last: LlmJob | null = null;
     let settled = false;
     const timer = window.setTimeout(() => {
-      es.close();
-      if (!settled) {
-        settled = true;
-        void pollLlmJob(jobId).then(resolve, reject);
-      }
-    }, LLM_JOB_POLL_MAX_MS);
+      // Долгое молчание SSE → poll, не ошибка.
+      if (!settled) startFallbackPoll();
+    }, SSE_FALLBACK_IDLE_MS);
 
     const es = new EventSource(url);
 
@@ -175,6 +222,14 @@ function waitLlmJobSse(jobId: string): Promise<LlmJob> {
       window.clearTimeout(timer);
       es.close();
       resolve(job);
+    };
+
+    const startFallbackPoll = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      es.close();
+      void pollLlmJob(jobId).then(resolve, reject);
     };
 
     es.addEventListener("status", (ev) => {
@@ -191,31 +246,18 @@ function waitLlmJobSse(jobId: string): Promise<LlmJob> {
         finish(last);
         return;
       }
-      if (!settled) {
-        settled = true;
-        window.clearTimeout(timer);
-        es.close();
-        void pollLlmJob(jobId).then(resolve, reject);
-      }
-    });
-
-    es.addEventListener("error", () => {
-      if (settled) return;
-      // Первый error от EventSource часто при connect — ждём; если уже был status — fallback poll
-      if (last) {
-        settled = true;
-        window.clearTimeout(timer);
-        es.close();
-        void pollLlmJob(jobId).then(resolve, reject);
-      }
+      startFallbackPoll();
     });
 
     es.onerror = () => {
       if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      es.close();
-      void pollLlmJob(jobId).then(resolve, reject);
+      if (last) {
+        startFallbackPoll();
+        return;
+      }
+      window.setTimeout(() => {
+        if (!settled && !last) startFallbackPoll();
+      }, 1500);
     };
   });
 }
@@ -248,20 +290,26 @@ async function postInteractiveLlm<T>(
     const accepted = (await res.json()) as LlmJobAccepted;
     const job = await awaitLlmJob(accepted.job_id);
     if (job.status === "error") {
-      throw new Error(job.error_message || "LLM: ошибка задачи");
+      throw new ApiError(job.error_message || "LLM: ошибка задачи", {
+        status: 500,
+        code: "INTERNAL",
+        retryable: true,
+      });
     }
     const value = pick(job);
-    if (value == null) throw new Error("LLM: пустой результат задачи");
+    if (value == null) {
+      throw new ApiError("LLM: пустой результат задачи", { status: 500, code: "INTERNAL" });
+    }
     return value;
   }
-  let detail = res.statusText;
+  let detail: unknown = res.statusText;
   try {
     const j = await res.json();
-    detail = j.detail ?? JSON.stringify(j);
+    detail = j.detail ?? j;
   } catch {
     detail = await res.text();
   }
-  throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  throw parseErrorDetail(res.status, detail, res.statusText);
 }
 
 export const api = {
@@ -393,6 +441,29 @@ export const api = {
     return `${API_BASE}/vacancies/export.xlsx${qs ? `?${qs}` : ""}`;
   },
 
+  /** Скачать export с Authorization / X-API-Key (вместо голого &lt;a href&gt;). */
+  downloadExport: async (url: string, filename: string) => {
+    const res = await fetch(url, { headers: authHeaders() });
+    if (res.status === 401) handleUnauthorized(url);
+    if (!res.ok) {
+      let detail: unknown = res.statusText;
+      try {
+        const j = await res.json();
+        detail = j.detail ?? j;
+      } catch {
+        detail = await res.text();
+      }
+      throw parseErrorDetail(res.status, detail, res.statusText);
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(objectUrl);
+  },
+
   listRunVacancies: (
     runId: string,
     page = 1,
@@ -498,8 +569,9 @@ export const api = {
     let settled = false;
     let gotProgress = false;
     let cancelled = false;
+    const cancelFlag = { cancelled: false };
 
-    const es = new EventSource(`${API_BASE}/runs/${runId}/events`);
+    const es = new EventSource(`${API_BASE}/runs/${runId}/events${sseAuthQuery()}`);
 
     const finishDone = () => {
       if (settled || cancelled) return;
@@ -514,7 +586,7 @@ export const api = {
       settled = true;
       window.clearTimeout(timer);
       es.close();
-      void pollRunUntilTerminal(runId, onProgress).then(
+      void pollRunUntilTerminal(runId, onProgress, cancelFlag).then(
         () => {
           if (!cancelled) onDone();
         },
@@ -526,9 +598,10 @@ export const api = {
       );
     };
 
+    // Idle SSE → poll; без hard-fail по времени.
     const timer = window.setTimeout(() => {
       startFallbackPoll();
-    }, RUN_SSE_MAX_MS);
+    }, SSE_FALLBACK_IDLE_MS);
 
     es.addEventListener("progress", (ev) => {
       try {
@@ -563,6 +636,7 @@ export const api = {
 
     return () => {
       cancelled = true;
+      cancelFlag.cancelled = true;
       window.clearTimeout(timer);
       es.close();
     };

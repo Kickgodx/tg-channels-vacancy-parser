@@ -8,7 +8,7 @@ import os
 import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -99,6 +99,7 @@ def _build_parse_result(
     posts_processed: int = 0,
     fetch_elapsed_sec: float = 0.0,
     process_elapsed_sec: float = 0.0,
+    fx_rates: dict[date, dict[str, float]] | None = None,
 ) -> ParseResult:
     _LOG.info(
         "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
@@ -117,11 +118,13 @@ def _build_parse_result(
             unique,
             default_currency_if_missing=config.fx.default_currency_if_missing,
             request_timeout_seconds=config.fx.request_timeout_seconds,
+            rates_for_date=fx_rates,
         )
         _LOG.info(
-            "Курсы для метрик прогона: %s вакансий за %.1f с.",
+            "Курсы для метрик прогона: %s вакансий за %.1f с%s.",
             len(unique),
             time.monotonic() - enrich_started,
+            " (из БД)" if fx_rates else "",
         )
 
     metrics = build_metrics(
@@ -217,6 +220,7 @@ def run_parse(
     progress_every_n_posts: int | None = None,
     cancel: ParseCancellationToken | None = None,
     vacancy_batch_sink: Callable[[list[Vacancy]], None] | None = None,
+    fx_rates: dict[date, dict[str, float]] | None = None,
 ) -> ParseResult:
     """
     Основной сценарий MVP.
@@ -227,6 +231,7 @@ def run_parse(
     при накоплении ``parser.db_flush_pending_vacancies`` незаписанных уникальных
     (что наступит раньше) и в конце прогона — чтобы сохранять вакансии в БД по ходу
     обработки, а не только в конце.
+    ``fx_rates`` — готовые курсы (из БД); если заданы, метрики не ходят в ЦБ.
     """
     try_load_dotenv()
 
@@ -319,6 +324,7 @@ def run_parse(
             dedup_elapsed_sec=0.0,
             ai_service=None,
             fetch_elapsed_sec=fetch_elapsed,
+            fx_rates=fx_rates,
         )
     fetch_elapsed = time.monotonic() - fetch_started
 
@@ -556,6 +562,7 @@ def run_parse(
             posts_processed=len(all_posts),
             fetch_elapsed_sec=fetch_elapsed,
             process_elapsed_sec=process_elapsed,
+            fx_rates=fx_rates,
         )
     except ParseCancelled:
         _LOG.warning("Прогон прерван (отмена).")
@@ -577,6 +584,7 @@ def run_parse(
             posts_processed=len(all_posts),
             fetch_elapsed_sec=fetch_elapsed,
             process_elapsed_sec=process_elapsed,
+            fx_rates=fx_rates,
         )
     except KeyboardInterrupt:
         if cancel is not None:

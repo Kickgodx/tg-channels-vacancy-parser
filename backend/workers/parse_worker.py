@@ -69,6 +69,14 @@ def main() -> None:
     except Exception as e:
         log.warning("Recover on start failed: %s", e)
 
+    from backend.workers.recover_loop import start_periodic_recover
+
+    recover_stop = start_periodic_recover(
+        recover_stuck_parse_runs,
+        interval_seconds=settings.job_recover_interval_seconds,
+        name="parse-recover-loop",
+    )
+
     from rq import SimpleWorker
 
     conn = get_redis_connection()
@@ -79,6 +87,7 @@ def main() -> None:
     try:
         worker.work(with_scheduler=False)
     finally:
+        recover_stop.set()
         shutdown_tracing()
 
 

@@ -17,6 +17,7 @@ from backend.api.routes.resumes import _letter_to_out, _match_to_out
 from backend.db import repository as repo
 from backend.db.models import UserRow
 from backend.db.session import session_scope
+from backend.errors import CODE_NOT_AUTHENTICATED, http_error
 from backend.observability import LLM_JOB_SSE_CONNECTIONS
 from backend.schemas import LlmJobOut
 from backend.services.llm_job_events import channel_for
@@ -163,7 +164,7 @@ async def llm_job_events(
     with session_scope() as session:
         user = _user_from_token(session, _extract_token(authorization, access_token))
         if user is None:
-            raise HTTPException(status_code=401, detail="Not authenticated")
+            raise http_error(401, CODE_NOT_AUTHENTICATED, "Not authenticated")
         user_id = user.id
         row = repo.get_llm_job(session, job_id)
         if row is None or row.user_id != user_id:

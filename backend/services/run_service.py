@@ -8,10 +8,12 @@ import uuid
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
+from sqlalchemy.exc import IntegrityError
 
 from backend.config_builder import config_snapshot_dict
 from backend.db import repository as repo
 from backend.db.session import session_scope
+from backend.errors import CODE_CONFLICT_ACTIVE_RUN, AppError
 from backend.schemas import RunCreateRequest
 from backend.services.parse_run_events import publish_parse_run_event
 from backend.settings import get_settings
@@ -20,6 +22,8 @@ from tg_jobs_parser.config.schema import AppConfig
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)
+
+_ACTIVE_PARSE_MSG = "Уже выполняется прогон парсинга. Дождитесь завершения или отмените его."
 
 
 def _current_traceparent() -> str | None:
@@ -36,10 +40,24 @@ def _current_traceparent() -> str | None:
 def start_parse_run(config: AppConfig, _body: RunCreateRequest) -> uuid.UUID:
     with session_scope() as session:
         if repo.has_active_parse_run(session):
-            raise RuntimeError("Уже выполняется прогон парсинга. Дождитесь завершения или отмените его.")
+            raise AppError(
+                CODE_CONFLICT_ACTIVE_RUN,
+                _ACTIVE_PARSE_MSG,
+                status_code=409,
+                retryable=False,
+            )
         snapshot = config_snapshot_dict(config)
-        row = repo.create_parse_run(session, config_snapshot=snapshot, status="queued")
-        run_id = row.id
+        try:
+            row = repo.create_parse_run(session, config_snapshot=snapshot, status="queued")
+            run_id = row.id
+            session.flush()
+        except IntegrityError as e:
+            raise AppError(
+                CODE_CONFLICT_ACTIVE_RUN,
+                _ACTIVE_PARSE_MSG,
+                status_code=409,
+                retryable=False,
+            ) from e
 
     settings = get_settings()
     backend = settings.parse_job_backend_normalized

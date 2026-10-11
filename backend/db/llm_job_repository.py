@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from backend.db.models import LlmJobRow
+from backend.settings import get_settings
 
 _ACTIVE_LLM_STATUSES = ("queued", "running")
 
@@ -54,18 +55,91 @@ def set_llm_job_rq_job_id(
     return row
 
 
-def claim_llm_job(session: Session, job_id: uuid.UUID) -> LlmJobRow | None:
+def _lease_deadline(now: datetime | None = None) -> datetime:
+    base = now or datetime.now(UTC)
+    seconds = max(30, get_settings().llm_job_lease_seconds)
+    return base + timedelta(seconds=seconds)
+
+
+def new_llm_lease_owner() -> str:
+    return f"llm-{uuid.uuid4().hex}"[:64]
+
+
+def claim_llm_job(
+    session: Session,
+    job_id: uuid.UUID,
+    *,
+    lease_owner: str | None = None,
+) -> LlmJobRow | None:
     """Атомарно ``queued`` → ``running``. Только победитель получает строку."""
     now = datetime.now(UTC)
+    owner = (lease_owner or new_llm_lease_owner()).strip()[:64] or new_llm_lease_owner()
     result = session.execute(
         update(LlmJobRow)
         .where(LlmJobRow.id == job_id, LlmJobRow.status == "queued")
-        .values(status="running", started_at=now)
+        .values(
+            status="running",
+            started_at=now,
+            lease_owner=owner,
+            lease_until=_lease_deadline(now),
+        )
     )
     if (result.rowcount or 0) != 1:
         return None
     session.flush()
     return session.get(LlmJobRow, job_id)
+
+
+def touch_llm_job_lease(
+    session: Session,
+    job_id: uuid.UUID,
+    *,
+    lease_owner: str,
+) -> bool:
+    now = datetime.now(UTC)
+    owner = lease_owner.strip()[:64]
+    result = session.execute(
+        update(LlmJobRow)
+        .where(
+            LlmJobRow.id == job_id,
+            LlmJobRow.status == "running",
+            LlmJobRow.lease_owner == owner,
+        )
+        .values(lease_until=_lease_deadline(now))
+    )
+    session.flush()
+    return (result.rowcount or 0) == 1
+
+
+def reclaim_expired_llm_job(
+    session: Session,
+    job_id: uuid.UUID,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Атомарно running(expired lease) → queued. True если перехватили."""
+    ts = now or datetime.now(UTC)
+    result = session.execute(
+        update(LlmJobRow)
+        .where(
+            LlmJobRow.id == job_id,
+            LlmJobRow.status == "running",
+            LlmJobRow.lease_until.is_not(None),
+            LlmJobRow.lease_until < ts,
+        )
+        .values(
+            status="queued",
+            started_at=None,
+            finished_at=None,
+            error_message=None,
+            rq_job_id=None,
+            lease_owner=None,
+            lease_until=None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    session.expire_all()
+    return (result.rowcount or 0) == 1
 
 
 def find_active_llm_job(
@@ -110,16 +184,48 @@ def set_llm_job_status(
     status: str,
     *,
     error_message: str | None = None,
+    lease_owner: str | None = None,
 ) -> LlmJobRow | None:
+    """Сменить статус. С ``lease_owner`` на terminal — только если lease ещё наш."""
+    now = datetime.now(UTC)
+    if lease_owner and status in ("done", "error"):
+        owner = lease_owner.strip()[:64]
+        values: dict = {
+            "status": status,
+            "finished_at": now,
+            "lease_owner": None,
+            "lease_until": None,
+        }
+        if error_message is not None:
+            values["error_message"] = error_message
+        result = session.execute(
+            update(LlmJobRow)
+            .where(
+                LlmJobRow.id == job_id,
+                LlmJobRow.status == "running",
+                LlmJobRow.lease_owner == owner,
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        session.expire_all()
+        if (result.rowcount or 0) != 1:
+            return None
+        return session.get(LlmJobRow, job_id)
+
     row = session.get(LlmJobRow, job_id)
     if row is None:
         return None
-    now = datetime.now(UTC)
     row.status = status
     if status == "running" and row.started_at is None:
         row.started_at = now
+        row.lease_until = _lease_deadline(now)
+        if row.lease_owner is None:
+            row.lease_owner = "worker"
     if status in ("done", "error"):
         row.finished_at = now
+        row.lease_owner = None
+        row.lease_until = None
         if error_message is not None:
             row.error_message = error_message
     session.flush()
@@ -135,9 +241,20 @@ def list_llm_jobs_by_status(
     stmt = select(LlmJobRow).where(LlmJobRow.status == status)
     if older_than is not None:
         if status == "running":
-            stmt = stmt.where(LlmJobRow.started_at.is_not(None), LlmJobRow.started_at < older_than)
+            heartbeat = func.coalesce(LlmJobRow.lease_until, LlmJobRow.started_at, LlmJobRow.created_at)
+            stmt = stmt.where(heartbeat < older_than)
         else:
             stmt = stmt.where(LlmJobRow.created_at < older_than)
+    return list(session.scalars(stmt).all())
+
+
+def list_llm_jobs_with_expired_lease(session: Session, *, now: datetime | None = None) -> list[LlmJobRow]:
+    ts = now or datetime.now(UTC)
+    stmt = select(LlmJobRow).where(
+        LlmJobRow.status == "running",
+        LlmJobRow.lease_until.is_not(None),
+        LlmJobRow.lease_until < ts,
+    )
     return list(session.scalars(stmt).all())
 
 
@@ -151,6 +268,8 @@ def reset_llm_job_to_queued(session: Session, job_id: uuid.UUID) -> LlmJobRow | 
     row.finished_at = None
     row.error_message = None
     row.rq_job_id = None
+    row.lease_owner = None
+    row.lease_until = None
     session.flush()
     return row
 

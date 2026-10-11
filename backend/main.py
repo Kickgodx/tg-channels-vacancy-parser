@@ -31,6 +31,7 @@ from backend.db import fx_repository as fx_repo
 from backend.db import hh_repository as hh_repo
 from backend.db import repository as repo
 from backend.db.session import init_db, session_scope
+from backend.errors import register_exception_handlers
 from backend.http_logging import HttpLoggingMiddleware
 from backend.settings import get_settings
 from backend.tracing import setup_tracing, shutdown_tracing
@@ -133,6 +134,7 @@ app = FastAPI(
 )
 
 settings = get_settings()
+register_exception_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -153,6 +155,7 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(config.router, prefix="/api/v1")
 app.include_router(runs.router, prefix="/api/v1")
+app.include_router(runs.sse_router, prefix="/api/v1")
 app.include_router(vacancies.router, prefix="/api/v1")
 app.include_router(hh.router, prefix="/api/v1")
 app.include_router(ai_cache.router, prefix="/api/v1")
