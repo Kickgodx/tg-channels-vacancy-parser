@@ -34,7 +34,7 @@ docker compose up --build
 | **Alloy** | http://localhost:12345 (UI пайплайна сбора логов и трасс) |
 | **Tempo** | http://localhost:3200 (API; трассы смотрятся в Grafana → Explore → Tempo) |
 | **PostgreSQL** | `localhost:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
-| **Redis** | `localhost:6379` (очереди RQ: parse + LLM) |
+| **Redis** | `localhost:16379` → контейнер `:6379` (очереди RQ: parse + LLM) |
 
 В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `parse-worker` (тот же образ, команда `tg-jobs-parse-worker`) выполняет прогоны парсинга через RQ (очередь `parse`, concurrency=1, volume `sessions/` для Telethon); метрики — контейнерный `:9102` (на хост не публикуется). Сервис `llm-worker` (`tg-jobs-llm-worker`) обрабатывает матчинг и письма; метрики — `:9101` (тоже без host mapping, чтобы работал `--scale`).
 
@@ -73,7 +73,7 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # PARSE_JOB_STUCK_MINUTES=30      # recover «залипших» running/queued прогонов
 # PARSE_RQ_JOB_TIMEOUT_SECONDS=43200  # таймаут RQ-джобы parse (сек; по умолчанию 12 ч)
 # PARSE_WORKER_METRICS_PORT=9102  # контейнерный порт метрик parse-worker
-# REDIS_URL=redis://redis:6379/0  # очереди RQ (parse + LLM); локально — redis://localhost:6379/0
+# REDIS_URL=redis://redis:6379/0  # очереди RQ (parse + LLM); локально — redis://localhost:16379/0
 # HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе
 # HTTP_LOG_BODY_LIMIT=4096        # макс. символов тела в логе, дальше — «…[truncated, N bytes]»
 # HTTP_LOG_EXCLUDE_PATHS=/metrics,/api/v1/health,/api/v1/vacancies/metrics,/api/v1/analytics/salaries,/api/v1/analytics/sources,/api/v1/analytics/companies,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico

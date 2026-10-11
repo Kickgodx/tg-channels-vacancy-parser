@@ -29,8 +29,10 @@ services:
   redis:
     image: redis:7-alpine
     logging: *default-logging
+    # Host 6379 often falls into Windows Hyper-V/WinNAT excluded ranges (≈6251–6450).
+    # Containers still use redis:6379; localhost clients → 16379.
     ports:
-      - "6379:6379"
+      - "16379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
