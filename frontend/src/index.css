@@ -513,6 +513,23 @@ tr.clickable:hover {
   line-height: 1.5;
 }
 
+.match-toggle {
+  margin-top: 0.45rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #2b8a3e;
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.match-toggle:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .cover-letter {
   margin: 0.75rem 0 1rem;
   padding: 0.85rem 1rem;

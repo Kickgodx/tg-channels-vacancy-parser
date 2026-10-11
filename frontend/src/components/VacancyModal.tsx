@@ -55,6 +55,18 @@ const BREAKDOWN_ROWS: [keyof NonNullable<VacancyMatch["breakdown"]>, string][] =
   ["work_format_match", "Формат работы"],
 ];
 
+/** Полный ответ GET/POST матча, а не урезанный снимок из списка вакансий. */
+function hasMatchDetails(m: VacancyMatch): boolean {
+  return (
+    m.breakdown != null ||
+    Boolean(m.model) ||
+    m.matching_skills.length > 0 ||
+    m.missing_skills.length > 0 ||
+    (m.strengths?.length ?? 0) > 0 ||
+    (m.risks?.length ?? 0) > 0
+  );
+}
+
 const TONE_OPTIONS: { value: CoverLetterTone; label: string }[] = [
   { value: "neutral", label: "Нейтральный" },
   { value: "friendly", label: "Дружелюбный" },
@@ -82,7 +94,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
       }
     : listItem;
 
-  // Оценка из списка (join vacancy_matches) — стартовое состояние до пересчёта.
+  // Оценка из списка (join vacancy_matches) — краткий снимок до «Подробнее» / пересчёта.
   const [match, setMatch] = useState<VacancyMatch | null>(
     listItem.match_score != null
       ? {
@@ -98,13 +110,24 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
         }
       : null,
   );
+  // Повторный вход: кратко; полный блок — после GET или свежего матчинга.
+  const [matchExpanded, setMatchExpanded] = useState(false);
 
   const matchM = useMutation({
     mutationFn: ({ force }: { force: boolean }) =>
       api.matchVacancy(resumeId as number, listItem.id, force),
     onSuccess: (data) => {
       setMatch(data);
+      setMatchExpanded(true);
       void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
+    },
+  });
+
+  const expandMatchM = useMutation({
+    mutationFn: () => api.getVacancyMatch(resumeId as number, listItem.id),
+    onSuccess: (data) => {
+      setMatch(data);
+      setMatchExpanded(true);
     },
   });
 
@@ -220,6 +243,9 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
         {matchM.isError && (
           <p className="error">{(matchM.error as Error).message}</p>
         )}
+        {expandMatchM.isError && (
+          <p className="error">{(expandMatchM.error as Error).message}</p>
+        )}
         {letterM.isError && (
           <p className="error">{(letterM.error as Error).message}</p>
         )}
@@ -230,7 +256,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
               <span className={scoreClass(match.overall_score)}>
                 {Math.round(match.overall_score)} / 100
               </span>
-              {match.confidence != null && (
+              {matchExpanded && match.confidence != null && (
                 <span
                   className="caption"
                   title="Уверенность модели в качестве оценки (полнота данных), а не сам score"
@@ -238,65 +264,94 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
                   уверенность {match.confidence}%
                 </span>
               )}
-              {match.model && <span className="caption">{match.model}</span>}
+              {matchExpanded && match.model && (
+                <span className="caption">{match.model}</span>
+              )}
             </div>
-            {match.breakdown && (
-              <div className="match-breakdown">
-                {BREAKDOWN_ROWS.map(([key, label]) => (
-                  <div key={key} className="match-breakdown-row">
-                    <span className="match-breakdown-label">{label}</span>
-                    <span className="match-breakdown-value">
-                      {match.breakdown![key]}%
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
             {match.explanation && (
               <p>
                 <strong>Почему такая оценка:</strong> {match.explanation}
               </p>
             )}
-            {match.matching_skills.length > 0 && (
-              <div className="match-skills">
-                <strong className="success">Совпадает:</strong>
-                <ul className="match-skill-list">
-                  {match.matching_skills.map((s) => (
-                    <SkillRow key={s.skill} item={s} matched />
-                  ))}
-                </ul>
-              </div>
+            {matchExpanded && hasMatchDetails(match) && (
+              <>
+                {match.breakdown && (
+                  <div className="match-breakdown">
+                    {BREAKDOWN_ROWS.map(([key, label]) => (
+                      <div key={key} className="match-breakdown-row">
+                        <span className="match-breakdown-label">{label}</span>
+                        <span className="match-breakdown-value">
+                          {match.breakdown![key]}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {match.matching_skills.length > 0 && (
+                  <div className="match-skills">
+                    <strong className="success">Совпадает:</strong>
+                    <ul className="match-skill-list">
+                      {match.matching_skills.map((s) => (
+                        <SkillRow key={s.skill} item={s} matched />
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {match.missing_skills.length > 0 && (
+                  <div className="match-skills">
+                    <strong className="warning">Не хватает:</strong>
+                    <ul className="match-skill-list">
+                      {match.missing_skills.map((s) => (
+                        <SkillRow key={s.skill} item={s} matched={false} />
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {match.strengths && match.strengths.length > 0 && (
+                  <div className="match-skills">
+                    <strong className="success">Сильные стороны:</strong>
+                    <ul className="match-skill-list">
+                      {match.strengths.map((s, i) => (
+                        <li key={i} className="match-note">
+                          {s}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {match.risks && match.risks.length > 0 && (
+                  <div className="match-skills">
+                    <strong className="warning">Риски:</strong>
+                    <ul className="match-skill-list">
+                      {match.risks.map((s, i) => (
+                        <li key={i} className="match-note">
+                          {s}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
             )}
-            {match.missing_skills.length > 0 && (
-              <div className="match-skills">
-                <strong className="warning">Не хватает:</strong>
-                <ul className="match-skill-list">
-                  {match.missing_skills.map((s) => (
-                    <SkillRow key={s.skill} item={s} matched={false} />
-                  ))}
-                </ul>
-              </div>
-            )}
-            {match.strengths && match.strengths.length > 0 && (
-              <div className="match-skills">
-                <strong className="success">Сильные стороны:</strong>
-                <ul className="match-skill-list">
-                  {match.strengths.map((s, i) => (
-                    <li key={i} className="match-note">{s}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {match.risks && match.risks.length > 0 && (
-              <div className="match-skills">
-                <strong className="warning">Риски:</strong>
-                <ul className="match-skill-list">
-                  {match.risks.map((s, i) => (
-                    <li key={i} className="match-note">{s}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {canMatch &&
+              (hasMatchDetails(match) ? (
+                <button
+                  type="button"
+                  className="match-toggle"
+                  onClick={() => setMatchExpanded((open) => !open)}
+                >
+                  {matchExpanded ? "Свернуть" : "Подробнее"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="match-toggle"
+                  disabled={expandMatchM.isPending}
+                  onClick={() => expandMatchM.mutate()}
+                >
+                  {expandMatchM.isPending ? "Загрузка…" : "Подробнее"}
+                </button>
+              ))}
             {match.cached && !matchM.isSuccess && (
               <p className="caption">
                 Сохранённая оценка — «Переоценить резюме» запустит LLM заново.
