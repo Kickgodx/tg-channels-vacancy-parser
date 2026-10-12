@@ -43,6 +43,7 @@ evals/reports/
 
 # --- проект: артефакты запуска (не коммитить выгрузки и сессии Telegram) ---
 output/
+backup/
 logs/
 sessions/
 *.xlsx
