@@ -8,6 +8,28 @@ x-logging: &default-logging
     max-file: "5"
     compress: "true"
 
+x-app-env: &app-env
+  DATABASE_URL: postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
+  CONFIG_PATH: /app/config.yaml
+  PYTHONUNBUFFERED: "1"
+  LOG_DIR: ""
+  REDIS_URL: redis://redis:6379/0
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+
+x-app-common: &app-common
+  build:
+    context: .
+    dockerfile: Dockerfile.backend
+  logging: *default-logging
+  env_file:
+    - .env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -40,99 +62,51 @@ services:
       retries: 10
 
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    logging: *default-logging
+    <<: *app-common
     ports:
       - "9000:8000"
     environment:
-      DATABASE_URL: postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
-      CONFIG_PATH: /app/config.yaml
+      <<: *app-env
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
-      PYTHONUNBUFFERED: "1"
-      LOG_DIR: ""
-      OTEL_ENABLED: "true"
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_SERVICE_NAME: tg-jobs-parser-backend
       LLM_JOB_BACKEND: rq
       PARSE_JOB_BACKEND: rq
-      REDIS_URL: redis://redis:6379/0
-    env_file:
-      - .env
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
       - ./sessions:/app/sessions
       - ./output:/app/output
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   # Параллелизм LLM = число реплик: docker compose up --scale llm-worker=4
   # Метрики :9101 только в Docker-сети (Prometheus dns_sd → все реплики);
   # host port mapping убран — иначе --scale конфликтует по 9101 на хосте.
   # Entrypoint: SimpleWorker (без fork) — метрики и экономия RAM.
   llm-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    logging: *default-logging
+    <<: *app-common
     command: ["tg-jobs-llm-worker"]
     environment:
-      DATABASE_URL: postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
-      CONFIG_PATH: /app/config.yaml
-      PYTHONUNBUFFERED: "1"
-      LOG_DIR: ""
+      <<: *app-env
       LLM_JOB_BACKEND: rq
-      REDIS_URL: redis://redis:6379/0
       LLM_WORKER_METRICS_PORT: "9101"
-      OTEL_ENABLED: "true"
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_SERVICE_NAME: tg-jobs-parser-llm-worker
-    env_file:
-      - .env
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   # Parse: один active run на БД; concurrency=1 (не scale). sessions/ — Telethon.
   # Метрики :9102 в Docker-сети (Prometheus dns_sd).
   parse-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    logging: *default-logging
+    <<: *app-common
     command: ["tg-jobs-parse-worker"]
     environment:
-      DATABASE_URL: postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
-      CONFIG_PATH: /app/config.yaml
-      PYTHONUNBUFFERED: "1"
-      LOG_DIR: ""
+      <<: *app-env
       PARSE_JOB_BACKEND: rq
-      REDIS_URL: redis://redis:6379/0
       PARSE_WORKER_METRICS_PORT: "9102"
-      OTEL_ENABLED: "true"
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_SERVICE_NAME: tg-jobs-parser-parse-worker
-    env_file:
-      - .env
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
       - ./sessions:/app/sessions
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   frontend:
     build:
@@ -148,6 +122,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v3.2.1
+    profiles: ["observability"]
     logging: *default-logging
     ports:
       - "9090:9090"
@@ -159,6 +134,7 @@ services:
 
   grafana:
     image: grafana/grafana:11.5.2
+    profiles: ["observability"]
     logging: *default-logging
     ports:
       - "3000:3000"
@@ -177,6 +153,7 @@ services:
 
   loki:
     image: grafana/loki:3.4.2
+    profiles: ["observability"]
     logging: *default-logging
     command: -config.file=/etc/loki/local-config.yaml
     ports:
@@ -188,6 +165,7 @@ services:
 
   alloy:
     image: grafana/alloy:v1.7.5
+    profiles: ["observability"]
     logging: *default-logging
     # root нужен для чтения docker.sock; Docker Desktop на Windows тоже
     # отдаёт unix-сокет внутрь WSL2-VM, поэтому путь кроссплатформенный.
@@ -206,6 +184,7 @@ services:
 
   tempo:
     image: grafana/tempo:2.7.2
+    profiles: ["observability"]
     logging: *default-logging
     # Образ работает под uid 10001, а named volume создаётся root'ом — без
     # этого Tempo не может писать WAL/блоки в /var/tempo.
