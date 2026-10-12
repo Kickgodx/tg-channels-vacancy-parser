@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +16,15 @@ from tg_jobs_parser.utils.logger import get_logger
 from tg_jobs_parser.utils.text import compact_whitespace
 
 _LOG = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class TelethonSessionInfo:
+    """Результат интерактивной (или уже сохранённой) авторизации Telethon."""
+
+    session_path: Path
+    user_id: int | None
+    username: str | None
 
 
 def telethon_import_error() -> ImportError | None:
@@ -58,6 +68,59 @@ async def _disconnect_client(client) -> None:
             await client.disconnect()
     except (ConnectionResetError, OSError, asyncio.CancelledError):
         pass
+
+
+async def start_telethon_client(client) -> object | None:
+    """``client.start()`` с телефоном/2FA из .env; возвращает ``get_me()``."""
+    try_load_dotenv()
+    phone = os.environ.get("TELEGRAM_PHONE", "").strip() or None
+    pwd = os.environ.get("TELEGRAM_2FA_PASSWORD", "").strip() or None
+    start_kw: dict = {}
+    if phone:
+        start_kw["phone"] = phone
+    if pwd:
+        start_kw["password"] = pwd
+    await client.start(**start_kw)
+
+    me = await client.get_me()
+    if me is not None:
+        _LOG.info("Telethon: сессия активна (%s).", getattr(me, "username", me.id))
+    return me
+
+
+def ensure_telethon_session(session_file: str | Path) -> TelethonSessionInfo:
+    """
+    Интерактивная авторизация Telethon и сохранение файла сессии.
+
+    При уже валидной сессии повторный ввод кода не требуется.
+    """
+    if err := telethon_import_error():
+        raise RuntimeError(
+            "Нужен Telethon: poetry install (и при необходимости --extras telethon). "
+            "Запускайте: poetry run python -m tg_jobs_parser.cli login"
+        ) from err
+
+    from telethon import TelegramClient
+
+    api_id, api_hash = telegram_api_credentials()
+    session_path = Path(session_file)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+
+    async def _run() -> TelethonSessionInfo:
+        client = TelegramClient(session_path.as_posix(), api_id, api_hash)
+        try:
+            me = await start_telethon_client(client)
+            user_id = getattr(me, "id", None) if me is not None else None
+            username = getattr(me, "username", None) if me is not None else None
+            return TelethonSessionInfo(
+                session_path=session_path.resolve(),
+                user_id=user_id,
+                username=username,
+            )
+        finally:
+            await _disconnect_client(client)
+
+    return _asyncio_run(_run())
 
 
 def _combine_utc(d, end_of_day: bool = False) -> datetime:
@@ -207,19 +270,7 @@ class TelegramTelethonParser(BaseChannelParser):
 
     async def _start_client(self, client) -> None:
         """Один client.start() с подгрузкой телефона/2FA из .env (если есть)."""
-        try_load_dotenv()
-        phone = os.environ.get("TELEGRAM_PHONE", "").strip() or None
-        pwd = os.environ.get("TELEGRAM_2FA_PASSWORD", "").strip() or None
-        start_kw: dict = {}
-        if phone:
-            start_kw["phone"] = phone
-        if pwd:
-            start_kw["password"] = pwd
-        await client.start(**start_kw)
-
-        me = await client.get_me()
-        if me is not None:
-            _LOG.info("Telethon: сессия активна (%s).", getattr(me, "username", me.id))
+        await start_telethon_client(client)
 
     async def _iter_channel(self, client, username: str) -> tuple[list[RawPost], str | None]:
         """Вычитка одного канала на уже подключённом клиенте."""

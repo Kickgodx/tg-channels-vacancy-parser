@@ -45,7 +45,7 @@ Prometheus, Grafana, стек логов (Loki + Alloy) и трассировк�
 В контейнере backend интерактивный ввод телефона и кода удобнее, чем в браузере:
 
 ```powershell
-docker compose exec backend python -m tg_jobs_parser.cli parse --config /app/config.yaml
+docker compose exec backend python -m tg_jobs_parser.cli login --config /app/config.yaml
 ```
 
 Введите номер (`+79991234567`), код из Telegram/SMS и при необходимости пароль 2FA. Файл сессии появится в `sessions/` на хосте (volume).
@@ -500,18 +500,18 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 
 ---
 
-## CLI (отладка и авторизация Telethon)
+## CLI (авторизация Telethon и перенос БД)
 
-Повседневный парсинг — через **React UI** → API. CLI нужен в основном для **первого входа в Telegram** (см. [Docker](#первая-авторизация-telethon)) и для работы без БД (пишет в `output/`).
+Повседневный парсинг — через **React UI** → API. CLI — для **первого входа в Telegram**
+(см. [Docker](#первая-авторизация-telethon)) и дампа/импорта PostgreSQL.
 
 ```powershell
-python -m tg_jobs_parser.cli parse --config config.yaml
-python -m tg_jobs_parser.cli parse --ai
-python -m tg_jobs_parser.cli analyze --from-json output/vacancies.json
-python -m tg_jobs_parser.cli export --from-json output/vacancies.json --out reexport.xlsx
+python -m tg_jobs_parser.cli login --config config.yaml
+# или с явным путём к сессии:
+python -m tg_jobs_parser.cli login --telegram-session sessions/tg_jobs.session
 ```
 
-Короткая команда после `poetry install`: `poetry run tg-jobs-parser parse`
+Короткая команда после `poetry install`: `poetry run tg-jobs-parser login`
 
 ### Перенос данных между инстансами (дамп / импорт БД)
 
@@ -538,7 +538,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 По умолчанию `--mode merge` — UPSERT по первичному ключу (существующие строки обновляются).  
 `replace` — сначала очищает все четыре таблицы, затем загружает дамп.
 
-Логи: консоль + `logs/app.log` (в Docker — только stdout, их собирает Alloy в Loki). Запись асинхронная: `QueueHandler` на root кладёт запись в очередь, stdout/файл пишет фоновый `QueueListener` — логирование не блокирует event loop. `app.log` ротируется по 10 МБ, хранится 5 частей `app.log.N.gz`. Stdout контейнеров в `docker-compose.yml` — `json-file` с ротацией (5 × 10 МБ, сжатие ротированных частей). Графики CLI: `output/charts/` (matplotlib).
+Логи: консоль + `logs/app.log` (в Docker — только stdout, их собирает Alloy в Loki). Запись асинхронная: `QueueHandler` на root кладёт запись в очередь, stdout/файл пишет фоновый `QueueListener` — логирование не блокирует event loop. `app.log` ротируется по 10 МБ, хранится 5 частей `app.log.N.gz`. Stdout контейнеров в `docker-compose.yml` — `json-file` с ротацией (5 × 10 МБ, сжатие ротированных частей).
 
 ---
 

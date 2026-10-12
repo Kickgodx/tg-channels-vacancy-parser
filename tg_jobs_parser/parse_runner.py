@@ -80,7 +80,7 @@ def _channel_parser(
     if err := telethon_import_error():
         raise RuntimeError(
             "Нужен Telethon: poetry install (и при необходимости --extras telethon). "
-            "Запускайте через poetry run python -m tg_jobs_parser.cli …"
+            "Сессия: poetry run python -m tg_jobs_parser.cli login"
         ) from err
     return TelegramTelethonParser(config, cancellation=cancellation)
 
