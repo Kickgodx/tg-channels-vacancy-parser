@@ -21,6 +21,7 @@
 ```powershell
 cd путь\к\tg_jobs_parser
 # Скопируйте .env.example → .env и заполните TELEGRAM_API_ID / TELEGRAM_API_HASH
+# В .env должна быть строка COMPOSE_PROFILES=observability (уже есть в .env.example)
 docker compose up --build
 ```
 
@@ -38,7 +39,22 @@ docker compose up --build
 
 В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `parse-worker` (тот же образ, команда `tg-jobs-parse-worker`) выполняет прогоны парсинга через RQ (очередь `parse`, concurrency=1, volume `sessions/` для Telethon); метрики — контейнерный `:9102` (на хост не публикуется). Сервис `llm-worker` (`tg-jobs-llm-worker`) обрабатывает матчинг и письма; метрики — `:9101` (тоже без host mapping, чтобы работал `--scale`).
 
-Prometheus, Grafana, стек логов (Loki + Alloy) и трассировка (Tempo) поднимаются вместе с основным стеком. Backend отдаёт метрики HTTP на `http://localhost:9000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
+Полный стек (Prometheus, Grafana, Loki, Alloy, Tempo) включается профилем
+`observability` через `COMPOSE_PROFILES=observability` в `.env` (уже есть в
+`.env.example`). Без этой переменной `docker compose up` поднимает только
+ядро: postgres, redis, backend, workers, frontend.
+
+Если `.env` создан раньше — добавьте строку `COMPOSE_PROFILES=observability`,
+иначе Grafana/Prometheus не стартуют.
+
+Backend отдаёт метрики HTTP на `http://localhost:9000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
+
+```powershell
+# Только ядро (без observability):
+$env:COMPOSE_PROFILES=""; docker compose up --build
+```
+
+Либо уберите/закомментируйте `COMPOSE_PROFILES` в `.env`.
 
 ### Первая авторизация Telethon
 
@@ -329,7 +345,7 @@ tg_jobs_parser/
   config.yaml
   llm_models.yaml
   docker-compose.yml       — postgres, redis, backend, parse-worker, llm-worker,
-                             frontend, observability
+                             frontend; observability — profile `observability`
   Dockerfile.backend
 
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
@@ -552,7 +568,8 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 
 ## Observability (Prometheus + Grafana + Loki)
 
-Стек метрик HTTP API включён в `docker compose up`:
+Стек метрик/логов/трасс поднимается вместе с приложением, если в `.env`
+задан `COMPOSE_PROFILES=observability` (дефолт из `.env.example`):
 
 | Компонент | Назначение |
 |-----------|------------|
