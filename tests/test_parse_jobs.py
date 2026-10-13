@@ -258,6 +258,18 @@ def test_enqueue_failure_marks_run_failed(admin_client, monkeypatch):
     r2 = admin_client.post("/api/v1/runs", json={})
     assert r2.status_code == 202
 
+    # Дождаться потока прогона: иначе он переживёт тест и вызовет уже настоящий run_parse.
+    import time
+
+    deadline = time.monotonic() + 10.0
+    status = None
+    while time.monotonic() < deadline:
+        status = admin_client.get(f"/api/v1/runs/{r2.json()['run_id']}").json()["status"]
+        if status in ("completed", "failed", "cancelled"):
+            break
+        time.sleep(0.05)
+    assert status == "completed"
+
 
 def test_cancel_queued_run(admin_client):
     with session_scope() as session:
@@ -394,3 +406,12 @@ def test_recover_skips_live_rq_job(fake_redis_for_parse, monkeypatch):
         assert row is not None
         assert row.rq_job_id
         assert row.rq_job_id != str(rq_job.id)
+
+
+def test_real_telethon_is_unreachable_in_tests(default_test_config):
+    """Страховка conftest.no_real_telegram: без подмены парсера каналов прогон падает, а не идёт в сеть."""
+    from tg_jobs_parser.config.loader import load_config
+    from tg_jobs_parser.parse_runner import run_parse
+
+    with pytest.raises(RuntimeError, match="настоящего Telethon"):
+        run_parse(load_config(default_test_config))
