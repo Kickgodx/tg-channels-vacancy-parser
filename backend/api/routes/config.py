@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from backend.api.deps import get_current_user, verify_api_key
 from backend.settings import get_settings
 from tg_jobs_parser.ai.llm_models_registry import (
     load_llm_models_registry,
@@ -13,7 +14,11 @@ from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 from tg_jobs_parser.utils.dates import resolve_search_date_from, resolve_search_date_to
 
-router = APIRouter(prefix="/config", tags=["config"])
+router = APIRouter(
+    prefix="/config",
+    tags=["config"],
+    dependencies=[Depends(verify_api_key), Depends(get_current_user)],
+)
 
 WORK_FORMAT_OPTIONS = [
     "any",

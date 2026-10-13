@@ -69,7 +69,9 @@ dedup → FX в ₽ → UPSERT в `vacancies` → метрики.
 - Одновременно допустим один активный прогон (409 `CONFLICT_ACTIVE_RUN`).
 - Конфиг прогона = `config.yaml` + overrides из тела запроса
   (`backend/config_builder.build_config`); воркер читает **снимок** из
-  `parse_runs.config_snapshot`, а не файл.
+  `parse_runs.config_snapshot`, а не файл. Overrides — whitelist-схема
+  `RunCreateRequest` (`extra="forbid"`): новое поле добавлять явно и только
+  если его безопасно отдать клиенту (не `base_url`, не пути, не лимиты).
 - `tg_jobs_parser/ingestion/` — общий путь для Telegram и ручного импорта
   (`POST /vacancies/import`, `MANUAL_POLICY` — без пост-фильтров и порога score).
   HH sync идёт мимо него: `hh/mapper` + `hh/dedup`, без LLM.
@@ -109,7 +111,9 @@ pub/sub для SSE). Оба типа джоб устроены одинаков�
 - Тесты идут на SQLite, прод — Postgres: диалект-зависимые вещи (FTS →
   `ILIKE`, JSON-операторы, миграции с FK) требуют ветки под оба диалекта.
 - Per-user (по `user_id`, JWT): резюме, пресеты, матчи, письма, `llm_jobs`.
-  Общее: вакансии, прогоны, аналитика, курсы, AI-кэш. SSE получает токен
+  Общее: вакансии, прогоны, аналитика, курсы, AI-кэш — чтение любому
+  залогиненному (`get_current_user` на роутере), мутации — `require_admin`.
+  Анонимно доступны только `/health` и `/auth/register|login`. SSE получает токен
   параметром `?access_token=` (`get_sse_user` в `backend/api/deps.py`).
 - Ошибки API — `AppError` / `http_error` из `backend/errors.py` с
   `detail = {code, message, retryable}`; frontend разбирает это в `ApiError`.

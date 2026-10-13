@@ -44,6 +44,10 @@ export default function DashboardPage() {
 
   const hasActiveRun = runs.data?.some((r) => r.status === "running" || r.status === "pending");
 
+  // Запуск прогона и очистка кэша — admin-only на backend (403 остальным).
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
+  const isAdmin = Boolean(meQ.data?.is_admin);
+
   return (
     <div className="dashboard-layout">
       <div className="main-col">
@@ -70,24 +74,26 @@ export default function DashboardPage() {
           <p>
             Записей в кэше: <strong>{cacheStats.data?.count ?? "—"}</strong>
           </p>
-          <button
-            type="button"
-            className="secondary danger"
-            disabled={!health.data?.database || clearCache.isPending || hasActiveRun}
-            onClick={() => {
-              if (
-                !window.confirm(
-                  "Удалить все записи кэша LLM? Следующий прогон снова вызовет API для всех постов.",
-                )
-              ) {
-                return;
-              }
-              clearCache.mutate();
-            }}
-          >
-            {clearCache.isPending ? "Очистка…" : "Очистить кэш LLM"}
-          </button>
-          {hasActiveRun && (
+          {isAdmin && (
+            <button
+              type="button"
+              className="secondary danger"
+              disabled={!health.data?.database || clearCache.isPending || hasActiveRun}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    "Удалить все записи кэша LLM? Следующий прогон снова вызовет API для всех постов.",
+                  )
+                ) {
+                  return;
+                }
+                clearCache.mutate();
+              }}
+            >
+              {clearCache.isPending ? "Очистка…" : "Очистить кэш LLM"}
+            </button>
+          )}
+          {isAdmin && hasActiveRun && (
             <p className="warning">Очистка недоступна во время активного прогона.</p>
           )}
           {clearCache.error && <p className="error">{(clearCache.error as Error).message}</p>}
@@ -100,11 +106,16 @@ export default function DashboardPage() {
 
         <div className="card">
           <h2>Новый прогон</h2>
-          <ParseForm
-            onSubmit={(body) => startRun.mutate(body)}
-            disabled={hasActiveRun || !health.data?.database}
-            isSubmitting={startRun.isPending}
-          />
+          {isAdmin && (
+            <ParseForm
+              onSubmit={(body) => startRun.mutate(body)}
+              disabled={hasActiveRun || !health.data?.database}
+              isSubmitting={startRun.isPending}
+            />
+          )}
+          {meQ.data && !isAdmin && (
+            <p className="muted">Запуск прогонов доступен только администратору.</p>
+          )}
           {hasActiveRun && <p className="warning">Уже выполняется прогон — дождитесь завершения.</p>}
           {startRun.error && <p className="error">{(startRun.error as Error).message}</p>}
         </div>

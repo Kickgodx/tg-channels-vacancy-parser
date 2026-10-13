@@ -3,12 +3,16 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_db, verify_api_key
+from backend.api.deps import get_current_user, get_db, verify_api_key
 from backend.api.params import vacancy_query_from_params
 from backend.db import analytics
 from backend.schemas import CompanyAnalytics, SalaryAnalytics, SourceAnalytics
 
-router = APIRouter(prefix="/analytics", tags=["analytics"], dependencies=[Depends(verify_api_key)])
+router = APIRouter(
+    prefix="/analytics",
+    tags=["analytics"],
+    dependencies=[Depends(verify_api_key), Depends(get_current_user)],
+)
 
 
 def _filters(

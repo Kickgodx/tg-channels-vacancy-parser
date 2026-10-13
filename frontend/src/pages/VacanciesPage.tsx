@@ -43,6 +43,10 @@ export default function VacanciesPage() {
     staleTime: 60_000,
   });
 
+  // Обновление курсов и пересчёт ₽ — admin-only на backend.
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
+  const isAdmin = Boolean(meQ.data?.is_admin);
+
   const fxRefreshM = useMutation({
     mutationFn: () => api.refreshFxRates(),
     onSuccess: () => {
@@ -361,24 +365,28 @@ export default function VacanciesPage() {
           Скачать Excel (все по фильтрам)
         </button>
         {exportError && <p className="error">{exportError}</p>}
-        <button
-          type="button"
-          className="btn-secondary"
-          disabled={fxRefreshM.isPending || fxRecalcRubM.isPending}
-          onClick={() => fxRefreshM.mutate()}
-          title="Загрузить курсы ЦБ и пересчитать зарплаты в рублях для всех вакансий"
-        >
-          {fxRefreshM.isPending ? "Обновление курсов…" : "Обновить курсы ЦБ"}
-        </button>
-        <button
-          type="button"
-          className="btn-secondary"
-          disabled={fxRefreshM.isPending || fxRecalcRubM.isPending}
-          onClick={() => fxRecalcRubM.mutate()}
-          title="Пересчитать колонку «Зарплата, ₽» по последнему курсу из БД (без запроса к ЦБ)"
-        >
-          {fxRecalcRubM.isPending ? "Пересчёт ₽…" : "Пересчитать зарплаты в ₽"}
-        </button>
+        {isAdmin && (
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={fxRefreshM.isPending || fxRecalcRubM.isPending}
+              onClick={() => fxRefreshM.mutate()}
+              title="Загрузить курсы ЦБ и пересчитать зарплаты в рублях для всех вакансий"
+            >
+              {fxRefreshM.isPending ? "Обновление курсов…" : "Обновить курсы ЦБ"}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={fxRefreshM.isPending || fxRecalcRubM.isPending}
+              onClick={() => fxRecalcRubM.mutate()}
+              title="Пересчитать колонку «Зарплата, ₽» по последнему курсу из БД (без запроса к ЦБ)"
+            >
+              {fxRecalcRubM.isPending ? "Пересчёт ₽…" : "Пересчитать зарплаты в ₽"}
+            </button>
+          </>
+        )}
         {fxRatesQ.data?.rate_date && fxRatesQ.data.rates.length > 0 && (
           <span className="caption">
             Курсы в БД на {fxRatesQ.data.rate_date}:{" "}

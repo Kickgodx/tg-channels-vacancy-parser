@@ -30,7 +30,7 @@ def _vac(vid: str, *, channel: str = "ch", post_id: str = "1") -> Vacancy:
     )
 
 
-def test_get_run_returns_patched_progress(api_client):
+def test_get_run_returns_patched_progress(admin_client):
     with session_scope() as session:
         rid = pr.create_parse_run(session, config_snapshot={}, status="running").id
     snap = {
@@ -42,7 +42,7 @@ def test_get_run_returns_patched_progress(api_client):
     with session_scope() as session:
         pr.patch_run_progress(session, rid, snap)
 
-    r = api_client.get(f"/api/v1/runs/{rid}")
+    r = admin_client.get(f"/api/v1/runs/{rid}")
     assert r.status_code == 200
     body = r.json()
     assert body["progress"] is not None
@@ -50,7 +50,7 @@ def test_get_run_returns_patched_progress(api_client):
     assert body["progress_updated_at"] is not None
 
 
-def test_run_events_terminal_emits_done_immediately(api_client):
+def test_run_events_terminal_emits_done_immediately(admin_client):
     factory = get_session_factory()
     session = factory()
     try:
@@ -67,7 +67,7 @@ def test_run_events_terminal_emits_done_immediately(api_client):
     finally:
         session.close()
 
-    with api_client.stream("GET", f"/api/v1/runs/{run_id}/events") as resp:
+    with admin_client.stream("GET", f"/api/v1/runs/{run_id}/events") as resp:
         assert resp.status_code == 200
         assert "text/event-stream" in resp.headers.get("content-type", "")
         body = b"".join(resp.iter_bytes()).decode("utf-8", errors="replace")
@@ -75,7 +75,7 @@ def test_run_events_terminal_emits_done_immediately(api_client):
     assert "event: done" in body
 
 
-def test_run_events_emits_initial_progress_from_db(api_client, monkeypatch):
+def test_run_events_emits_initial_progress_from_db(admin_client, monkeypatch):
     """Initial progress из БД; live-ветка Redis (TestClient буферит до конца стрима)."""
     server = fakeredis.FakeStrictRedis()
     monkeypatch.setenv("REDIS_URL", "redis://fake:6379/0")
@@ -115,7 +115,7 @@ def test_run_events_emits_initial_progress_from_db(api_client, monkeypatch):
 
     threading.Thread(target=_finish, daemon=True).start()
 
-    with api_client.stream("GET", f"/api/v1/runs/{rid}/events") as resp:
+    with admin_client.stream("GET", f"/api/v1/runs/{rid}/events") as resp:
         assert resp.status_code == 200
         ready.set()
         body = b"".join(resp.iter_bytes()).decode("utf-8", errors="replace")
@@ -127,7 +127,7 @@ def test_run_events_emits_initial_progress_from_db(api_client, monkeypatch):
     get_settings.cache_clear()
 
 
-def test_run_events_db_poll_without_redis(api_client, monkeypatch):
+def test_run_events_db_poll_without_redis(admin_client, monkeypatch):
     """Без REDIS_URL SSE поллит БД: progress при смене progress_updated_at, затем done."""
     monkeypatch.setenv("REDIS_URL", "")
     from backend.settings import get_settings
@@ -162,7 +162,7 @@ def test_run_events_db_poll_without_redis(api_client, monkeypatch):
 
     threading.Thread(target=_patch_then_complete, daemon=True).start()
 
-    with api_client.stream("GET", f"/api/v1/runs/{rid}/events") as resp:
+    with admin_client.stream("GET", f"/api/v1/runs/{rid}/events") as resp:
         assert resp.status_code == 200
         ready.set()
         body = b"".join(resp.iter_bytes()).decode("utf-8", errors="replace")
@@ -186,7 +186,7 @@ def test_vacancies_preview_dedupes_by_id():
     assert len(ids) == len(set(ids))
 
 
-def test_run_events_accepts_api_key_query(api_client, monkeypatch):
+def test_run_events_accepts_api_key_query(admin_client, monkeypatch):
     """EventSource не шлёт заголовки — api_key в query при API_KEY."""
     from backend.settings import get_settings
 
@@ -196,14 +196,14 @@ def test_run_events_accepts_api_key_query(api_client, monkeypatch):
         with session_scope() as session:
             rid = pr.create_parse_run(session, config_snapshot={}, status="completed").id
 
-        bad = api_client.get(f"/api/v1/runs/{rid}/events")
+        bad = admin_client.get(f"/api/v1/runs/{rid}/events")
         assert bad.status_code == 401
 
         # Обычный REST не принимает ?api_key= (только X-API-Key).
-        rest = api_client.get(f"/api/v1/runs/{rid}?api_key=sse-secret")
+        rest = admin_client.get(f"/api/v1/runs/{rid}?api_key=sse-secret")
         assert rest.status_code == 401
 
-        with api_client.stream("GET", f"/api/v1/runs/{rid}/events?api_key=sse-secret") as resp:
+        with admin_client.stream("GET", f"/api/v1/runs/{rid}/events?api_key=sse-secret") as resp:
             assert resp.status_code == 200
             body = b"".join(resp.iter_bytes()).decode("utf-8", errors="replace")
         assert "event: done" in body

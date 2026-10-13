@@ -148,15 +148,15 @@ def test_route_logs_carry_request_id_prefix(mini_client):
     assert "backend.test_route | outside request" in lines
 
 
-def test_noisy_endpoints_and_preflight_are_not_logged(api_client, caplog):
+def test_noisy_endpoints_and_preflight_are_not_logged(admin_client, caplog):
     caplog.set_level(logging.INFO, logger="backend.http")
-    assert api_client.get("/api/v1/health").status_code == 200
-    assert api_client.get("/metrics").status_code == 200
-    assert api_client.get("/openapi.json").status_code == 200
+    assert admin_client.get("/api/v1/health").status_code == 200
+    assert admin_client.get("/metrics").status_code == 200
+    assert admin_client.get("/openapi.json").status_code == 200
     # Агрегаты с крупным JSON: под ab/UI polling иначе заливают Loki (ingestion 4MB/s).
-    assert api_client.get("/api/v1/vacancies/metrics").status_code == 200
-    assert api_client.get("/api/v1/analytics/salaries").status_code == 200
-    preflight = api_client.options(
+    assert admin_client.get("/api/v1/vacancies/metrics").status_code == 200
+    assert admin_client.get("/api/v1/analytics/salaries").status_code == 200
+    preflight = admin_client.options(
         "/api/v1/auth/me",
         headers={
             "Origin": "http://localhost:5173",
@@ -167,7 +167,7 @@ def test_noisy_endpoints_and_preflight_are_not_logged(api_client, caplog):
     assert "x-request-id" not in preflight.headers
     assert _records(caplog) == []
 
-    api_client.get("/api/v1/auth/me")
+    admin_client.get("/api/v1/auth/me")
     assert [r["event"] for r in _records(caplog)] == ["request", "response"]
 
 

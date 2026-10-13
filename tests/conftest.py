@@ -42,6 +42,16 @@ def default_test_config(tmp_path_factory):
     get_settings.cache_clear()
 
 
+def login_as_admin(client, email: str = "admin@example.com") -> str:
+    """Первый зарегистрированный пользователь — admin; Bearer ставится клиенту по умолчанию."""
+    r = client.post("/api/v1/auth/register", json={"email": email, "password": "secret1"})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["user"]["is_admin"] is True
+    client.headers["Authorization"] = f"Bearer {body['access_token']}"
+    return body["access_token"]
+
+
 @pytest.fixture
 def api_client(monkeypatch, tmp_path, default_test_config):
     """TestClient на своей SQLite-базе; схема — через alembic (`init_db`)."""
@@ -74,3 +84,10 @@ def api_client(monkeypatch, tmp_path, default_test_config):
     reset_redis_connection()
     reset_engine()
     get_settings.cache_clear()
+
+
+@pytest.fixture
+def admin_client(api_client):
+    """``api_client``, залогиненный первым пользователем (admin)."""
+    login_as_admin(api_client)
+    return api_client

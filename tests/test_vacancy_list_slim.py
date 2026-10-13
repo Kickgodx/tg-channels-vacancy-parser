@@ -40,9 +40,9 @@ def _seed_long_vacancy() -> str:
     return vid
 
 
-def test_list_vacancies_returns_preview_without_full_texts(api_client: TestClient):
+def test_list_vacancies_returns_preview_without_full_texts(admin_client: TestClient):
     vid = _seed_long_vacancy()
-    r = api_client.get("/api/v1/vacancies")
+    r = admin_client.get("/api/v1/vacancies")
     assert r.status_code == 200
     body = r.json()
     assert body["total"] == 1
@@ -56,9 +56,9 @@ def test_list_vacancies_returns_preview_without_full_texts(api_client: TestClien
     assert item["preview"].endswith("…")
 
 
-def test_get_vacancy_returns_full_texts(api_client: TestClient):
+def test_get_vacancy_returns_full_texts(admin_client: TestClient):
     vid = _seed_long_vacancy()
-    r = api_client.get(f"/api/v1/vacancies/{vid}")
+    r = admin_client.get(f"/api/v1/vacancies/{vid}")
     assert r.status_code == 200
     body = r.json()
     assert body["id"] == vid
@@ -66,6 +66,6 @@ def test_get_vacancy_returns_full_texts(api_client: TestClient):
     assert body["raw_text"] == _LONG
 
 
-def test_get_vacancy_not_found(api_client: TestClient):
-    r = api_client.get("/api/v1/vacancies/missing-id-xyz")
+def test_get_vacancy_not_found(admin_client: TestClient):
+    r = admin_client.get("/api/v1/vacancies/missing-id-xyz")
     assert r.status_code == 404

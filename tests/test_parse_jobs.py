@@ -153,7 +153,7 @@ def test_parse_job_backend_normalized(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_start_parse_run_inprocess_completes(api_client, monkeypatch):
+def test_start_parse_run_inprocess_completes(admin_client, monkeypatch):
     import time
 
     def fake_run_parse(config, **kwargs):
@@ -177,7 +177,7 @@ def test_start_parse_run_inprocess_completes(api_client, monkeypatch):
     get_settings.cache_clear()
     monkeypatch.setattr("backend.workers.parse_tasks.run_parse", fake_run_parse)
 
-    r = api_client.post("/api/v1/runs", json={})
+    r = admin_client.post("/api/v1/runs", json={})
     assert r.status_code == 202
     body = r.json()
     assert body["status"] == "queued"
@@ -186,7 +186,7 @@ def test_start_parse_run_inprocess_completes(api_client, monkeypatch):
     deadline = time.monotonic() + 10.0
     status = None
     while time.monotonic() < deadline:
-        got = api_client.get(f"/api/v1/runs/{run_id}")
+        got = admin_client.get(f"/api/v1/runs/{run_id}")
         assert got.status_code == 200
         status = got.json()["status"]
         if status in ("completed", "failed", "cancelled"):
@@ -195,14 +195,14 @@ def test_start_parse_run_inprocess_completes(api_client, monkeypatch):
     assert status == "completed"
 
 
-def test_second_post_runs_while_queued_returns_409(api_client, monkeypatch):
+def test_second_post_runs_while_queued_returns_409(admin_client, monkeypatch):
     monkeypatch.setenv("PARSE_JOB_BACKEND", "inprocess")
     get_settings.cache_clear()
     with session_scope() as session:
         pr.create_parse_run(session, config_snapshot={})
         assert pr.has_active_parse_run(session) is True
 
-    r = api_client.post("/api/v1/runs", json={})
+    r = admin_client.post("/api/v1/runs", json={})
     assert r.status_code == 409
     detail = r.json()["detail"]
     assert isinstance(detail, dict)
@@ -211,7 +211,7 @@ def test_second_post_runs_while_queued_returns_409(api_client, monkeypatch):
     assert detail["retryable"] is False
 
 
-def test_enqueue_failure_marks_run_failed(api_client, monkeypatch):
+def test_enqueue_failure_marks_run_failed(admin_client, monkeypatch):
     from backend.config_builder import build_config
     from backend.schemas import RunCreateRequest
     from backend.services import run_service
@@ -255,17 +255,17 @@ def test_enqueue_failure_marks_run_failed(api_client, monkeypatch):
         )
 
     monkeypatch.setattr("backend.workers.parse_tasks.run_parse", fake_run_parse)
-    r2 = api_client.post("/api/v1/runs", json={})
+    r2 = admin_client.post("/api/v1/runs", json={})
     assert r2.status_code == 202
 
 
-def test_cancel_queued_run(api_client):
+def test_cancel_queued_run(admin_client):
     with session_scope() as session:
         rid = pr.create_parse_run(session, config_snapshot={}).id
-    r = api_client.post(f"/api/v1/runs/{rid}/cancel")
+    r = admin_client.post(f"/api/v1/runs/{rid}/cancel")
     assert r.status_code == 200
     assert r.json()["ok"] is True
-    got = api_client.get(f"/api/v1/runs/{rid}")
+    got = admin_client.get(f"/api/v1/runs/{rid}")
     assert got.status_code == 200
     body = got.json()
     assert body["status"] == "cancelled"

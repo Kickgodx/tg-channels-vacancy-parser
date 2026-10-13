@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
 from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
@@ -16,13 +16,49 @@ from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 RunStatus = Literal["pending", "queued", "running", "completed", "cancelled", "failed"]
 
 
-class RunCreateRequest(BaseModel):
+class _RunOverrides(BaseModel):
+    """Whitelist overrides прогона: неизвестное поле → 422, а не молчаливый merge в конфиг.
+
+    Всё, чего здесь нет (``ai.base_url``, лимиты и concurrency, путь к Telethon-сессии),
+    берётся только из серверного ``config.yaml``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RunSearchOverrides(_RunOverrides):
+    date_from: str | None = Field(default=None, max_length=32)
+    date_to: str | None = Field(default=None, max_length=32)
+
+
+class RunFiltersOverrides(_RunOverrides):
+    specializations: list[str] | None = None
+    any_specialization: bool | None = None
+    exclude_keywords: list[str] | None = None
+    countries: list[str] | None = None
+    cities: list[str] | None = None
+    work_formats: list[str] | None = None
+
+
+class RunParserOverrides(_RunOverrides):
+    vacancy_score_threshold: int | None = None
+    vacancy_min_substantive_score: int | None = Field(default=None, ge=0)
+
+
+class RunAiOverrides(_RunOverrides):
+    enabled: bool | None = None
+    # id из llm_models.yaml — проверяется в build_config.
+    model: str | None = Field(default=None, min_length=1)
+    fallback_models: list[str] | None = None
+    use_cache: bool | None = None
+
+
+class RunCreateRequest(_RunOverrides):
     channels: list[str] | None = None
-    search: dict[str, Any] | None = None
-    filters: dict[str, Any] | None = None
-    parser: dict[str, Any] | None = None
-    ai: dict[str, Any] | None = None
-    telegram_session_file: str | None = None
+    search: RunSearchOverrides | None = None
+    filters: RunFiltersOverrides | None = None
+    parser: RunParserOverrides | None = None
+    ai: RunAiOverrides | None = None
 
 
 class RunCreateResponse(BaseModel):

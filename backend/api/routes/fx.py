@@ -8,13 +8,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_db, verify_api_key
+from backend.api.deps import get_current_user, get_db, require_admin, verify_api_key
 from backend.db import fx_repository as fx_repo
 from backend.fx.backfill import backfill_vacancies_salary_rub
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 
-router = APIRouter(prefix="/fx", tags=["fx"], dependencies=[Depends(verify_api_key)])
+# Курсы читает любой залогиненный пользователь; обновление и пересчёт — только admin.
+router = APIRouter(
+    prefix="/fx",
+    tags=["fx"],
+    dependencies=[Depends(verify_api_key), Depends(get_current_user)],
+)
 
 
 class FxRateItem(BaseModel):
@@ -57,7 +62,7 @@ def list_fx_rates(db: Session = Depends(get_db)) -> FxRatesResponse:
     )
 
 
-@router.post("/refresh", response_model=FxRefreshResponse)
+@router.post("/refresh", response_model=FxRefreshResponse, dependencies=[Depends(require_admin)])
 def refresh_fx_rates(db: Session = Depends(get_db)) -> FxRefreshResponse:
     """
     Загрузить курсы из API ЦБ, сохранить в ``exchange_rates``,
@@ -77,7 +82,11 @@ def refresh_fx_rates(db: Session = Depends(get_db)) -> FxRefreshResponse:
     )
 
 
-@router.post("/recalculate-rub", response_model=FxRecalculateRubResponse)
+@router.post(
+    "/recalculate-rub",
+    response_model=FxRecalculateRubResponse,
+    dependencies=[Depends(require_admin)],
+)
 def recalculate_salary_rub(db: Session = Depends(get_db)) -> FxRecalculateRubResponse:
     """
     Пересчитать ``detected_salary_avg_rub`` по последнему курсу в БД, без запроса к ЦБ.

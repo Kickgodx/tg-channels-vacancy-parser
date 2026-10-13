@@ -69,14 +69,10 @@ export default function ParseForm({ onSubmit, disabled, isSubmitting }: Props) {
             placeholder="qa_jobs&#10;python_django_jobs"
           />
         </label>
-        <label className="field">
-          Файл сессии Telethon
-          <input
-            value={form.telethonSession}
-            onChange={(e) => patch({ telethonSession: e.target.value })}
-          />
-        </label>
-        <p className="caption">Нужны TELEGRAM_API_ID / TELEGRAM_API_HASH в .env на backend.</p>
+        <p className="caption">
+          Сессия Telethon: <code>{d.telegram.telethon_session_file}</code> — задаётся в config.yaml на
+          backend. Нужны TELEGRAM_API_ID / TELEGRAM_API_HASH в .env.
+        </p>
       </section>
 
       <section>
