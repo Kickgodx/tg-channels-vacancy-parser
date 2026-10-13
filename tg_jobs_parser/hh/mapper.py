@@ -8,6 +8,7 @@ import re
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from tg_jobs_parser.hh.grades import grade_from_experience
 from tg_jobs_parser.hh.models import (
     Contacts,
     Salary,
@@ -179,7 +180,7 @@ def detail_to_vacancy(
         raw_text=detail.description or body,
         cleaned_text=body,
         detected_specializations=_specializations(detail),
-        detected_grade="unknown",
+        detected_grade=grade_from_experience(detail.experience),
         detected_salary_min=lo,
         detected_salary_max=hi,
         detected_salary_avg=avg,
@@ -234,7 +235,7 @@ def short_to_vacancy(
         raw_text=body,
         cleaned_text=body,
         detected_specializations=_specializations(short),
-        detected_grade="unknown",
+        detected_grade=grade_from_experience(short.experience),
         detected_salary_min=lo,
         detected_salary_max=hi,
         detected_salary_avg=avg,

@@ -149,11 +149,15 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 ### Аналитика
 
 Вкладка **Аналитика** на странице вакансий: агрегация в SQL, без выгрузки
-строк, с теми же фильтрами, что и список.
+строк, с теми же фильтрами, что и список. Запросы аналитики всегда идут с
+`include_archived=true` (активные **и** архивные), чтобы история по HH
+не обрезалась TTL.
 
 - `GET /analytics/salaries` — медиана/квартили/распределение
-  `detected_salary_avg_rub` по грейдам, специализациям и формату работы +
-  помесячная динамика.
+  `detected_salary_avg_rub` по грейдам, специализациям и формату работы;
+  помесячная и **погодовая** динамика; разрезы год×грейд / год×формат и
+  месяц×грейд / месяц×формат (для drill-down).
+- UI: режим «Все годы (YoY)» или выбор года → месяц к месяцу.
 - `GET /analytics/sources` — качество канала: число вакансий, доля с
   зарплатой, средний `vacancy_score`, доля уникальных.
 - `GET /analytics/companies` — топ компаний.
@@ -301,7 +305,11 @@ JWT обязателен для `/auth/me`, `/filters`, `/resumes` (включа
 
 Вакансии с HH (`source_channel = "hh"`) появляются после admin-sync
 (`/hh` или `POST /hh/sync`): поля берутся из API без LLM, дедуп мультигорода
-как в MVP hhparser, TTL вакансий — общий `retention.vacancy_ttl_days`.
+как в MVP hhparser, TTL вакансий — общий `retention.vacancy_ttl_days`
+(soft-archive: строки остаются в БД для исторических метрик).
+Грейд HH мапится из `experience.id`: `noExperience`→`intern`,
+`between1And3`→`junior`, `between3And6`→`middle`, `moreThan6`→`senior+`
+(при старте/hourly cleanup — идемпотентный бэкфилл по `required_experience`).
 Роли HH (`Тестировщик`, `Программист, разработчик`) пишутся в
 `detected_specializations` как есть и дополнительно как `QA` /
 `Software Engineer` — оба варианта доступны в фильтрах UI.
@@ -445,8 +453,9 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 - **`vacancy_ttl_days`** (по умолчанию 40) — через сколько дней вакансия
   архивируется (soft delete, `archived_at`): по `post_date`, а без неё — по
   `parsed_at`. `0` — не архивировать. Проверка идёт при старте backend, раз в
-  час фоном и после каждого прогона. Архивные строки не попадают в списки и
-  агрегаты, пока не передать `include_archived=true`.
+  час фоном и после каждого прогона. Архивные строки не попадают в списки,
+  пока не передать `include_archived=true`. Вкладка **Аналитика** всегда
+  включает архив (активные + архивные), в т.ч. для YoY/MoM по каналу `hh`.
 
 ### HH.ru (`hh`)
 

@@ -178,6 +178,20 @@ class SalaryMonthlyBucket(BaseModel):
     median: float | None = None
 
 
+class SalaryPeriodGroupBucket(BaseModel):
+    """Квантили зарплаты внутри пары (период × группа): год/месяц × грейд|формат."""
+
+    period: str
+    group: str
+    count: int
+    mean: float | None = None
+    median: float | None = None
+    min: float | None = None
+    q1: float | None = None
+    q3: float | None = None
+    max: float | None = None
+
+
 class SalaryDistributionBucket(BaseModel):
     range: str
     count: int
@@ -188,6 +202,11 @@ class SalaryAnalytics(BaseModel):
     by_work_format: list[SalaryGroupStats] = Field(default_factory=list)
     by_specialization: list[SalaryGroupStats] = Field(default_factory=list)
     monthly: list[SalaryMonthlyBucket] = Field(default_factory=list)
+    yearly: list[SalaryMonthlyBucket] = Field(default_factory=list)
+    by_grade_yearly: list[SalaryPeriodGroupBucket] = Field(default_factory=list)
+    by_work_format_yearly: list[SalaryPeriodGroupBucket] = Field(default_factory=list)
+    by_grade_monthly: list[SalaryPeriodGroupBucket] = Field(default_factory=list)
+    by_work_format_monthly: list[SalaryPeriodGroupBucket] = Field(default_factory=list)
     distribution: list[SalaryDistributionBucket] = Field(default_factory=list)
     salary_display: SalaryDisplayMeta | None = None
 

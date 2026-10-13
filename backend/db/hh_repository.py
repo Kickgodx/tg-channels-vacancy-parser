@@ -21,8 +21,10 @@ from backend.observability import record_hh_listings_purged, record_vacancy_upse
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import FxConfig
+from tg_jobs_parser.extraction.grade_extractor import UNKNOWN_GRADE
 from tg_jobs_parser.hh.dedup import vacancy_key_hex
-from tg_jobs_parser.hh.mapper import hh_source_post_key, parse_hh_datetime
+from tg_jobs_parser.hh.grades import grade_from_experience_name
+from tg_jobs_parser.hh.mapper import HH_CHANNEL, hh_source_post_key, parse_hh_datetime
 from tg_jobs_parser.hh.models import VacancyShort
 from tg_jobs_parser.models.vacancy import Vacancy
 
@@ -189,6 +191,29 @@ def purge_expired_listings(
         _LOG.info("HH listings purged: %s (ttl=%s d)", deleted, ttl)
         record_hh_listings_purged(deleted)
     return deleted
+
+
+def backfill_hh_grades_from_experience(session: Session) -> int:
+    """Идемпотентно проставить detected_grade HH-вакансиям по required_experience."""
+    rows = session.scalars(
+        select(VacancyRow).where(
+            VacancyRow.source_channel == HH_CHANNEL,
+            VacancyRow.detected_grade == UNKNOWN_GRADE,
+            VacancyRow.required_experience.is_not(None),
+        )
+    ).all()
+    updated = 0
+    for row in rows:
+        grade = grade_from_experience_name(row.required_experience)
+        if grade == UNKNOWN_GRADE:
+            continue
+        row.detected_grade = grade
+        updated += 1
+    if updated:
+        session.flush()
+        invalidate_vacancy_count_cache()
+        _LOG.info("HH grades backfill: обновлено %s вакансий", updated)
+    return updated
 
 
 def listing_counts(session: Session) -> HhListingCounts:

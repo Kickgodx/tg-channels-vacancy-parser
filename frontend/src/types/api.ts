@@ -151,6 +151,18 @@ export interface SalaryMonthlyBucket {
   median?: number | null;
 }
 
+export interface SalaryPeriodGroupBucket {
+  period: string;
+  group: string;
+  count: number;
+  mean?: number | null;
+  median?: number | null;
+  min?: number | null;
+  q1?: number | null;
+  q3?: number | null;
+  max?: number | null;
+}
+
 export interface SalaryDistributionBucket {
   range: string;
   count: number;
@@ -161,6 +173,11 @@ export interface SalaryAnalytics {
   by_work_format: SalaryGroupStats[];
   by_specialization: SalaryGroupStats[];
   monthly: SalaryMonthlyBucket[];
+  yearly: SalaryMonthlyBucket[];
+  by_grade_yearly: SalaryPeriodGroupBucket[];
+  by_work_format_yearly: SalaryPeriodGroupBucket[];
+  by_grade_monthly: SalaryPeriodGroupBucket[];
+  by_work_format_monthly: SalaryPeriodGroupBucket[];
   distribution: SalaryDistributionBucket[];
   salary_display?: { display_currency: string; rates_as_of?: string | null; rates_source: string } | null;
 }

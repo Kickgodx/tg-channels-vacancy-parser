@@ -38,6 +38,7 @@ def _row(
     is_duplicate: bool = False,
     score: int = 10,
     post_date: datetime | None = None,
+    archived_at: datetime | None = None,
 ) -> VacancyRow:
     return VacancyRow(
         id=f"id-{idx}",
@@ -53,6 +54,7 @@ def _row(
         company=company,
         is_duplicate=is_duplicate,
         vacancy_score=score,
+        archived_at=archived_at,
     )
 
 
@@ -156,3 +158,69 @@ def test_analytics_respects_filters(db_session):
     res = analytics.salary_analytics(db_session, VacancyQuery(source_channel="a"))
     assert sum(r.count for r in res.by_grade) == 1
     assert res.by_grade[0].median == 100_000
+
+
+def test_salary_analytics_yearly_and_period_groups(db_session):
+    db_session.add_all(
+        [
+            _row(1, grade="junior", salary_rub=100_000, work_format="remote", post_date=datetime(2024, 3, 1, tzinfo=UTC)),
+            _row(2, grade="junior", salary_rub=200_000, work_format="office", post_date=datetime(2024, 8, 1, tzinfo=UTC)),
+            _row(3, grade="middle", salary_rub=300_000, work_format="remote", post_date=datetime(2025, 1, 15, tzinfo=UTC)),
+            _row(4, grade="middle", salary_rub=400_000, work_format="remote", post_date=datetime(2025, 6, 1, tzinfo=UTC)),
+        ]
+    )
+    db_session.commit()
+
+    res = analytics.salary_analytics(db_session, VacancyQuery())
+
+    yearly = {b.period: b for b in res.yearly}
+    assert set(yearly) == {"2024", "2025"}
+    assert yearly["2024"].count == 2
+    assert yearly["2024"].median == 150_000
+    assert yearly["2025"].count == 2
+    assert yearly["2025"].median == 350_000
+
+    grade_y = {(b.period, b.group): b for b in res.by_grade_yearly}
+    assert grade_y[("2024", "junior")].count == 2
+    assert grade_y[("2024", "junior")].median == 150_000
+    assert grade_y[("2025", "middle")].count == 2
+
+    wf_y = {(b.period, b.group): b for b in res.by_work_format_yearly}
+    assert wf_y[("2024", "remote")].count == 1
+    assert wf_y[("2024", "office")].count == 1
+
+    # Drill-down: один год → monthly + by_*_monthly
+    y2025 = analytics.salary_analytics(
+        db_session,
+        VacancyQuery(date_from=datetime(2025, 1, 1, tzinfo=UTC), date_to=datetime(2025, 12, 31, tzinfo=UTC)),
+    )
+    assert [b.period for b in y2025.monthly] == ["2025-01", "2025-06"]
+    assert {(b.period, b.group) for b in y2025.by_grade_monthly} == {("2025-01", "middle"), ("2025-06", "middle")}
+    assert all(b.period.startswith("2025") for b in y2025.by_work_format_monthly)
+
+
+def test_salary_analytics_include_archived_active_and_archived(db_session):
+    now = datetime.now(UTC)
+    db_session.add_all(
+        [
+            _row(1, channel="hh", salary_rub=100_000, post_date=datetime(2024, 5, 1, tzinfo=UTC)),
+            _row(
+                2,
+                channel="hh",
+                salary_rub=300_000,
+                post_date=datetime(2024, 6, 1, tzinfo=UTC),
+                archived_at=now,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    active_only = analytics.salary_analytics(db_session, VacancyQuery(source_channel="hh"))
+    assert sum(b.count for b in active_only.yearly) == 1
+
+    both = analytics.salary_analytics(
+        db_session,
+        VacancyQuery(source_channel="hh", include_archived=True),
+    )
+    assert sum(b.count for b in both.yearly) == 2
+    assert both.yearly[0].median == 200_000

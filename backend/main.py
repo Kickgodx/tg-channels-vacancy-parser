@@ -66,11 +66,12 @@ def _sync_fx_on_startup() -> None:
 
 
 def _cleanup_expired_vacancies() -> None:
-    """Применить TTL вакансий (архивацию) и кэша HH listings."""
+    """Применить TTL вакансий (архивацию), кэш HH listings и бэкфилл грейдов HH."""
     try:
         with session_scope() as session:
             repo.archive_expired_vacancies(session)
             hh_repo.purge_expired_listings(session)
+            hh_repo.backfill_hh_grades_from_experience(session)
     except Exception as e:
         logging.getLogger(__name__).warning("TTL вакансий/HH listings не применён: %s", e)
 

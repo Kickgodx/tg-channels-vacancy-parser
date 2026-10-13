@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tg_jobs_parser.hh.grades import grade_from_experience, grade_from_experience_name
 from tg_jobs_parser.hh.mapper import (
     clean_hh_url,
     detail_to_vacancy,
@@ -11,6 +12,25 @@ from tg_jobs_parser.hh.mapper import (
     stable_vacancy_id,
 )
 from tg_jobs_parser.hh.models import IdName, VacancyDetail, VacancyShort
+
+
+def test_grade_from_experience_ids():
+    assert grade_from_experience(IdName(id="noExperience", name="Нет опыта")) == "intern"
+    assert grade_from_experience(IdName(id="between1And3", name="От 1 года до 3 лет")) == "junior"
+    assert grade_from_experience(IdName(id="between3And6", name="От 3 до 6 лет")) == "middle"
+    assert grade_from_experience(IdName(id="moreThan6", name="Более 6 лет")) == "senior+"
+    assert grade_from_experience(None) == "unknown"
+    assert grade_from_experience(IdName(id="weird")) == "unknown"
+
+
+def test_grade_from_experience_name_backfill():
+    assert grade_from_experience_name("Нет опыта") == "intern"
+    assert grade_from_experience_name("От 1 года до 3 лет") == "junior"
+    assert grade_from_experience_name("От 3 до 6 лет") == "middle"
+    assert grade_from_experience_name("Более 6 лет") == "senior+"
+    assert grade_from_experience_name("1–3 года") == "junior"
+    assert grade_from_experience_name(None) == "unknown"
+    assert grade_from_experience_name("что-то ещё") == "unknown"
 
 
 def test_html_to_text_strips_tags():
@@ -61,6 +81,43 @@ def test_detail_to_vacancy_fields():
     assert "pytest" in v.cleaned_text.lower() or "AQA" in v.cleaned_text
     assert "Тестировщик" in v.detected_specializations
     assert "QA" in v.detected_specializations
+    assert v.detected_grade == "junior"
+    assert v.required_experience == "1–3 года"
+
+
+def test_detail_to_vacancy_all_experience_grades():
+    cases = (
+        ("noExperience", "Нет опыта", "intern"),
+        ("between1And3", "От 1 года до 3 лет", "junior"),
+        ("between3And6", "От 3 до 6 лет", "middle"),
+        ("moreThan6", "Более 6 лет", "senior+"),
+    )
+    for exp_id, exp_name, grade in cases:
+        detail = VacancyDetail.model_validate(
+            {
+                "id": exp_id,
+                "name": "Dev",
+                "description": "<p>x</p>",
+                "alternate_url": f"https://hh.ru/vacancy/{exp_id}",
+                "published_at": "2026-10-01T12:00:00+0300",
+                "experience": {"id": exp_id, "name": exp_name},
+            }
+        )
+        v = detail_to_vacancy(detail)
+        assert v.detected_grade == grade
+        assert v.required_experience == exp_name
+
+
+def test_short_to_vacancy_experience_grade():
+    short = VacancyShort.model_validate(
+        {
+            "id": "8",
+            "name": "SDET",
+            "alternate_url": "https://hh.ru/vacancy/8",
+            "experience": {"id": "moreThan6", "name": "Более 6 лет"},
+        }
+    )
+    assert short_to_vacancy(short).detected_grade == "senior+"
 
 
 def test_detail_to_vacancy_developer_role_dual_tag():
