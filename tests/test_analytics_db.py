@@ -163,10 +163,18 @@ def test_analytics_respects_filters(db_session):
 def test_salary_analytics_yearly_and_period_groups(db_session):
     db_session.add_all(
         [
-            _row(1, grade="junior", salary_rub=100_000, work_format="remote", post_date=datetime(2024, 3, 1, tzinfo=UTC)),
-            _row(2, grade="junior", salary_rub=200_000, work_format="office", post_date=datetime(2024, 8, 1, tzinfo=UTC)),
-            _row(3, grade="middle", salary_rub=300_000, work_format="remote", post_date=datetime(2025, 1, 15, tzinfo=UTC)),
-            _row(4, grade="middle", salary_rub=400_000, work_format="remote", post_date=datetime(2025, 6, 1, tzinfo=UTC)),
+            _row(
+                1, grade="junior", salary_rub=100_000, work_format="remote", post_date=datetime(2024, 3, 1, tzinfo=UTC)
+            ),
+            _row(
+                2, grade="junior", salary_rub=200_000, work_format="office", post_date=datetime(2024, 8, 1, tzinfo=UTC)
+            ),
+            _row(
+                3, grade="middle", salary_rub=300_000, work_format="remote", post_date=datetime(2025, 1, 15, tzinfo=UTC)
+            ),
+            _row(
+                4, grade="middle", salary_rub=400_000, work_format="remote", post_date=datetime(2025, 6, 1, tzinfo=UTC)
+            ),
         ]
     )
     db_session.commit()

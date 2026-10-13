@@ -1,0 +1,6 @@
+# Окончания строк — LF во всех текстовых файлах, на любой ОС (как в .editorconfig
+# и ruff `line-ending = "lf"`). Без этого файла решает core.autocrlf машины: на
+# Windows с autocrlf=true каждый checkout / merge / stash переписывает затронутые
+# файлы в CRLF, и `ruff format --check` показывает diff на весь файл.
+# Бинарные файлы git определяет сам (text=auto) и не трогает.
+* text=auto eol=lf
