@@ -361,18 +361,10 @@ def salary_analytics(session: Session, query: VacancyQuery) -> SalaryAnalytics:
         by_specialization=_salary_by_spec(session, query, dialect=dialect),
         monthly=_salary_period_buckets(session, query, dialect=dialect, grain="month"),
         yearly=_salary_period_buckets(session, query, dialect=dialect, grain="year"),
-        by_grade_yearly=_salary_period_group(
-            session, query, grade_expr, dialect=dialect, grain="year"
-        ),
-        by_work_format_yearly=_salary_period_group(
-            session, query, wf_expr, dialect=dialect, grain="year"
-        ),
-        by_grade_monthly=_salary_period_group(
-            session, query, grade_expr, dialect=dialect, grain="month"
-        ),
-        by_work_format_monthly=_salary_period_group(
-            session, query, wf_expr, dialect=dialect, grain="month"
-        ),
+        by_grade_yearly=_salary_period_group(session, query, grade_expr, dialect=dialect, grain="year"),
+        by_work_format_yearly=_salary_period_group(session, query, wf_expr, dialect=dialect, grain="year"),
+        by_grade_monthly=_salary_period_group(session, query, grade_expr, dialect=dialect, grain="month"),
+        by_work_format_monthly=_salary_period_group(session, query, wf_expr, dialect=dialect, grain="month"),
         distribution=_salary_distribution(session, query, dialect=dialect),
         salary_display=salary_display,
     )

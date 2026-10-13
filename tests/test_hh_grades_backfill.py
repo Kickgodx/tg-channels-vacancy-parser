@@ -67,10 +67,7 @@ def test_backfill_hh_grades_from_experience_name():
         session.commit()
         assert n == 4
 
-        rows = {
-            r.source_post_key: r.detected_grade
-            for r in session.scalars(select(VacancyRow)).all()
-        }
+        rows = {r.source_post_key: r.detected_grade for r in session.scalars(select(VacancyRow)).all()}
         assert rows[hh_source_post_key("1")] == "intern"
         assert rows[hh_source_post_key("2")] == "junior"
         assert rows[hh_source_post_key("3")] == "middle"
