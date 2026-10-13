@@ -60,5 +60,8 @@ constraint: SQLite (тесты) не умеет `ALTER TABLE ADD COLUMN` с FK.
 - Реализованные фичи описываются в `README.md`; из `ROADMAP.md` выполненный
   пункт удаляется (план — только про нереализованное). Настройки — `config.md`.
 - Ветки: `feature/<name>` от `master`, мерж через `--no-ff`.
+- Окончания строк — LF везде, закреплено в `.gitattributes` (`* text=auto eol=lf`):
+  `core.autocrlf` машины на checkout / merge / stash больше не влияет. CRLF в
+  рабочей копии — признак того, что файл записан мимо git (см. про PowerShell выше).
 - Спеки и планы (`docs/superpowers/`, `docs/specs/`, `.superpowers/`) — только
   локально, **не коммитить**. В git они в `.gitignore`.
