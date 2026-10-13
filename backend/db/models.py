@@ -60,6 +60,8 @@ class ParseRunRow(Base):
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Сколько раз прогон брали в работу (claim); лимит — PARSE_JOB_MAX_ATTEMPTS.
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
 class ExchangeRateRow(Base):
@@ -265,6 +267,8 @@ class LlmJobRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Сколько раз джобу брали в работу (claim); лимит — LLM_JOB_MAX_ATTEMPTS.
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
 class IdempotencyKeyRow(Base):

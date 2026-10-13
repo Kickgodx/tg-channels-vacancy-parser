@@ -82,6 +82,44 @@ def _vacancy_retention_worker(stop_event: threading.Event) -> None:
         _cleanup_expired_vacancies()
 
 
+def _start_inprocess_job_recovery() -> list[threading.Event]:
+    """Поднять зависшие джобы и запустить периодический recover для backend'ов ``inprocess``.
+
+    В режиме ``rq`` это делают воркеры. В ``inprocess`` воркеров нет: без recover
+    в API прогон, оборванный рестартом, навсегда остаётся ``running`` (вечный
+    409 CONFLICT_ACTIVE_RUN), а LLM-джобы съедают лимит пользователя.
+    """
+    from backend.workers.recover import recover_stuck_llm_jobs
+    from backend.workers.recover_loop import start_periodic_recover
+    from backend.workers.recover_parse import recover_stuck_parse_runs
+
+    log = logging.getLogger(__name__)
+    settings = get_settings()
+    stops: list[threading.Event] = []
+    for job_backend, recover_fn, name in (
+        (settings.parse_job_backend_normalized, recover_stuck_parse_runs, "parse-recover-loop"),
+        (settings.llm_job_backend_normalized, recover_stuck_llm_jobs, "llm-recover-loop"),
+    ):
+        if job_backend != "inprocess":
+            continue
+        try:
+            # Потоки прошлого процесса не пережили рестарт — queued поднимаем сразу.
+            # running ждёт истечения lease: его подберёт периодический цикл.
+            n = recover_fn(requeue_all_queued=True)
+            if n:
+                log.info("%s: recover on start, requeued=%s", name, n)
+        except Exception as e:
+            log.warning("%s: recover on start failed: %s", name, e)
+        stops.append(
+            start_periodic_recover(
+                recover_fn,
+                interval_seconds=settings.job_recover_interval_seconds,
+                name=name,
+            )
+        )
+    return stops
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     log = logging.getLogger(__name__)
@@ -112,9 +150,12 @@ async def lifespan(_app: FastAPI):
         daemon=True,
     )
     retention_thread.start()
+    recover_stops = _start_inprocess_job_recovery()
     try:
         yield
     finally:
+        for stop in recover_stops:
+            stop.set()
         retention_stop.set()
         retention_thread.join(timeout=1)
         from backend.services.interactive_llm import reset_interactive_client

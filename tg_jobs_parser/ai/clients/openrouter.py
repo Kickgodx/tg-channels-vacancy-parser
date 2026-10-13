@@ -125,6 +125,20 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "429" in msg or "rate limit" in msg
 
 
+def _is_transient_error(exc: Exception) -> bool:
+    """Сбой, который имеет смысл повторить: 5xx/408/409, таймаут, обрыв соединения."""
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status in (408, 409) or status >= 500
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    try:
+        from openai import APIConnectionError  # APITimeoutError — его подкласс
+    except ImportError:
+        return False
+    return isinstance(exc, APIConnectionError)
+
+
 class OpenRouterClient:
     """OpenRouter (OpenAI-compatible). Клиент — ``openai`` SDK; ``poetry install --extras ai``."""
 
@@ -188,17 +202,22 @@ class OpenRouterClient:
         if self._rate_limiter.llm_disabled:
             raise LlmQuotaExhausted(self._rate_limiter.llm_disabled_reason or "LLM отключён")
 
-        attempts = self._rate_limiter.max_retries + 1
-        last_err: Exception | None = None
-        for attempt in range(attempts):
+        # Счётчики раздельные: 429 повторяется по max_retries_on_429, транзиентные сбои —
+        # по max_retries_on_error.
+        rate_limit_retries = 0
+        transient_retries = 0
+        while True:
             try:
                 self._rate_limiter.acquire()
                 return self._get_sdk().chat.completions.create(**kwargs)
             except LlmQuotaExhausted:
                 raise
             except Exception as e:
-                last_err = e
                 if not _is_rate_limit_error(e):
+                    if _is_transient_error(e) and transient_retries < self._ai.max_retries_on_error:
+                        transient_retries += 1
+                        self._rate_limiter.wait_after_transient_error(transient_retries, e)
+                        continue
                     raise RuntimeError(f"OpenRouter API: {e}") from e
 
                 headers = extract_rate_limit_headers(e)
@@ -211,7 +230,8 @@ class OpenRouterClient:
                     except LlmQuotaExhausted:
                         raise
 
-                if attempt < attempts - 1 and not self._rate_limiter.llm_disabled:
+                if rate_limit_retries < self._rate_limiter.max_retries and not self._rate_limiter.llm_disabled:
+                    rate_limit_retries += 1
                     try:
                         self._rate_limiter.wait_after_429(e)
                     except LlmQuotaExhausted:
@@ -225,7 +245,6 @@ class OpenRouterClient:
                         raise
 
                 raise RuntimeError(f"OpenRouter API: {e}") from e
-        raise RuntimeError(f"OpenRouter API: {last_err}")
 
     def _call_llm(
         self,

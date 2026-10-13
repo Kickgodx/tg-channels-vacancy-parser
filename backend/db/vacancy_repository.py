@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
-from sqlalchemy import and_, func, literal_column, or_, select, update
+from sqlalchemy import and_, case, func, literal_column, null, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, defer
 
@@ -142,7 +142,10 @@ def upsert_vacancies(
     """
     Вставка уникальных вакансий по ``id`` (content hash).
 
-    При совпадении текста обновляются только ``last_parse_run_id`` и ``updated_at``.
+    При совпадении текста обновляются ``last_parse_run_id``, ``updated_at``, RUB-зарплата
+    и AI-метаданные; извлечённые поля не трогаются. Если пост новее сохранённого
+    (канал повторно опубликовал тот же текст), ``post_date`` сдвигается вперёд, а
+    вакансия возвращается из архива — иначе TTL по первой публикации прятал бы её навсегда.
     ``parse_run_id=None`` — ручной импорт без прогона: существующая привязка
     к прогону при update не затирается.
     """
@@ -169,12 +172,20 @@ def upsert_vacancies(
             data["parsed_at"] = now
         stmt = insert(VacancyRow).values(**data)
         if is_existing:
+            # CASE вместо GREATEST: в SQLite (тесты) его нет, а max() там не игнорирует NULL.
+            reposted_later = stmt.excluded.post_date > VacancyRow.post_date
             conflict_set = {
                 "updated_at": now,
                 "detected_salary_avg_rub": data["detected_salary_avg_rub"],
                 "ai_notes": data["ai_notes"],
                 "ai_confidence": data["ai_confidence"],
                 "extraction_source": data["extraction_source"],
+                "post_date": case(
+                    (VacancyRow.post_date.is_(None), stmt.excluded.post_date),
+                    (reposted_later, stmt.excluded.post_date),
+                    else_=VacancyRow.post_date,
+                ),
+                "archived_at": case((reposted_later, null()), else_=VacancyRow.archived_at),
             }
             if parse_run_id is not None:
                 conflict_set["last_parse_run_id"] = parse_run_id

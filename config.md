@@ -82,10 +82,12 @@
 | **`interactive_concurrency`** | Inprocess: размер ThreadPool; при RQ — ориентир для `--scale llm-worker`. |
 | **`interactive_per_user_limit`** | Сколько LLM-джоб (`queued`+`running`) одновременно на одного пользователя (по умолчанию 2); сверх лимита — HTTP 429. |
 | **`requests_per_minute`** | Целевой темп к OpenRouter; для interactive LLM — process-wide limiter (per worker при RQ). |
+| **`max_retries_on_error`** | Сколько раз повторить вызов при транзиентном сбое: 5xx, 408/409, таймаут, обрыв соединения (по умолчанию 2, `0` — без повторов). Пауза 2/4/8… с, не дольше 30 с. Отдельно от `max_retries_on_429`. |
+| **`mode`** | `assist` — при отключении LLM по лимиту остаток постов разбирается rules. `primary` — остаток не разбирается, прогон завершается `failed` с причиной в `error_message` (собранные вакансии сохраняются). |
 
-Env (не yaml): `LLM_JOB_BACKEND=inprocess|rq`, `REDIS_URL`, `LLM_WORKER_METRICS_PORT`, `LLM_JOB_STUCK_MINUTES`, `LLM_JOB_LEASE_SECONDS`, `LLM_RQ_JOB_TIMEOUT_SECONDS`, `JOB_RECOVER_INTERVAL_SECONDS` — см. `.env.example`.
+Env (не yaml): `LLM_JOB_BACKEND=inprocess|rq`, `REDIS_URL`, `LLM_WORKER_METRICS_PORT`, `LLM_JOB_STUCK_MINUTES`, `LLM_JOB_LEASE_SECONDS`, `LLM_RQ_JOB_TIMEOUT_SECONDS`, `LLM_JOB_MAX_ATTEMPTS`, `JOB_RECOVER_INTERVAL_SECONDS` — см. `.env.example`.
 
-Прогоны парсинга (не yaml): `PARSE_JOB_BACKEND=inprocess|rq`, `PARSE_JOB_STUCK_MINUTES`, `PARSE_JOB_LEASE_SECONDS`, `PARSE_RQ_JOB_TIMEOUT_SECONDS`, `PARSE_WORKER_METRICS_PORT` — в Docker Compose по умолчанию `rq` + сервис `parse-worker`; см. `.env.example` и README.
+Прогоны парсинга (не yaml): `PARSE_JOB_BACKEND=inprocess|rq`, `PARSE_JOB_STUCK_MINUTES`, `PARSE_JOB_LEASE_SECONDS`, `PARSE_JOB_MAX_ATTEMPTS`, `PARSE_RQ_JOB_TIMEOUT_SECONDS`, `PARSE_WORKER_METRICS_PORT` — в Docker Compose по умолчанию `rq` + сервис `parse-worker`; см. `.env.example` и README.
 
 **Идемпотентность мутаций:** заголовок `Idempotency-Key` на `POST /runs`, `POST /hh/sync`, `POST /vacancies/import` (TTL 24ч). Повтор с тем же ключом возвращает сохранённый ответ.
 
@@ -101,7 +103,7 @@ Env (не yaml): `LLM_JOB_BACKEND=inprocess|rq`, `REDIS_URL`, `LLM_WORKER_METRIC
 
 | Поле | Назначение |
 |------|------------|
-| **`vacancy_ttl_days`** | Через сколько дней архивировать вакансию (soft delete, `archived_at`): по `post_date`, а если его нет — по `parsed_at`. `0` — не архивировать. Проверка идёт при старте backend, раз в час фоном и после каждого прогона. |
+| **`vacancy_ttl_days`** | Через сколько дней архивировать вакансию (soft delete, `archived_at`): по `post_date`, а если его нет — по `parsed_at`. `0` — не архивировать. Проверка идёт при старте backend, раз в час фоном и после каждого прогона. Повторная публикация того же текста сдвигает `post_date` вперёд и возвращает вакансию из архива. |
 
 ---
 

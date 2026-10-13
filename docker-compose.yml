@@ -30,11 +30,25 @@ x-app-common: &app-common
   restart: unless-stopped
   env_file:
     - .env
-  depends_on:
+  depends_on: &infra-ready
     postgres:
       condition: service_healthy
     redis:
       condition: service_healthy
+
+# Воркеры ждут healthy backend: миграции (alembic upgrade head) применяет он.
+x-worker-depends-on: &worker-depends-on
+  <<: *infra-ready
+  backend:
+    condition: service_healthy
+
+# В образе backend нет curl/wget — проверяем через python. Воркеры отвечают
+# на порту метрик: это «процесс жив», а не «джобы выполняются».
+x-worker-healthcheck: &worker-healthcheck
+  interval: 15s
+  timeout: 5s
+  retries: 4
+  start_period: 30s
 
 services:
   postgres:
@@ -59,7 +73,7 @@ services:
     image: redis:7-alpine
     logging: *default-logging
     # Host 6379 often falls into Windows Hyper-V/WinNAT excluded ranges (≈6251–6450).
-    # Containers still use redis:6379; localhost clients → 16379.
+    # Containers still use redis:6379; host clients → 127.0.0.1:16379.
     restart: unless-stopped
     ports:
       - "${INFRA_BIND_ADDR:-127.0.0.1}:16379:6379"
@@ -84,6 +98,20 @@ services:
       - ./llm_models.yaml:/app/llm_models.yaml:ro
       - ./sessions:/app/sessions
       - ./output:/app/output
+    # /health отвечает 200 и при недоступной БД (status=degraded) — смотрим на поле.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import json, sys, urllib.request
+          body = json.load(urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health", timeout=4))
+          sys.exit(0 if body.get("status") == "ok" else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
 
   # Параллелизм LLM = число реплик: docker compose up --scale llm-worker=4
   # Метрики :9101 только в Docker-сети (Prometheus dns_sd → все реплики);
@@ -92,6 +120,7 @@ services:
   llm-worker:
     <<: *app-common
     command: ["tg-jobs-llm-worker"]
+    depends_on: *worker-depends-on
     environment:
       <<: *app-env
       LLM_JOB_BACKEND: rq
@@ -100,12 +129,16 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
+    healthcheck:
+      <<: *worker-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/metrics', timeout=4)"]
 
   # Parse: один active run на БД; concurrency=1 (не scale). sessions/ — Telethon.
   # Метрики :9102 в Docker-сети (Prometheus dns_sd).
   parse-worker:
     <<: *app-common
     command: ["tg-jobs-parse-worker"]
+    depends_on: *worker-depends-on
     environment:
       <<: *app-env
       PARSE_JOB_BACKEND: rq
@@ -115,6 +148,9 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
       - ./sessions:/app/sessions
+    healthcheck:
+      <<: *worker-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9102/metrics', timeout=4)"]
 
   frontend:
     build:
@@ -128,6 +164,12 @@ services:
       VITE_API_BASE_URL: http://localhost:9000/api/v1
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5173/"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
 
   prometheus:
     image: prom/prometheus:v3.2.1

@@ -25,3 +25,10 @@ class ParseResult(BaseModel):
     duplicates: list[Vacancy] = Field(default_factory=list)
     metrics: MetricsSummary = Field(default_factory=MetricsSummary)
     parsed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    incomplete_reason: str | None = Field(
+        default=None,
+        description=(
+            "Прогон дошёл до конца, но часть постов осталась неразобранной (LLM отключён "
+            "в режиме primary). Собранные вакансии валидны; статус прогона — не completed."
+        ),
+    )

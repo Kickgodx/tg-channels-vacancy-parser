@@ -82,6 +82,7 @@ def claim_llm_job(
             started_at=now,
             lease_owner=owner,
             lease_until=_lease_deadline(now),
+            attempts=LlmJobRow.attempts + 1,
         )
     )
     if (result.rowcount or 0) != 1:
@@ -111,35 +112,67 @@ def touch_llm_job_lease(
     return (result.rowcount or 0) == 1
 
 
+def attempts_exhausted_message(attempts: int) -> str:
+    return f"Превышено число попыток ({attempts}): воркер не довёл задачу до конца (падение процесса или потеря lease)."
+
+
+def _reclaim_running_llm_job(session: Session, job_id: uuid.UUID, ts: datetime, *lease_conditions) -> str | None:
+    """Зависший ``running`` → ``error`` (лимит попыток исчерпан) либо ``queued``.
+
+    Два условных UPDATE вместо чтения строки: исход определяется атомарно.
+    """
+    max_attempts = max(1, get_settings().llm_job_max_attempts)
+    stuck = (LlmJobRow.id == job_id, LlmJobRow.status == "running", *lease_conditions)
+    released = {"rq_job_id": None, "lease_owner": None, "lease_until": None}
+
+    exhausted = session.execute(
+        update(LlmJobRow)
+        .where(*stuck, LlmJobRow.attempts >= max_attempts)
+        .values(
+            status="error",
+            finished_at=ts,
+            error_message=attempts_exhausted_message(max_attempts),
+            **released,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if (exhausted.rowcount or 0) == 1:
+        session.expire_all()
+        return "error"
+
+    requeued = session.execute(
+        update(LlmJobRow)
+        .where(*stuck, LlmJobRow.attempts < max_attempts)
+        .values(status="queued", started_at=None, finished_at=None, error_message=None, **released)
+        .execution_options(synchronize_session=False)
+    )
+    session.expire_all()
+    return "queued" if (requeued.rowcount or 0) == 1 else None
+
+
 def reclaim_expired_llm_job(
     session: Session,
     job_id: uuid.UUID,
     *,
     now: datetime | None = None,
-) -> bool:
-    """Атомарно running(expired lease) → queued. True если перехватили."""
+) -> str | None:
+    """Атомарно running(expired lease) → queued|error. None — перехватить не удалось.
+
+    ``error`` — исчерпан лимит попыток (``LLM_JOB_MAX_ATTEMPTS``).
+    """
     ts = now or datetime.now(UTC)
-    result = session.execute(
-        update(LlmJobRow)
-        .where(
-            LlmJobRow.id == job_id,
-            LlmJobRow.status == "running",
-            LlmJobRow.lease_until.is_not(None),
-            LlmJobRow.lease_until < ts,
-        )
-        .values(
-            status="queued",
-            started_at=None,
-            finished_at=None,
-            error_message=None,
-            rq_job_id=None,
-            lease_owner=None,
-            lease_until=None,
-        )
-        .execution_options(synchronize_session=False)
+    return _reclaim_running_llm_job(
+        session,
+        job_id,
+        ts,
+        LlmJobRow.lease_until.is_not(None),
+        LlmJobRow.lease_until < ts,
     )
-    session.expire_all()
-    return (result.rowcount or 0) == 1
+
+
+def reclaim_legacy_stale_llm_job(session: Session, job_id: uuid.UUID) -> str | None:
+    """То же для running без ``lease_until`` (legacy); возраст проверяет вызывающий."""
+    return _reclaim_running_llm_job(session, job_id, datetime.now(UTC), LlmJobRow.lease_until.is_(None))
 
 
 def find_active_llm_job(

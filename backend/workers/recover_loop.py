@@ -1,4 +1,4 @@
-"""Периодический recover stuck jobs в RQ-воркерах."""
+"""Периодический recover stuck jobs: в RQ-воркерах и в API при backend'е ``inprocess``."""
 
 from __future__ import annotations
 
