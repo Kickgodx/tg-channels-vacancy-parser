@@ -24,6 +24,7 @@ def _fingerprint(ai: AiConfig) -> tuple:
         ai.base_url,
         ai.requests_per_minute,
         ai.max_retries_on_429,
+        ai.max_retries_on_error,
         ai.retry_base_delay_seconds,
         ai.stop_llm_when_rate_limited,
         ai.request_timeout_seconds,

@@ -9,7 +9,8 @@ from uuid import UUID
 from backend.db import llm_job_repository as lj
 from backend.db import repository as repo
 from backend.db.session import session_scope
-from backend.observability import record_llm_jobs_recover
+from backend.observability import record_llm_job, record_llm_jobs_recover
+from backend.services.llm_job_events import publish_llm_job_event
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 
@@ -28,8 +29,13 @@ def _rq_job_still_live(rq_job_id: str, connection) -> bool:
     return not (job.is_finished or job.is_failed)
 
 
-def recover_stuck_llm_jobs() -> int:
-    """Сбросить stuck ``running`` (expired lease) и старые ``queued`` → снова в RQ/inprocess."""
+def recover_stuck_llm_jobs(*, requeue_all_queued: bool = False) -> int:
+    """Сбросить stuck ``running`` (expired lease) и старые ``queued`` → снова в RQ/inprocess.
+
+    Джоба, исчерпавшая ``LLM_JOB_MAX_ATTEMPTS``, уходит в ``error`` вместо requeue.
+    ``requeue_all_queued`` — поднять и свежие ``queued`` (старт API в режиме inprocess:
+    пул прошлого процесса уже не существует).
+    """
     settings = get_settings()
     backend = settings.llm_job_backend_normalized
     now = datetime.now(UTC)
@@ -37,23 +43,30 @@ def recover_stuck_llm_jobs() -> int:
     legacy_cutoff = stuck_queued_after
     requeued = 0
     to_requeue: list[UUID] = []
+    exhausted: list[tuple[UUID, str]] = []  # (id, kind) — ушли в error по лимиту попыток
     seen: set[UUID] = set()
+
+    def _finish_reclaimed(job_id: UUID, kind: str, outcome: str, *, legacy: bool = False) -> None:
+        seen.add(job_id)
+        record_llm_jobs_recover(from_status="running")
+        label = "recover legacy running" if legacy else "recover running"
+        if outcome == "queued":
+            _LOG.warning("LLM job %s: %s→queued%s", job_id, label, "" if legacy else " (lease expired)")
+            to_requeue.append(job_id)
+        else:
+            _LOG.error("LLM job %s: %s→error (исчерпан лимит попыток)", job_id, label)
+            exhausted.append((job_id, kind))
 
     with session_scope() as session:
         expired = lj.list_llm_jobs_with_expired_lease(session, now=now)
         for row in expired:
             if row.id in seen:
                 continue
-            if not lj.reclaim_expired_llm_job(session, row.id, now=now):
+            job_id, kind = row.id, row.kind  # reclaim делает expire_all — читаем до него
+            outcome = lj.reclaim_expired_llm_job(session, job_id, now=now)
+            if outcome is None:
                 continue
-            seen.add(row.id)
-            record_llm_jobs_recover(from_status="running")
-            _LOG.warning("LLM job %s: recover running→queued (lease expired)", row.id)
-            to_requeue.append(row.id)
-
-        from sqlalchemy import update
-
-        from backend.db.models import LlmJobRow
+            _finish_reclaimed(job_id, kind, outcome)
 
         legacy_running = [
             r
@@ -63,37 +76,28 @@ def recover_stuck_llm_jobs() -> int:
         for row in legacy_running:
             if row.id in seen:
                 continue
-            result = session.execute(
-                update(LlmJobRow)
-                .where(
-                    LlmJobRow.id == row.id,
-                    LlmJobRow.status == "running",
-                    LlmJobRow.lease_until.is_(None),
-                )
-                .values(
-                    status="queued",
-                    started_at=None,
-                    finished_at=None,
-                    error_message=None,
-                    rq_job_id=None,
-                    lease_owner=None,
-                    lease_until=None,
-                )
-            )
-            if (result.rowcount or 0) != 1:
+            job_id, kind = row.id, row.kind
+            outcome = lj.reclaim_legacy_stale_llm_job(session, job_id)
+            if outcome is None:
                 continue
-            session.flush()
-            seen.add(row.id)
-            record_llm_jobs_recover(from_status="running")
-            _LOG.warning("LLM job %s: recover legacy running→queued", row.id)
-            to_requeue.append(row.id)
+            _finish_reclaimed(job_id, kind, outcome, legacy=True)
 
-        stale_queued = repo.list_llm_jobs_by_status(session, status="queued", older_than=stuck_queued_after)
+        stale_queued = repo.list_llm_jobs_by_status(
+            session,
+            status="queued",
+            older_than=None if requeue_all_queued else stuck_queued_after,
+        )
         for row in stale_queued:
             if row.id in seen:
                 continue
             seen.add(row.id)
             to_requeue.append(row.id)
+
+    # После commit: клиент, получив событие, перечитывает уже финальный статус.
+    for job_id, kind in exhausted:
+        message = lj.attempts_exhausted_message(max(1, settings.llm_job_max_attempts))
+        publish_llm_job_event(job_id, status="error", kind=kind, error_message=message)
+        record_llm_job(outcome="error", kind=kind)
 
     if not to_requeue:
         return 0

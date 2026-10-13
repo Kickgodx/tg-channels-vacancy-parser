@@ -9,7 +9,8 @@ from uuid import UUID
 from backend.db import parse_run_repository as pr
 from backend.db import repository as repo
 from backend.db.session import session_scope
-from backend.observability import record_parse_jobs_recover
+from backend.observability import record_parse_jobs_recover, record_parse_run_finished
+from backend.services.parse_run_events import publish_parse_run_event
 from backend.settings import get_settings
 
 _LOG = logging.getLogger(__name__)
@@ -27,11 +28,29 @@ def _rq_job_still_live(rq_job_id: str, connection) -> bool:
     return not (job.is_finished or job.is_failed)
 
 
-def recover_stuck_parse_runs() -> int:
+def _finish_reclaimed(run_id: UUID, outcome: str, *, legacy: bool = False) -> bool:
+    """Учесть reclaim зависшего ``running``. True — прогон вернулся в ``queued``."""
+    record_parse_jobs_recover(from_status="running")
+    label = "recover legacy running" if legacy else "recover running"
+    if outcome == "queued":
+        _LOG.warning("Parse run %s: %s→queued%s", run_id, label, "" if legacy else " (lease expired)")
+        return True
+    if outcome == "failed":
+        _LOG.error("Parse run %s: %s→failed (исчерпан лимит попыток)", run_id, label)
+        record_parse_run_finished(status="failed", posts_fetched=0, duration_seconds=0.0)
+    else:
+        _LOG.warning("Parse run %s: %s→cancelled (cancel_requested)", run_id, label)
+    return False
+
+
+def recover_stuck_parse_runs(*, requeue_all_queued: bool = False) -> int:
     """Сбросить stuck ``running`` (expired lease) и старые ``queued`` → снова в RQ/inprocess.
 
     Возвращает число прогонов, отправленных в очередь снова.
-    Reclaim running — атомарный conditional UPDATE (fencing).
+    Reclaim running — атомарный conditional UPDATE (fencing); прогон, исчерпавший
+    ``PARSE_JOB_MAX_ATTEMPTS``, уходит в ``failed`` вместо очередного requeue.
+    ``requeue_all_queued`` — поднять и свежие ``queued`` (старт API в режиме
+    inprocess: потоков прошлого процесса уже нет, ждать stuck-таймаут незачем).
     """
     settings = get_settings()
     backend = settings.parse_job_backend_normalized
@@ -40,6 +59,7 @@ def recover_stuck_parse_runs() -> int:
     legacy_cutoff = stuck_queued_after
     requeued = 0
     to_requeue: list[UUID] = []
+    terminal: list[UUID] = []  # ушли в failed/cancelled — подписчикам SSE нужен ``done``
     seen: set[UUID] = set()
 
     with session_scope() as session:
@@ -60,12 +80,7 @@ def recover_stuck_parse_runs() -> int:
             if outcome is None:
                 continue
             seen.add(row.id)
-            record_parse_jobs_recover(from_status="running")
-            if outcome == "cancelled":
-                _LOG.warning("Parse run %s: recover running→cancelled (cancel_requested)", row.id)
-                continue
-            _LOG.warning("Parse run %s: recover running→queued (lease expired)", row.id)
-            to_requeue.append(row.id)
+            (to_requeue if _finish_reclaimed(row.id, outcome) else terminal).append(row.id)
 
         legacy_running = [
             r
@@ -79,20 +94,23 @@ def recover_stuck_parse_runs() -> int:
             if outcome is None:
                 continue
             seen.add(row.id)
-            record_parse_jobs_recover(from_status="running")
-            if outcome == "cancelled":
-                _LOG.warning("Parse run %s: recover legacy running→cancelled", row.id)
-                continue
-            _LOG.warning("Parse run %s: recover legacy running→queued", row.id)
-            to_requeue.append(row.id)
+            (to_requeue if _finish_reclaimed(row.id, outcome, legacy=True) else terminal).append(row.id)
 
-        stale_queued = repo.list_parse_runs_by_status(session, status="queued", older_than=stuck_queued_after)
+        stale_queued = repo.list_parse_runs_by_status(
+            session,
+            status="queued",
+            older_than=None if requeue_all_queued else stuck_queued_after,
+        )
         for row in stale_queued:
             if row.id in seen or row.cancel_requested:
                 continue
             seen.add(row.id)
             # Сохраняем rq_job_id для live-check до очистки.
             to_requeue.append(row.id)
+
+    # После commit: подписчик, получив ``done``, перечитывает уже финальный статус.
+    for rid in terminal:
+        publish_parse_run_event(rid, event="done", payload={})
 
     if not to_requeue:
         return 0

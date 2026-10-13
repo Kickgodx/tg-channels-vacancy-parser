@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import re
 import threading
 import time
@@ -10,6 +11,8 @@ from datetime import UTC, datetime
 from tg_jobs_parser.utils.logger import get_logger
 
 _LOG = get_logger(__name__)
+
+_TRANSIENT_BACKOFF_CAP_S = 30.0
 
 _RESET_MS_RE = re.compile(r"X-RateLimit-Reset['\"]?\s*[:=]\s*['\"]?(\d+)", re.I)
 _REMAINING_RE = re.compile(r"X-RateLimit-Remaining['\"]?\s*[:=]\s*['\"]?(\d+)", re.I)
@@ -166,6 +169,14 @@ class OpenRouterRateLimiter:
         wait = min(wait, 120.0)
         self.rate_limit_retries += 1
         _LOG.warning("OpenRouter 429: пауза %.1f с перед повтором.", wait)
+        time.sleep(wait)
+        self.total_waits_seconds += wait
+
+    def wait_after_transient_error(self, attempt: int, error: Exception) -> None:
+        """Backoff перед повтором после 5xx/таймаута: 2, 4, 8… с (не дольше 30) плюс jitter."""
+        wait = min(2.0 * 2 ** max(0, attempt - 1), _TRANSIENT_BACKOFF_CAP_S)
+        wait += random.uniform(0, wait * 0.25)
+        _LOG.warning("OpenRouter: сбой (%s), повтор %s через %.1f с.", error, attempt, wait)
         time.sleep(wait)
         self.total_waits_seconds += wait
 

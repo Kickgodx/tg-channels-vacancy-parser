@@ -100,6 +100,7 @@ def _build_parse_result(
     fetch_elapsed_sec: float = 0.0,
     process_elapsed_sec: float = 0.0,
     fx_rates: dict[date, dict[str, float]] | None = None,
+    incomplete_reason: str | None = None,
 ) -> ParseResult:
     _LOG.info(
         "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
@@ -167,6 +168,7 @@ def _build_parse_result(
         vacancies_unique=unique,
         duplicates=dups,
         metrics=metrics,
+        incomplete_reason=incomplete_reason,
     )
 
 
@@ -379,6 +381,7 @@ def run_parse(
     db_flush_step = max(1, config.parser.db_flush_every_posts)
     db_flush_pending = max(1, config.parser.db_flush_pending_vacancies)
     pending_uniques: list[Vacancy] = []  # уникальные вакансии, ещё не ушедшие в sink
+    incomplete_reason: str | None = None
     process_span: trace.Span | None = None
     process_ctx_token = None
     try:
@@ -537,10 +540,22 @@ def run_parse(
                 )
                 if cost_summary:
                     all_warnings.append(cost_summary)
-            if ai_service._client.rate_limiter.llm_disabled:
+            rate_limiter = ai_service._client.rate_limiter
+            skipped = ai_service.stats.rate_limit_skipped
+            if skipped and config.ai.mode != "assist":
+                # В primary посты без LLM отбрасываются (см. AIEnrichmentService.enrich):
+                # прогон неполный, «completed» скрыл бы потерю остатка.
+                incomplete_reason = (
+                    f"AI: LLM отключён ({rate_limiter.llm_disabled_reason}); в режиме "
+                    f"{config.ai.mode} не разобрано постов: {skipped}. Они не кэшируются — "
+                    "повторный прогон после сброса лимита обработает их."
+                )
+                # Прогон через API показывает причину как error_message — не дублируем.
+                if not _api_run(cli_overrides):
+                    all_warnings.append(incomplete_reason)
+            elif rate_limiter.llm_disabled:
                 all_warnings.append(
-                    f"AI: LLM отключён ({ai_service._client.rate_limiter.llm_disabled_reason}). "
-                    "Оставшиеся посты обработаны только rules."
+                    f"AI: LLM отключён ({rate_limiter.llm_disabled_reason}). Оставшиеся посты обработаны только rules."
                 )
         _LOG.info(
             "Пост-обработка завершена за %.1f с. После фильтров осталось вакансий-кандидатов: %s",
@@ -563,6 +578,7 @@ def run_parse(
             fetch_elapsed_sec=fetch_elapsed,
             process_elapsed_sec=process_elapsed,
             fx_rates=fx_rates,
+            incomplete_reason=incomplete_reason,
         )
     except ParseCancelled:
         _LOG.warning("Прогон прерван (отмена).")

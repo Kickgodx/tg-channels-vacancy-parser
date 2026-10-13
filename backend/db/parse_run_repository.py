@@ -64,6 +64,7 @@ def claim_parse_run(
             started_at=now,
             lease_owner=owner,
             lease_until=_lease_deadline(now),
+            attempts=ParseRunRow.attempts + 1,
         )
     )
     if (result.rowcount or 0) != 1:
@@ -94,53 +95,63 @@ def touch_parse_run_lease(
     return (result.rowcount or 0) == 1
 
 
+def attempts_exhausted_message(attempts: int) -> str:
+    return f"Превышено число попыток ({attempts}): воркер не довёл прогон до конца (падение процесса или потеря lease)."
+
+
+def _reclaim_values(row: ParseRunRow, ts: datetime) -> tuple[str, dict]:
+    """Во что перевести зависший ``running``: итоговый статус и значения UPDATE."""
+    base = {"rq_job_id": None, "lease_owner": None, "lease_until": None}
+    if row.cancel_requested:
+        return "cancelled", {
+            **base,
+            "status": "cancelled",
+            "finished_at": ts,
+            "started_at": None,
+            "error_message": None,
+        }
+    attempts = int(row.attempts or 0)
+    if attempts >= max(1, get_settings().parse_job_max_attempts):
+        # Отравленный прогон: каждый requeue заново вычитывает Telegram и платит за LLM.
+        return "failed", {
+            **base,
+            "status": "failed",
+            "finished_at": ts,
+            "error_message": attempts_exhausted_message(attempts),
+        }
+    return "queued", {
+        **base,
+        "status": "queued",
+        "started_at": None,
+        "finished_at": None,
+        "error_message": None,
+    }
+
+
 def reclaim_expired_parse_run(
     session: Session,
     run_id: uuid.UUID,
     *,
     now: datetime | None = None,
 ) -> str | None:
-    """Атомарно running(expired lease) → queued|cancelled. None если не удалось.
+    """Атомарно running(expired lease) → queued|cancelled|failed. None если не удалось.
 
-    Возвращает итоговый статус ``queued`` / ``cancelled``.
+    Возвращает итоговый статус: ``cancelled`` — была запрошена отмена, ``failed`` —
+    исчерпан лимит попыток (``PARSE_JOB_MAX_ATTEMPTS``), иначе ``queued``.
     """
     ts = now or datetime.now(UTC)
     row = session.get(ParseRunRow, run_id)
     if row is None or row.status != "running":
         return None
-    cancel = bool(row.cancel_requested)
-    if row.lease_until is not None:
-        until = row.lease_until if row.lease_until.tzinfo else row.lease_until.replace(tzinfo=UTC)
-        if until >= ts:
-            return None
     # legacy без lease_until: не reclaim здесь (recover отфильтрует по older_than)
     if row.lease_until is None:
         return None
+    until = row.lease_until if row.lease_until.tzinfo else row.lease_until.replace(tzinfo=UTC)
+    if until >= ts:
+        return None
 
+    outcome, values = _reclaim_values(row, ts)
     # synchronize_session=False: SQLite отдаёт naive datetime, evaluate ломается на aware ts.
-    if cancel:
-        result = session.execute(
-            update(ParseRunRow)
-            .where(
-                ParseRunRow.id == run_id,
-                ParseRunRow.status == "running",
-                ParseRunRow.lease_until.is_not(None),
-                ParseRunRow.lease_until < ts,
-            )
-            .values(
-                status="cancelled",
-                finished_at=ts,
-                started_at=None,
-                rq_job_id=None,
-                lease_owner=None,
-                lease_until=None,
-                error_message=None,
-            )
-            .execution_options(synchronize_session=False)
-        )
-        session.expire_all()
-        return "cancelled" if (result.rowcount or 0) == 1 else None
-
     result = session.execute(
         update(ParseRunRow)
         .where(
@@ -149,19 +160,11 @@ def reclaim_expired_parse_run(
             ParseRunRow.lease_until.is_not(None),
             ParseRunRow.lease_until < ts,
         )
-        .values(
-            status="queued",
-            started_at=None,
-            finished_at=None,
-            rq_job_id=None,
-            lease_owner=None,
-            lease_until=None,
-            error_message=None,
-        )
+        .values(**values)
         .execution_options(synchronize_session=False)
     )
     session.expire_all()
-    return "queued" if (result.rowcount or 0) == 1 else None
+    return outcome if (result.rowcount or 0) == 1 else None
 
 
 def reclaim_legacy_stale_parse_run(
@@ -174,35 +177,13 @@ def reclaim_legacy_stale_parse_run(
     row = session.get(ParseRunRow, run_id)
     if row is None or row.status != "running" or row.lease_until is not None:
         return None
-    cancel = bool(row.cancel_requested)
     heartbeat = row.started_at or row.created_at
     if heartbeat is None:
         return None
     hb = heartbeat if heartbeat.tzinfo else heartbeat.replace(tzinfo=UTC)
     if hb >= older_than:
         return None
-    now = datetime.now(UTC)
-    if cancel:
-        result = session.execute(
-            update(ParseRunRow)
-            .where(
-                ParseRunRow.id == run_id,
-                ParseRunRow.status == "running",
-                ParseRunRow.lease_until.is_(None),
-            )
-            .values(
-                status="cancelled",
-                finished_at=now,
-                started_at=None,
-                rq_job_id=None,
-                lease_owner=None,
-                lease_until=None,
-                error_message=None,
-            )
-            .execution_options(synchronize_session=False)
-        )
-        session.expire_all()
-        return "cancelled" if (result.rowcount or 0) == 1 else None
+    outcome, values = _reclaim_values(row, datetime.now(UTC))
     result = session.execute(
         update(ParseRunRow)
         .where(
@@ -210,19 +191,11 @@ def reclaim_legacy_stale_parse_run(
             ParseRunRow.status == "running",
             ParseRunRow.lease_until.is_(None),
         )
-        .values(
-            status="queued",
-            started_at=None,
-            finished_at=None,
-            rq_job_id=None,
-            lease_owner=None,
-            lease_until=None,
-            error_message=None,
-        )
+        .values(**values)
         .execution_options(synchronize_session=False)
     )
     session.expire_all()
-    return "queued" if (result.rowcount or 0) == 1 else None
+    return outcome if (result.rowcount or 0) == 1 else None
 
 
 def clear_parse_run_lease(session: Session, run_id: uuid.UUID) -> None:
@@ -393,6 +366,7 @@ def finalize_parse_run(
     *,
     status: str = "completed",
     lease_owner: str | None = None,
+    error_message: str | None = None,
 ) -> bool:
     """Сохранить метаданные прогона. С ``lease_owner`` — conditional UPDATE (fencing).
 
@@ -409,6 +383,8 @@ def finalize_parse_run(
         "run_params": result.run_params,
         "metrics": result.metrics.model_dump(mode="json"),
     }
+    if error_message is not None:
+        values["error_message"] = error_message
     if lease_owner:
         owner = lease_owner.strip()[:64]
         exec_result = session.execute(
@@ -435,6 +411,8 @@ def finalize_parse_run(
     row.parse_warnings = result.parse_warnings
     row.run_params = result.run_params
     row.metrics = values["metrics"]
+    if error_message is not None:
+        row.error_message = error_message
     session.flush()
     return True
 

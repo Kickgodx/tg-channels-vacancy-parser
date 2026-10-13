@@ -236,6 +236,12 @@ class AiConfig(BaseModel):
     )
     max_retries_on_429: int = Field(default=0, ge=0, le=10)
     retry_base_delay_seconds: float = Field(default=5.0, ge=1, le=120)
+    max_retries_on_error: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="Повторы при транзиентном сбое (5xx, таймаут, обрыв соединения) с backoff 2/4/8… с.",
+    )
     stop_llm_when_rate_limited: bool = Field(
         default=True,
         description="При X-RateLimit-Remaining=0 / дневном лимите — отключить LLM до конца прогона (rules).",

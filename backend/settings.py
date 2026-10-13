@@ -27,8 +27,10 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "prod"] = Field(default="dev", alias="APP_ENV")
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
+    # 127.0.0.1, а не localhost: compose публикует порт только на IPv4-loopback, а
+    # localhost сначала резолвится в ::1 — на Windows psycopg ждёт там весь connect timeout.
     database_url: str = Field(
-        default="postgresql+psycopg://tgjobs:tgjobs@localhost:5432/tgjobs",
+        default="postgresql+psycopg://tgjobs:tgjobs@127.0.0.1:5432/tgjobs",
         alias="DATABASE_URL",
     )
     config_path: Path = Field(default=Path("config.yaml"), alias="CONFIG_PATH")
@@ -74,6 +76,10 @@ class Settings(BaseSettings):
     parse_job_lease_seconds: int = Field(default=120, alias="PARSE_JOB_LEASE_SECONDS")
     llm_job_lease_seconds: int = Field(default=120, alias="LLM_JOB_LEASE_SECONDS")
     job_recover_interval_seconds: int = Field(default=60, alias="JOB_RECOVER_INTERVAL_SECONDS")
+    # Сколько раз джобу берут в работу, прежде чем recover завершит её ошибкой
+    # вместо очередного requeue (воркер стабильно падает на ней, напр. OOM).
+    parse_job_max_attempts: int = Field(default=3, ge=1, alias="PARSE_JOB_MAX_ATTEMPTS")
+    llm_job_max_attempts: int = Field(default=2, ge=1, alias="LLM_JOB_MAX_ATTEMPTS")
 
     @field_validator("app_env", mode="before")
     @classmethod

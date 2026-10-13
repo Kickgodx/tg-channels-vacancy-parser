@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from backend.db.models import HhListingRow, VacancyRow
@@ -66,6 +67,15 @@ def _clip(value: str | None, max_len: int) -> str | None:
     return s if len(s) <= max_len else s[: max_len - 1] + "…"
 
 
+def _is_later(new: datetime | None, old: datetime | None) -> bool:
+    """``new`` строго позже ``old``; naive-значения (SQLite) считаются UTC."""
+    if new is None or old is None:
+        return False
+    new_utc = new if new.tzinfo else new.replace(tzinfo=UTC)
+    old_utc = old if old.tzinfo else old.replace(tzinfo=UTC)
+    return new_utc > old_utc
+
+
 def get_listing(session: Session, hh_id: str) -> HhListingRow | None:
     return session.get(HhListingRow, hh_id)
 
@@ -83,28 +93,50 @@ def mark_detail_fetched(session: Session, hh_id: str, *, when: datetime | None =
     row.updated_at = datetime.now(UTC)
 
 
-def try_acquire_hh_sync_lock(session: Session) -> bool:
-    """Межпроцессный lock (Postgres advisory) или no-op True на SQLite (там threading)."""
-    bind = session.bind
-    if bind is None:
-        return True
-    if bind.dialect.name != "postgresql":
-        return True
-    got = session.execute(
-        text("SELECT pg_try_advisory_lock(:k)"),
-        {"k": HH_SYNC_ADVISORY_LOCK_KEY},
-    ).scalar()
-    return bool(got)
+class HhSyncDbLock:
+    """Межпроцессный lock HH sync: Postgres advisory на выделенном соединении.
 
+    Advisory-lock принадлежит соединению, а sync коммитит по ходу работы: после
+    commit сессия возвращает соединение в пул и дальше может получить другое.
+    Lock на соединении сессии поэтому «протекал» — unlock уходил не туда, и
+    следующий sync получал 409 до рестарта. Здесь lock живёт на своём соединении
+    (AUTOCOMMIT — без idle-in-transaction на всё время sync) от ``try_acquire``
+    до ``release``. На SQLite — no-op (там хватает threading-lock).
+    """
 
-def release_hh_sync_lock(session: Session) -> None:
-    bind = session.bind
-    if bind is None or bind.dialect.name != "postgresql":
-        return
-    session.execute(
-        text("SELECT pg_advisory_unlock(:k)"),
-        {"k": HH_SYNC_ADVISORY_LOCK_KEY},
-    )
+    def __init__(self, session: Session) -> None:
+        self._session = session
+        self._conn: Connection | None = None
+
+    def try_acquire(self) -> bool:
+        bind = self._session.get_bind()
+        if bind.dialect.name != "postgresql":
+            return True
+        conn = bind.engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+        try:
+            got = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": HH_SYNC_ADVISORY_LOCK_KEY}).scalar())
+        except Exception:
+            conn.close()
+            raise
+        if not got:
+            conn.close()
+            return False
+        self._conn = conn
+        return True
+
+    def release(self) -> None:
+        conn, self._conn = self._conn, None
+        if conn is None:
+            return
+        try:
+            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": HH_SYNC_ADVISORY_LOCK_KEY})
+        except Exception as exc:
+            # Вернуть в пул соединение с неснятым lock нельзя: закрываем его совсем —
+            # Postgres освобождает advisory-lock вместе с сессией.
+            _LOG.warning("HH advisory unlock failed, соединение закрыто: %s", exc)
+            conn.invalidate()
+        finally:
+            conn.close()
 
 
 def upsert_listings_from_shorts(
@@ -267,7 +299,9 @@ def upsert_hh_vacancies(
             data["id"] = existing.id
             data["parsed_at"] = existing.parsed_at or data["parsed_at"]
             data["last_parse_run_id"] = existing.last_parse_run_id
-            data["archived_at"] = existing.archived_at
+            # HH поднял вакансию заново (published_at новее) — возвращаем из архива.
+            republished = _is_later(data["post_date"], existing.post_date)
+            data["archived_at"] = None if republished else existing.archived_at
 
         dialect = session.bind.dialect.name if session.bind is not None else "postgresql"
         if dialect == "postgresql":

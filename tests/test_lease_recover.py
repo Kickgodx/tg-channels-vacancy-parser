@@ -149,7 +149,7 @@ def test_llm_set_status_after_reclaim_is_noop():
         claimed.lease_until = datetime.now(UTC) - timedelta(seconds=5)
 
     with session_scope() as session:
-        assert lj.reclaim_expired_llm_job(session, jid) is True
+        assert lj.reclaim_expired_llm_job(session, jid) == "queued"
         assert lj.get_llm_job(session, jid).status == "queued"
 
     with session_scope() as session:

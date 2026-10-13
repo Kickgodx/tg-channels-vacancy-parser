@@ -102,6 +102,8 @@ ai:
   requests_per_minute: 480
   max_retries_on_429: 0
   retry_base_delay_seconds: 5
+  # Повторы при 5xx / таймауте / обрыве соединения (backoff 2/4/8… с); 0 — без повторов.
+  max_retries_on_error: 2
   stop_llm_when_rate_limited: true
   use_cache: true
   cache_backend: postgres

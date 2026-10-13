@@ -34,8 +34,8 @@ docker compose up --build
 | **Loki** | http://localhost:3100 (API; логи смотрятся в Grafana → Explore) |
 | **Alloy** | http://localhost:12345 (UI пайплайна сбора логов и трасс) |
 | **Tempo** | http://localhost:3200 (API; трассы смотрятся в Grafana → Explore → Tempo) |
-| **PostgreSQL** | `localhost:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
-| **Redis** | `localhost:16379` → контейнер `:6379` (очереди RQ: parse + LLM) |
+| **PostgreSQL** | `127.0.0.1:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
+| **Redis** | `127.0.0.1:16379` → контейнер `:6379` (очереди RQ: parse + LLM) |
 
 В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `parse-worker` (тот же образ, команда `tg-jobs-parse-worker`) выполняет прогоны парсинга через RQ (очередь `parse`, concurrency=1, volume `sessions/` для Telethon); метрики — контейнерный `:9102` (на хост не публикуется). Сервис `llm-worker` (`tg-jobs-llm-worker`) обрабатывает матчинг и письма; метрики — `:9101` (тоже без host mapping, чтобы работал `--scale`).
 
@@ -92,10 +92,12 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # PARSE_JOB_STUCK_MINUTES=30      # stale queued без живого RQ (мин)
 # PARSE_JOB_LEASE_SECONDS=120     # lease running parse; recover при истечении
 # LLM_JOB_LEASE_SECONDS=120       # lease running LLM
-# JOB_RECOVER_INTERVAL_SECONDS=60 # периодический recover в worker
+# JOB_RECOVER_INTERVAL_SECONDS=60 # периодический recover: в worker (rq) или в API (inprocess)
+# PARSE_JOB_MAX_ATTEMPTS=3        # после стольких попыток зависший прогон → failed вместо requeue
+# LLM_JOB_MAX_ATTEMPTS=2          # то же для LLM-джоб → error
 # PARSE_RQ_JOB_TIMEOUT_SECONDS=43200  # таймаут RQ-джобы parse (сек; по умолчанию 12 ч)
 # PARSE_WORKER_METRICS_PORT=9102  # контейнерный порт метрик parse-worker
-# REDIS_URL=redis://redis:6379/0  # очереди RQ (parse + LLM); локально — redis://localhost:16379/0
+# REDIS_URL=redis://redis:6379/0  # очереди RQ (parse + LLM); локально — redis://127.0.0.1:16379/0
 # VITE_API_KEY=                   # если API_KEY задан — тот же ключ для SSE/export во frontend
 # HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе; умолчание: dev — true, prod — false
 # HTTP_LOG_BODY_LIMIT=4096        # макс. символов тела в логе, дальше — «…[truncated, N bytes]»
@@ -126,7 +128,10 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 временно пустить нового пользователя.
 
 Порты compose публикуются на `127.0.0.1`: с этой машины всё доступно по
-`localhost` как раньше, из сети — нет. `BIND_ADDR=0.0.0.0` открывает UI и API
+`localhost` как раньше, из сети — нет. К Postgres и Redis с хоста подключайтесь
+по `127.0.0.1`, а не `localhost`: порт слушает только IPv4, а `localhost`
+сначала пробует `::1` — psycopg на Windows ждёт там весь connect timeout на
+каждое новое соединение (браузера это не касается). `BIND_ADDR=0.0.0.0` открывает UI и API
 (доступ с телефона, сервер без reverse proxy); `INFRA_BIND_ADDR` — то же для
 Postgres, Redis и observability, но у них дефолтные пароли или нет
 аутентификации, наружу их открывать не стоит.
@@ -281,13 +286,20 @@ Backend отдельно (без compose порт обычно `8000`; без Re
 
 ```powershell
 poetry install
-# DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@localhost:5432/tgjobs
+# DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@127.0.0.1:5432/tgjobs
 # PARSE_JOB_BACKEND=inprocess
 # LLM_JOB_BACKEND=inprocess
 uvicorn backend.main:app --reload --port 8000
 ```
 
 Прогон парсинга: API создаёт строку `parse_runs` со статусом `queued` и ставит RQ-джобу (в Docker — `PARSE_JOB_BACKEND=rq`). `parse-worker` claim'ит прогон → `running`, пишет `progress` в БД (+ Redis pub/sub для SSE). Рестарт backend не обрывает воркер: прогресс продолжает обновляться, cancel идёт через `cancel_requested` в БД. Локально без Redis: `PARSE_JOB_BACKEND=inprocess` (ThreadPool в процессе API).
+
+Самовосстановление джоб (parse и LLM устроены одинаково):
+
+- **Зависший `running`** (lease истёк — воркер упал или завис) recover-цикл возвращает в `queued` и запускает заново. В режиме `rq` цикл живёт в воркерах, в `inprocess` — в самом API: при старте он сразу поднимает `queued`, оставшиеся от прошлого процесса, а оборванный рестартом `running` — после истечения lease (до ~3 минут при настройках по умолчанию).
+- **Лимит попыток.** Каждый claim увеличивает `attempts`; прогон, который воркер не довёл до конца `PARSE_JOB_MAX_ATTEMPTS` раз (по умолчанию 3; для LLM-джоб — `LLM_JOB_MAX_ATTEMPTS`, 2), завершается `failed` / `error` с пояснением, а не уходит на очередной круг.
+- **Неполный прогон.** Если в `ai.mode: primary` LLM отключился по лимиту, оставшиеся посты не разбираются. Такой прогон получает статус `failed` с причиной в `error_message`; уже разобранные вакансии сохранены, а неразобранные посты не кэшируются — повторный прогон после сброса лимита обработает их.
+- **Docker Compose:** у сервисов приложения `restart: unless-stopped` и healthcheck; воркеры стартуют после того, как backend стал healthy (то есть применил миграции).
 
 ---
 
@@ -362,8 +374,8 @@ uvicorn backend.main:app --reload --port 8000
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…013`, head —
-`013_vac_active_post_date_idx`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…016`, head —
+`016_job_attempts`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -497,6 +509,9 @@ poetry run python -c "import telethon; print(telethon.__version__)"
   час фоном и после каждого прогона. Архивные строки не попадают в списки,
   пока не передать `include_archived=true`. Вкладка **Аналитика** всегда
   включает архив (активные + архивные), в т.ч. для YoY/MoM по каналу `hh`.
+  Повторная публикация возвращает вакансию из архива: если канал снова
+  запостил тот же текст (или HH обновил `published_at`), `post_date`
+  сдвигается на свежую дату и TTL отсчитывается от неё.
 
 ### HH.ru (`hh`)
 
@@ -528,7 +543,8 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 | `fallback_models` | Запасные модели |
 | `concurrency`, `requests_per_minute` | Темп и параллелизм парсинга |
 | `interactive_concurrency`, `interactive_per_user_limit` | Пул и лимит на пользователя для фоновых мэтч/письмо (in-process; несколько реплик backend → нужна внешняя очередь) |
-| `stop_llm_when_rate_limited` | Отключить LLM при 429 до конца прогона |
+| `stop_llm_when_rate_limited` | Отключить LLM при 429 до конца прогона. В `mode: primary` оставшиеся посты не разбираются, и прогон завершается `failed` (см. «Самовосстановление джоб») |
+| `max_retries_on_error` | Повторы при транзиентном сбое — 5xx, таймаут, обрыв соединения (по умолчанию 2, backoff 2/4/8… с; `0` — без повторов). Действует для парсинга, матчинга и писем |
 | `max_completion_tokens` | Лимит выходных токенов |
 | `use_cache` | Дисковый/Postgres кэш LLM |
 | `prompt_version` | Должен совпадать с `EXTRACT_PROMPT_VERSION` в коде; кэш ключуется константой |

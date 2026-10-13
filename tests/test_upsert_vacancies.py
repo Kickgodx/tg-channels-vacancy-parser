@@ -172,3 +172,100 @@ def test_list_vacancies_hides_archived_unless_included(db_session):
 
     items, total = list_vacancies(db_session, VacancyQuery(include_archived=True))
     assert total == 2
+
+
+def _archived_vacancy(db_session, *, text: str, first_seen: datetime) -> Vacancy:
+    """Вакансия, ушедшая в архив по TTL от первой публикации."""
+    original = _vac(cleaned=text, source_post_key="chan-1", post_date=first_seen)
+    upsert_vacancies(db_session, [original], parse_run_id=uuid.uuid4())
+    assert archive_expired_vacancies(db_session) == 1
+    db_session.commit()
+    return original
+
+
+def test_repost_advances_post_date_and_unarchives(db_session):
+    """Канал повторил тот же текст: вакансия актуальна, архив по первой публикации снимается."""
+    now = datetime.now(UTC)
+    text = "Python backend, remote, weekly repost"
+    original = _archived_vacancy(db_session, text=text, first_seen=now - timedelta(days=VACANCY_TTL_DAYS + 5))
+
+    repost_date = now - timedelta(days=1)
+    repost = _vac(cleaned=text, source_post_key="chan-99", post_date=repost_date)
+    stats = upsert_vacancies(db_session, [repost], parse_run_id=uuid.uuid4())
+    db_session.commit()
+    db_session.expire_all()
+
+    assert stats.updated_existing == 1
+    row = db_session.get(VacancyRow, original.id)
+    assert row.archived_at is None
+    assert row.post_date.replace(tzinfo=UTC) == repost_date
+    # TTL теперь считается от свежей публикации — повторная архивация не трогает.
+    assert archive_expired_vacancies(db_session) == 0
+    items, total = list_vacancies(db_session, VacancyQuery())
+    assert total == 1 and items[0].id == original.id
+
+
+@pytest.mark.parametrize("days_before_first", [0, 3])
+def test_same_or_older_post_keeps_date_and_archive(db_session, days_before_first):
+    """Повторный разбор того же или более старого поста — не репост: дата и архив не меняются."""
+    now = datetime.now(UTC)
+    first_seen = now - timedelta(days=VACANCY_TTL_DAYS + 5)
+    text = "Go developer, office"
+    original = _archived_vacancy(db_session, text=text, first_seen=first_seen)
+
+    again = _vac(
+        cleaned=text,
+        source_post_key="chan-2",
+        post_date=first_seen - timedelta(days=days_before_first),
+    )
+    upsert_vacancies(db_session, [again], parse_run_id=uuid.uuid4())
+    db_session.commit()
+    db_session.expire_all()
+
+    row = db_session.get(VacancyRow, original.id)
+    assert row.archived_at is not None
+    assert row.post_date.replace(tzinfo=UTC) == first_seen
+
+
+def test_repost_fills_missing_post_date(db_session):
+    text = "QA engineer, hybrid"
+    undated = _vac(cleaned=text, source_post_key="chan-1").model_copy(update={"post_date": None})
+    upsert_vacancies(db_session, [undated], parse_run_id=uuid.uuid4())
+    db_session.commit()
+
+    dated_at = datetime.now(UTC) - timedelta(days=2)
+    dated = _vac(cleaned=text, source_post_key="chan-2", post_date=dated_at)
+    upsert_vacancies(db_session, [dated], parse_run_id=uuid.uuid4())
+    db_session.commit()
+    db_session.expire_all()
+
+    assert db_session.get(VacancyRow, undated.id).post_date.replace(tzinfo=UTC) == dated_at
+
+
+def test_hh_republished_vacancy_returns_from_archive(db_session):
+    """HH поднял вакансию заново (published_at новее) — она возвращается из архива."""
+    from backend.db import hh_repository as hh_repo
+    from tg_jobs_parser.config.schema import FxConfig
+
+    now = datetime.now(UTC)
+    fx = FxConfig(enabled=False)
+    first = _vac(
+        cleaned="HH: Python developer",
+        source_post_key="hh-555",
+        post_date=now - timedelta(days=VACANCY_TTL_DAYS + 5),
+    )
+    hh_repo.upsert_hh_vacancies(db_session, [first], fx_config=fx)
+    assert archive_expired_vacancies(db_session) == 1
+    db_session.commit()
+
+    # Тот же published_at (вакансия просто снова попала в выдачу) — архив остаётся.
+    hh_repo.upsert_hh_vacancies(db_session, [first.model_copy()], fx_config=fx)
+    db_session.commit()
+    assert db_session.get(VacancyRow, first.id).archived_at is not None
+
+    republished = first.model_copy(update={"post_date": now - timedelta(hours=3)})
+    stats = hh_repo.upsert_hh_vacancies(db_session, [republished], fx_config=fx)
+    db_session.commit()
+
+    assert stats.updated_existing == 1
+    assert db_session.get(VacancyRow, first.id).archived_at is None

@@ -72,8 +72,6 @@ def test_hh_sync_flushes_in_batches(monkeypatch):
     monkeypatch.setattr(hh_sync_service.hh_repo, "mark_detail_fetched", lambda *a, **k: None)
     monkeypatch.setattr(hh_sync_service.hh_repo, "upsert_hh_vacancies", fake_upsert)
     monkeypatch.setattr(hh_sync_service.hh_repo, "purge_expired_listings", lambda *a, **k: 0)
-    monkeypatch.setattr(hh_sync_service.hh_repo, "try_acquire_hh_sync_lock", lambda s: True)
-    monkeypatch.setattr(hh_sync_service.hh_repo, "release_hh_sync_lock", lambda s: None)
 
     session = MagicMock()
     config = AppConfig(

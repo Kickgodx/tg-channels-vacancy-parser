@@ -111,7 +111,7 @@ def run_hh_sync(
     thread_locked = _SYNC_LOCK.acquire(blocking=False)
     if not thread_locked:
         raise HhSyncConflict("HH sync already in progress")
-    db_locked = False
+    db_lock = hh_repo.HhSyncDbLock(session)
     started = time.monotonic()
     result = HhSyncResult()
     outcome = "success"
@@ -121,8 +121,7 @@ def run_hh_sync(
     result.date_from = resolved.date_from
     result.date_to = resolved.date_to
     try:
-        db_locked = hh_repo.try_acquire_hh_sync_lock(session)
-        if not db_locked:
+        if not db_lock.try_acquire():
             raise HhSyncConflict("HH sync already in progress")
 
         with _TRACER.start_as_current_span("hh.sync") as span:
@@ -218,11 +217,10 @@ def run_hh_sync(
         outcome = "error"
         raise
     finally:
-        if db_locked:
-            try:
-                hh_repo.release_hh_sync_lock(session)
-            except Exception as exc:
-                _LOG.warning("HH advisory unlock failed: %s", exc)
+        try:
+            db_lock.release()
+        except Exception as exc:
+            _LOG.warning("HH advisory lock release failed: %s", exc)
         if thread_locked:
             _SYNC_LOCK.release()
         result.duration_seconds = time.monotonic() - started

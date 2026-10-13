@@ -241,7 +241,14 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
         remaining = [v for v in res.vacancies_unique if v.id not in flushed_ids]
         with session_scope() as session:
             # Fenced UPDATE первым: проверяет lease до записи вакансий.
-            if not repo.finalize_parse_run(session, run_id, res, status=final_status, lease_owner=lease_owner):
+            if not repo.finalize_parse_run(
+                session,
+                run_id,
+                res,
+                status=final_status,
+                lease_owner=lease_owner,
+                error_message=res.incomplete_reason if final_status == "failed" else None,
+            ):
                 return None
             stats = repo.upsert_vacancies(session, remaining, parse_run_id=run_id)
             repo.archive_expired_vacancies(session)
@@ -286,7 +293,14 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             error = "lease lost"
             _LOG.warning("Прогон %s: результат отброшен — lease перехвачен recover", run_id)
         else:
-            final_status = "cancelled" if cancel_token.is_cancelled() else "completed"
+            if cancel_token.is_cancelled():
+                final_status = "cancelled"
+            elif result.incomplete_reason:
+                # Часть постов не разобрана (LLM отключился в primary): собранное
+                # сохраняем, но «completed» скрыл бы потерю остатка.
+                final_status = "failed"
+            else:
+                final_status = "completed"
             # Heartbeat останавливаем до финализации: после неё прогон уже не running.
             stop_lease.set()
             lease_thread.join(timeout=_LEASE_JOIN_TIMEOUT_S)
@@ -314,6 +328,9 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
                     totals.inserted,
                     totals.updated_existing,
                 )
+                if final_status == "failed":
+                    error = result.incomplete_reason
+                    _LOG.error("Прогон %s неполный, статус failed: %s", run_id, error)
     except ParseCancelled:
         if lease_lost.is_set():
             status = "failed"

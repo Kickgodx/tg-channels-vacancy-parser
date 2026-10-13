@@ -44,6 +44,26 @@ def default_test_config(tmp_path_factory):
     get_settings.cache_clear()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def no_real_telegram():
+    """Тесты не открывают Telethon.
+
+    Прогон в режиме inprocess идёт фоновым потоком; если тест завершился раньше, чем
+    поток дошёл до ``run_parse``, его monkeypatch уже снят — и поток пошёл бы в Telegram
+    с настоящими ``TELEGRAM_*`` из ``.env`` и сессией из ``sessions/``. Session-scope:
+    заглушка переживает отдельный тест; свой ``_channel_parser`` тест ставит поверх.
+    """
+    import tg_jobs_parser.parse_runner as parse_runner
+
+    def _forbidden(config, *, cancellation=None):
+        raise RuntimeError("Тест дошёл до настоящего Telethon: подмените run_parse или parse_runner._channel_parser")
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(parse_runner, "_channel_parser", _forbidden)
+    yield
+    mp.undo()
+
+
 def login_as_admin(client, email: str = "admin@example.com") -> str:
     """Первый зарегистрированный пользователь — admin; Bearer ставится клиенту по умолчанию."""
     r = client.post("/api/v1/auth/register", json={"email": email, "password": "secret1"})

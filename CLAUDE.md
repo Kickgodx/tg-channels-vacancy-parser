@@ -22,7 +22,8 @@ docker compose up --build                 # UI :5173, API :9000/docs
 # observability (Prometheus/Grafana/Loki/Alloy/Tempo) — только при COMPOSE_PROFILES=observability в .env
 
 # backend локально без Docker и без Redis
-# env: PARSE_JOB_BACKEND=inprocess LLM_JOB_BACKEND=inprocess DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@localhost:5432/tgjobs
+# env: PARSE_JOB_BACKEND=inprocess LLM_JOB_BACKEND=inprocess DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@127.0.0.1:5432/tgjobs
+# (127.0.0.1, не localhost: порт опубликован только на IPv4, через ::1 psycopg на Windows ждёт connect timeout)
 .venv/Scripts/python.exe -m uvicorn backend.main:app --reload --port 8000
 
 # frontend локально (VITE_API_BASE_URL=http://localhost:9000/api/v1 для compose-backend, :8000 для uvicorn)
@@ -84,8 +85,10 @@ dedup → FX в ₽ → UPSERT в `vacancies` → метрики.
 pub/sub для SSE). Оба типа джоб устроены одинаково:
 
 - claim с lease (`lease_owner`, heartbeat) → `running`; истёкший lease или
-  `queued` без живой RQ-джобы поднимает recover-цикл воркера
-  (`backend/workers/recover*.py`);
+  `queued` без живой RQ-джобы поднимает recover-цикл (`backend/workers/recover*.py`):
+  в режиме `rq` он живёт в воркерах, в `inprocess` — в lifespan API;
+- каждый claim увеличивает `attempts`; исчерпав `PARSE_JOB_MAX_ATTEMPTS` /
+  `LLM_JOB_MAX_ATTEMPTS`, зависшая джоба уходит в `failed` / `error`, а не в requeue;
 - отмена прогона — флаг `cancel_requested` в БД, воркер его поллит (переживает
   рестарт API);
 - прогресс прогона — колонка `parse_runs.progress`; SSE (`/runs/{id}/events`,
