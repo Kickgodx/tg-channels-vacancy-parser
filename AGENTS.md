@@ -6,6 +6,7 @@
 .venv/Scripts/python.exe -m pytest -q          # ~10 с
 .venv/Scripts/python.exe -m pytest -n 8 -q     # параллельно (pytest-xdist), ~6 с
 .venv/Scripts/ruff.exe check .                 # lint (конфиг в pyproject.toml)
+cd frontend && npm run lint                    # oxlint (.oxlintrc.json)
 cd frontend && npm run build                   # tsc -b + vite build
 ```
 
