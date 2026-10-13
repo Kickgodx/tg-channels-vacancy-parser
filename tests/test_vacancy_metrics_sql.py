@@ -64,3 +64,46 @@ def test_salary_metrics_sql_uses_stored_rub_without_fx_subquery():
         ).compile(dialect=postgresql.dialect())
     ).lower()
     assert "exchange_rates" not in count_sql
+
+
+def test_daily_buckets_keep_latest_days(monkeypatch, tmp_path):
+    """Лимит точек графика отбрасывает самые старые дни, а не самые свежие."""
+    import uuid
+    from datetime import UTC, datetime
+
+    from backend.db import vacancy_metrics
+    from backend.db.repository import upsert_vacancies
+    from backend.db.session import init_db, reset_engine, session_scope
+    from backend.settings import get_settings
+    from tg_jobs_parser.models.vacancy import Vacancy
+    from tg_jobs_parser.utils.hashing import vacancy_content_id
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{(tmp_path / 'daily.db').as_posix()}")
+    get_settings.cache_clear()
+    reset_engine()
+    init_db()
+    try:
+        vacancies = []
+        for day in (1, 2, 3):
+            text = f"Python dev, day {day}"
+            vacancies.append(
+                Vacancy(
+                    id=vacancy_content_id(text),
+                    source_post_key=f"chan-{day}",
+                    source_channel="chan",
+                    source_url="https://t.me/s/chan",
+                    post_date=datetime(2026, 3, day, 12, tzinfo=UTC),
+                    raw_text=text,
+                    cleaned_text=text,
+                    detected_specializations=["Python"],
+                    detected_grade="middle",
+                )
+            )
+        monkeypatch.setattr(vacancy_metrics, "_MAX_DAILY_BUCKETS", 2)
+        with session_scope() as session:
+            upsert_vacancies(session, vacancies, parse_run_id=uuid.uuid4())
+            buckets = vacancy_metrics._daily_buckets(session, VacancyQuery(include_archived=True), dialect="sqlite")
+        assert [b.period for b in buckets] == ["2026-03-02", "2026-03-03"]
+    finally:
+        reset_engine()
+        get_settings.cache_clear()

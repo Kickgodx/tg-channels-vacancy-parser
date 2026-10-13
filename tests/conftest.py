@@ -36,6 +36,8 @@ def default_test_config(tmp_path_factory):
     register_db_ai_cache()
     mp = pytest.MonkeyPatch()
     mp.setenv("CONFIG_PATH", str(cfg))
+    # Тесты рассчитаны на dev-умолчания и не должны зависеть от APP_ENV в .env разработчика.
+    mp.setenv("APP_ENV", "dev")
     get_settings.cache_clear()
     yield cfg
     mp.undo()

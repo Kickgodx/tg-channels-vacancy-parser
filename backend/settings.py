@@ -4,14 +4,27 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Any, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_APP_ENV_ALIASES = {"": "dev", "development": "dev", "local": "dev", "production": "prod"}
+_MIN_JWT_SECRET_LENGTH = 32
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        # Ошибка валидации печатается при старте — без этого в лог попадут значения env (секреты).
+        hide_input_in_errors=True,
+    )
 
+    # dev — умолчания, удобные для локальной разработки; prod — закрытые
+    # (см. _apply_app_env). Явно заданная переменная побеждает в обоих режимах.
+    app_env: Literal["dev", "prod"] = Field(default="dev", alias="APP_ENV")
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
     database_url: str = Field(
@@ -26,8 +39,9 @@ class Settings(BaseSettings):
     api_key: str | None = Field(default=None, alias="API_KEY")
     jwt_secret: str | None = Field(default=None, alias="JWT_SECRET")
     jwt_ttl_minutes: int = Field(default=60, alias="JWT_TTL_MINUTES")
-    auth_registration_open: bool = Field(default=True, alias="AUTH_REGISTRATION_OPEN")
-    http_log_bodies: bool = Field(default=True, alias="HTTP_LOG_BODIES")
+    # None → по APP_ENV: dev — true, prod — false.
+    auth_registration_open: bool | None = Field(default=None, alias="AUTH_REGISTRATION_OPEN")
+    http_log_bodies: bool | None = Field(default=None, alias="HTTP_LOG_BODIES")
     http_log_body_limit: int = Field(default=4096, alias="HTTP_LOG_BODY_LIMIT")
     otel_enabled: bool = Field(default=False, alias="OTEL_ENABLED")
     otel_traces_sample_ratio: float = Field(default=1.0, alias="OTEL_TRACES_SAMPLE_RATIO")
@@ -60,6 +74,30 @@ class Settings(BaseSettings):
     parse_job_lease_seconds: int = Field(default=120, alias="PARSE_JOB_LEASE_SECONDS")
     llm_job_lease_seconds: int = Field(default=120, alias="LLM_JOB_LEASE_SECONDS")
     job_recover_interval_seconds: int = Field(default=60, alias="JOB_RECOVER_INTERVAL_SECONDS")
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def _normalize_app_env(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().lower()
+        return _APP_ENV_ALIASES.get(normalized, normalized)
+
+    @model_validator(mode="after")
+    def _apply_app_env(self) -> Self:
+        if self.auth_registration_open is None:
+            self.auth_registration_open = not self.is_production
+        if self.http_log_bodies is None:
+            self.http_log_bodies = not self.is_production
+        if self.is_production and len((self.jwt_secret or "").strip()) < _MIN_JWT_SECRET_LENGTH:
+            # Эфемерный секрет допустим только в dev: в prod он сбрасывает сессии при
+            # каждом рестарте и расходится между процессами.
+            raise ValueError(f"APP_ENV=prod: задайте JWT_SECRET не короче {_MIN_JWT_SECRET_LENGTH} символов")
+        return self
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env == "prod"
 
     @property
     def llm_job_backend_normalized(self) -> str:

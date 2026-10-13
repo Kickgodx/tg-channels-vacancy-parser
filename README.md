@@ -80,10 +80,13 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # Опционально (для docker compose уже задано в compose-файле):
 # DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
 # CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+# APP_ENV=dev                     # dev (локально) или prod — см. «Режимы dev и prod» ниже
+# BIND_ADDR=127.0.0.1             # адрес публикации портов UI/API в compose; 0.0.0.0 — открыть в сеть
+# INFRA_BIND_ADDR=127.0.0.1       # то же для Postgres, Redis и observability
 # API_KEY=                        # если задан — заголовок X-API-Key для API (дополнительно к JWT)
-# JWT_SECRET=                     # подпись access-токенов; без него — эфемерный (сессии сгорают при рестарте)
+# JWT_SECRET=                     # подпись access-токенов; в dev без него — эфемерный (сессии сгорают при рестарте), в prod обязателен (32+ символа)
 # JWT_TTL_MINUTES=60              # TTL access-токена
-# AUTH_REGISTRATION_OPEN=true     # false — регистрация закрыта после первого пользователя
+# AUTH_REGISTRATION_OPEN=true     # false — регистрация закрыта после первого пользователя; умолчание: dev — true, prod — false
 # LLM_JOB_BACKEND=rq              # rq (Docker) или inprocess (локально без Redis)
 # PARSE_JOB_BACKEND=rq            # rq (Docker + parse-worker) или inprocess (ThreadPool в API)
 # PARSE_JOB_STUCK_MINUTES=30      # stale queued без живого RQ (мин)
@@ -94,7 +97,7 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # PARSE_WORKER_METRICS_PORT=9102  # контейнерный порт метрик parse-worker
 # REDIS_URL=redis://redis:6379/0  # очереди RQ (parse + LLM); локально — redis://localhost:16379/0
 # VITE_API_KEY=                   # если API_KEY задан — тот же ключ для SSE/export во frontend
-# HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе
+# HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе; умолчание: dev — true, prod — false
 # HTTP_LOG_BODY_LIMIT=4096        # макс. символов тела в логе, дальше — «…[truncated, N bytes]»
 # HTTP_LOG_EXCLUDE_PATHS=/metrics,/api/v1/health,/api/v1/vacancies/metrics,/api/v1/analytics/salaries,/api/v1/analytics/sources,/api/v1/analytics/companies,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico
 #                                  (те же пути не трассируются)
@@ -106,6 +109,35 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 
 Первый вход в UI — через регистрацию на странице `/login`; подробнее — в
 разделе [Аутентификация и per-user данные](#аутентификация-и-per-user-данные).
+
+### Режимы dev и prod
+
+`APP_ENV` переключает умолчания, сам код один и тот же. Без переменной работает
+`dev` — локальная разработка ничего не требует настраивать.
+
+| | `APP_ENV=dev` (по умолчанию) | `APP_ENV=prod` |
+|---|---|---|
+| Регистрация новых пользователей | открыта | закрыта после первого (админа) |
+| Тела запросов/ответов в HTTP-логе | пишутся | не пишутся (резюме и email не уходят в Loki) |
+| `JWT_SECRET` | необязателен, эфемерный секрет | обязателен, 32+ символа — иначе backend и воркеры не стартуют |
+
+`AUTH_REGISTRATION_OPEN` и `HTTP_LOG_BODIES`, заданные явно, действуют в любом
+режиме — например, `APP_ENV=prod` + `AUTH_REGISTRATION_OPEN=true`, чтобы
+временно пустить нового пользователя.
+
+Порты compose публикуются на `127.0.0.1`: с этой машины всё доступно по
+`localhost` как раньше, из сети — нет. `BIND_ADDR=0.0.0.0` открывает UI и API
+(доступ с телефона, сервер без reverse proxy); `INFRA_BIND_ADDR` — то же для
+Postgres, Redis и observability, но у них дефолтные пароли или нет
+аутентификации, наружу их открывать не стоит.
+
+Минимальный `.env` для сервера:
+
+```env
+APP_ENV=prod
+JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(48))"
+# BIND_ADDR=0.0.0.0   # если перед API нет reverse proxy на этой же машине
+```
 
 ---
 

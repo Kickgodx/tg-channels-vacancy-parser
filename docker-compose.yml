@@ -1,3 +1,7 @@
+# Порты публикуются на loopback: стек доступен с этой машины (localhost), но не из сети.
+# BIND_ADDR — UI и API, INFRA_BIND_ADDR — Postgres, Redis и observability (у них нет
+# своей аутентификации либо дефолтные пароли). Открыть в сеть: BIND_ADDR=0.0.0.0 в .env.
+
 # Ротация stdout-логов контейнеров (по умолчанию json-file растёт без лимита):
 # до 5 файлов по 10 МБ на контейнер, ротированные — gzip. Alloy читает логи
 # через Docker API, на сбор в Loki это не влияет.
@@ -22,6 +26,8 @@ x-app-common: &app-common
     context: .
     dockerfile: Dockerfile.backend
   logging: *default-logging
+  # Упавший воркер без restart оставляет прогон в queued и блокирует новые запуски.
+  restart: unless-stopped
   env_file:
     - .env
   depends_on:
@@ -40,8 +46,9 @@ services:
       POSTGRES_DB: tgjobs
     volumes:
       - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "${INFRA_BIND_ADDR:-127.0.0.1}:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tgjobs -d tgjobs"]
       interval: 5s
@@ -53,8 +60,9 @@ services:
     logging: *default-logging
     # Host 6379 often falls into Windows Hyper-V/WinNAT excluded ranges (≈6251–6450).
     # Containers still use redis:6379; localhost clients → 16379.
+    restart: unless-stopped
     ports:
-      - "16379:6379"
+      - "${INFRA_BIND_ADDR:-127.0.0.1}:16379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -64,7 +72,7 @@ services:
   backend:
     <<: *app-common
     ports:
-      - "9000:8000"
+      - "${BIND_ADDR:-127.0.0.1}:9000:8000"
     environment:
       <<: *app-env
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
@@ -113,8 +121,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     logging: *default-logging
+    restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "${BIND_ADDR:-127.0.0.1}:5173:5173"
     environment:
       VITE_API_BASE_URL: http://localhost:9000/api/v1
     depends_on:
@@ -125,7 +134,7 @@ services:
     profiles: ["observability"]
     logging: *default-logging
     ports:
-      - "9090:9090"
+      - "${INFRA_BIND_ADDR:-127.0.0.1}:9090:9090"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
@@ -137,7 +146,7 @@ services:
     profiles: ["observability"]
     logging: *default-logging
     ports:
-      - "3000:3000"
+      - "${INFRA_BIND_ADDR:-127.0.0.1}:3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -157,7 +166,7 @@ services:
     logging: *default-logging
     command: -config.file=/etc/loki/local-config.yaml
     ports:
-      - "3100:3100"
+      - "${INFRA_BIND_ADDR:-127.0.0.1}:3100:3100"
     volumes:
       - ./observability/loki-config.yml:/etc/loki/local-config.yaml:ro
       - loki_data:/loki
@@ -172,7 +181,7 @@ services:
     user: root
     command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
     ports:
-      - "12345:12345"
+      - "${INFRA_BIND_ADDR:-127.0.0.1}:12345:12345"
     volumes:
       - ./observability/alloy-config.alloy:/etc/alloy/config.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -191,7 +200,7 @@ services:
     user: root
     command: -config.file=/etc/tempo/tempo.yaml
     ports:
-      - "3200:3200"
+      - "${INFRA_BIND_ADDR:-127.0.0.1}:3200:3200"
     volumes:
       - ./observability/tempo-config.yml:/etc/tempo/tempo.yaml:ro
       - tempo_data:/var/tempo

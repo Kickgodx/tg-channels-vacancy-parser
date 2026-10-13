@@ -103,11 +103,16 @@ def _count_by_column(
 def _daily_buckets(session: Session, query: VacancyQuery, *, dialect: str) -> list[TimeSeriesBucket]:
     day = func.date(VacancyRow.post_date)
     stmt = apply_vacancy_filters(
-        select(day, func.count(VacancyRow.id)).where(VacancyRow.post_date.isnot(None)).group_by(day).order_by(day),
+        select(day, func.count(VacancyRow.id))
+        .where(VacancyRow.post_date.isnot(None))
+        .group_by(day)
+        .order_by(day.desc()),
         query,
         dialect=dialect,
     ).limit(_MAX_DAILY_BUCKETS)
-    return [TimeSeriesBucket(period=str(d), count=int(c)) for d, c in session.execute(stmt).all() if d is not None]
+    # Лимит оставляет самые свежие дни; наружу — по возрастанию даты.
+    rows = session.execute(stmt).all()
+    return [TimeSeriesBucket(period=str(d), count=int(c)) for d, c in reversed(rows) if d is not None]
 
 
 def _vacancies_alias():

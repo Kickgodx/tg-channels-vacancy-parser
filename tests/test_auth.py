@@ -210,3 +210,17 @@ def test_registration_closed_for_new_users(client: TestClient, monkeypatch):
         assert _register(client, "second@example.com").status_code == 403
     finally:
         get_settings.cache_clear()
+
+
+def test_registration_closed_by_default_in_prod(client: TestClient, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "prod")
+    monkeypatch.setenv("JWT_SECRET", "test-secret-value-for-tests-32-chars")
+    monkeypatch.delenv("AUTH_REGISTRATION_OPEN", raising=False)
+    from backend.settings import get_settings
+
+    get_settings.cache_clear()
+    try:
+        assert _register(client, "admin@example.com").status_code == 201
+        assert _register(client, "second@example.com").status_code == 403
+    finally:
+        get_settings.cache_clear()
