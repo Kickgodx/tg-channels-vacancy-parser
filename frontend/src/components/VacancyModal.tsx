@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "../api/client";
 import type {
   CoverLetter,
@@ -136,10 +136,10 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
     ? "LLM оценит, насколько выбранное резюме подходит этой вакансии"
     : "Сначала выберите резюме в панели над таблицей";
 
-  // Сопроводительное письмо: сохранённый вариант подтягивается при открытии.
-  const [letter, setLetter] = useState<CoverLetter | null>(null);
-  const [letterDraft, setLetterDraft] = useState("");
-  const [letterTone, setLetterTone] = useState<CoverLetterTone>("neutral");
+  // Сопроводительное письмо: сохранённый вариант — база, правки и генерация — поверх.
+  const [generatedLetter, setGeneratedLetter] = useState<CoverLetter | null>(null);
+  const [draftOverride, setDraftOverride] = useState<string | null>(null);
+  const [toneOverride, setToneOverride] = useState<CoverLetterTone | null>(null);
   const [letterCopied, setLetterCopied] = useState(false);
 
   const savedLetterQ = useQuery({
@@ -151,23 +151,21 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
     retry: false,
   });
 
-  useEffect(() => {
-    const saved = savedLetterQ.data;
-    if (saved) {
-      setLetter(saved);
-      setLetterDraft(saved.text);
-      if (saved.tone === "friendly" || saved.tone === "formal") {
-        setLetterTone(saved.tone);
-      }
-    }
-  }, [savedLetterQ.data]);
+  const savedLetter = savedLetterQ.data ?? null;
+  const letter = generatedLetter ?? savedLetter;
+  const letterDraft = draftOverride ?? letter?.text ?? "";
+  const savedTone =
+    !generatedLetter && (savedLetter?.tone === "friendly" || savedLetter?.tone === "formal")
+      ? savedLetter.tone
+      : null;
+  const letterTone = toneOverride ?? savedTone ?? "neutral";
 
   const letterM = useMutation({
     mutationFn: ({ force }: { force: boolean }) =>
       api.generateCoverLetter(resumeId as number, listItem.id, letterTone, force),
     onSuccess: (data) => {
-      setLetter(data);
-      setLetterDraft(data.text);
+      setGeneratedLetter(data);
+      setDraftOverride(null);
       setLetterCopied(false);
     },
   });
@@ -217,7 +215,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
           </button>
           <select
             value={letterTone}
-            onChange={(e) => setLetterTone(e.target.value as CoverLetterTone)}
+            onChange={(e) => setToneOverride(e.target.value as CoverLetterTone)}
             disabled={!canMatch || letterM.isPending}
             title="Тон сопроводительного письма"
           >
@@ -371,7 +369,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
             <textarea
               className="cover-letter-text"
               value={letterDraft}
-              onChange={(e) => setLetterDraft(e.target.value)}
+              onChange={(e) => setDraftOverride(e.target.value)}
               rows={12}
             />
             {letter.cached && !letterM.isSuccess && (

@@ -36,3 +36,13 @@ export function elapsedSecondsBetween(isoStart?: string | null, isoEnd?: string 
   if (!Number.isFinite(ms) || ms < 0) return null;
   return ms / 1000;
 }
+
+/** Секунды от ISO-старта до уже известной отметки времени (мс). */
+export function elapsedSecondsUntil(isoStart: string | null | undefined, endMs: number): number | null {
+  if (!isoStart || !Number.isFinite(endMs)) return null;
+  const startMs = Date.parse(isoStart);
+  if (!Number.isFinite(startMs)) return null;
+  const ms = endMs - startMs;
+  if (ms < 0) return null;
+  return ms / 1000;
+}

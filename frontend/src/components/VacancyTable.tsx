@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { VacancyListItem } from "../types/api";
 import type { VacancySortField, VacancySortOrder } from "../types/sort";
 import { SORTABLE_COLUMNS } from "../types/sort";
@@ -81,13 +81,14 @@ export default function VacancyTable({
     "vacancy_score",
     "preview",
   ]);
+  const [matchScoreHidden, setMatchScoreHidden] = useState(false);
   const [selected, setSelected] = useState<{ v: VacancyListItem; idx: number } | null>(null);
 
-  useEffect(() => {
-    if (items.some((v) => v.match_score != null)) {
-      setCols((prev) => (prev.includes("match_score") ? prev : [...prev, "match_score"]));
-    }
-  }, [items]);
+  const hasMatchScore = items.some((v) => v.match_score != null);
+  const shownCols = useMemo(() => {
+    if (cols.includes("match_score") || matchScoreHidden || !hasMatchScore) return cols;
+    return [...cols, "match_score"];
+  }, [cols, hasMatchScore, matchScoreHidden]);
 
   const sortedItems = useMemo(() => {
     const base = onSortChange ? items : sortVacancies(items, sortBy, sortOrder);
@@ -164,7 +165,7 @@ export default function VacancyTable({
     }
   };
 
-  const visibleCols = useMemo(() => ALL_COLUMNS.filter((c) => cols.includes(c.key)), [cols]);
+  const visibleCols = useMemo(() => ALL_COLUMNS.filter((c) => shownCols.includes(c.key)), [shownCols]);
 
   const sortIndicator = (key: ColKey) => {
     if (sortBy !== key) return "";
@@ -179,10 +180,22 @@ export default function VacancyTable({
           <label key={c.key} className="chip">
             <input
               type="checkbox"
-              checked={cols.includes(c.key)}
+              checked={shownCols.includes(c.key)}
               onChange={(e) => {
-                if (e.target.checked) setCols([...cols, c.key]);
-                else setCols(cols.filter((k) => k !== c.key));
+                if (c.key === "match_score") {
+                  setMatchScoreHidden(!e.target.checked);
+                  setCols((prev) =>
+                    e.target.checked
+                      ? prev.includes("match_score")
+                        ? prev
+                        : [...prev, "match_score"]
+                      : prev.filter((k) => k !== "match_score"),
+                  );
+                  return;
+                }
+                setCols((prev) =>
+                  e.target.checked ? [...prev, c.key] : prev.filter((k) => k !== c.key),
+                );
               }}
             />
             {c.label}

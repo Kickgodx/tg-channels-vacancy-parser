@@ -8,6 +8,7 @@ import type { Vacancy } from "../types/api";
 import type { VacancySortField, VacancySortOrder } from "../types/sort";
 import {
   elapsedSecondsBetween,
+  elapsedSecondsUntil,
   formatDuration,
   parseSummaryFromRunParams,
 } from "../utils/formatDuration";
@@ -62,6 +63,7 @@ function RunTimingSummary({
   run,
   progress,
   isActive,
+  nowMs,
 }: {
   run: {
     started_at?: string | null;
@@ -71,13 +73,14 @@ function RunTimingSummary({
   };
   progress: ProgressEvent | null;
   isActive: boolean;
+  nowMs: number | null;
 }) {
   const summary = parseSummaryFromRunParams(run.run_params);
   const elapsedSec =
     summary?.total_elapsed_seconds ??
     elapsedSecondsBetween(run.started_at, run.finished_at) ??
-    (isActive && run.started_at
-      ? elapsedSecondsBetween(run.started_at, new Date().toISOString())
+    (isActive && run.started_at && nowMs != null
+      ? elapsedSecondsUntil(run.started_at, nowMs)
       : null);
 
   const postsProcessed = summary?.posts_processed ?? progress?.posts_total ?? run.posts_fetched;
@@ -118,11 +121,14 @@ function RunTimingSummary({
 export default function RunPage() {
   const { runId } = useParams<{ runId: string }>();
   const qc = useQueryClient();
-  const [progress, setProgress] = useState<ProgressEvent | null>(null);
-  const [liveVacancies, setLiveVacancies] = useState<Vacancy[]>([]);
+  const [stream, setStream] = useState<{
+    runId: string;
+    progress: ProgressEvent;
+    vacancies: Vacancy[];
+  } | null>(null);
   const [sortBy, setSortBy] = useState<VacancySortField>("post_date");
   const [sortOrder, setSortOrder] = useState<VacancySortOrder>("desc");
-  const [, setTick] = useState(0);
+  const [nowMs, setNowMs] = useState<number | null>(null);
 
   const run = useQuery({
     queryKey: ["run", runId],
@@ -130,14 +136,12 @@ export default function RunPage() {
     enabled: !!runId,
   });
 
-  useEffect(() => {
-    const snap = run.data?.progress;
-    if (!snap) return;
-    setProgress(snap);
-    if (snap.vacancies_preview?.length) {
-      setLiveVacancies(snap.vacancies_preview as Vacancy[]);
-    }
-  }, [run.data?.id, run.data?.progress_updated_at, run.data?.progress]);
+  const serverProgress = run.data?.progress ?? null;
+  const streamForRun = stream?.runId === runId ? stream : null;
+  const progress = streamForRun?.progress ?? serverProgress;
+  const liveVacancies = streamForRun?.vacancies.length
+    ? streamForRun.vacancies
+    : (serverProgress?.vacancies_preview ?? []);
 
   const runFinished =
     run.data?.status === "completed" ||
@@ -166,11 +170,20 @@ export default function RunPage() {
 
   useEffect(() => {
     if (!run.data?.started_at || run.data.status !== "running") return;
-    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
-    return () => window.clearInterval(id);
+    const tick = () => setNowMs(Date.now());
+    const first = window.setTimeout(tick, 0);
+    const id = window.setInterval(tick, 1000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(id);
+    };
   }, [run.data?.started_at, run.data?.status]);
 
-  const [streamError, setStreamError] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<{
+    runId: string;
+    status: string;
+    message: string;
+  } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -181,21 +194,29 @@ export default function RunPage() {
     ) {
       return;
     }
-    setStreamError(null);
     return api.subscribeRunEvents(
       runId,
       (snap) => {
-        setProgress(snap);
-        if (snap.vacancies_preview?.length) {
-          setLiveVacancies(snap.vacancies_preview as Vacancy[]);
-        }
+        setStream((prev) => {
+          const prevForRun = prev?.runId === runId ? prev : null;
+          const preview = snap.vacancies_preview ?? [];
+          return {
+            runId,
+            progress: snap,
+            vacancies: preview.length ? preview : (prevForRun?.vacancies ?? []),
+          };
+        });
       },
       () => {
         qc.invalidateQueries({ queryKey: ["run", runId] });
         qc.invalidateQueries({ queryKey: ["run-vacancies", runId] });
       },
       (err) => {
-        setStreamError(err.message || "Ошибка подписки на прогресс");
+        setStreamError({
+          runId,
+          status,
+          message: err.message || "Ошибка подписки на прогресс",
+        });
       },
     );
   }, [runId, run.data?.status, qc]);
@@ -246,7 +267,7 @@ export default function RunPage() {
             )}
             {run.data.error_message && <p className="error">{run.data.error_message}</p>}
 
-            <RunTimingSummary run={run.data} progress={progress} isActive={isActive} />
+            <RunTimingSummary run={run.data} progress={progress} isActive={isActive} nowMs={nowMs} />
 
             {isActive && (
               <>
@@ -276,7 +297,11 @@ export default function RunPage() {
                       {cancel.isPending ? "Отмена…" : "Отменить"}
                     </button>
                     {cancelError && <p className="error">{cancelError}</p>}
-                    {streamError && <p className="error">{streamError}</p>}
+                    {streamError &&
+                      streamError.runId === runId &&
+                      streamError.status === run.data.status && (
+                        <p className="error">{streamError.message}</p>
+                      )}
                   </>
                 )}
               </>

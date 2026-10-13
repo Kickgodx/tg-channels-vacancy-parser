@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "../api/client";
 import type { ParseFormState } from "../types/api";
 import { buildRunBody, formFromDefaults } from "../utils/parseForm";
@@ -15,12 +15,10 @@ export default function ParseForm({ onSubmit, disabled, isSubmitting }: Props) {
   const llmQ = useQuery({ queryKey: ["llm-models"], queryFn: () => api.getLlmModels() });
 
   const [form, setForm] = useState<ParseFormState | null>(null);
-
-  useEffect(() => {
-    if (defaultsQ.data && !form) {
-      setForm(formFromDefaults(defaultsQ.data));
-    }
-  }, [defaultsQ.data, form]);
+  // Первый снимок настроек фиксируем один раз: дальнейшие refetch не затирают правки.
+  if (form === null && defaultsQ.data) {
+    setForm(formFromDefaults(defaultsQ.data));
+  }
 
   if (defaultsQ.isError) {
     const msg =
