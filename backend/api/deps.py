@@ -14,7 +14,6 @@ from backend.settings import get_settings
 __all__ = [
     "get_current_user",
     "get_db",
-    "get_optional_user",
     "get_sse_user",
     "require_admin",
     "verify_api_key",
@@ -108,14 +107,6 @@ def get_sse_user(
     if user is None:
         raise http_error(401, CODE_NOT_AUTHENTICATED, "Not authenticated")
     return user
-
-
-def get_optional_user(
-    authorization: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-) -> UserRow | None:
-    """Тот же разбор JWT (только Bearer), но без 401 — для общих эндпоинтов."""
-    return _user_from_token(db, _extract_bearer(authorization))
 
 
 def require_admin(user: UserRow = Depends(get_current_user)) -> UserRow:

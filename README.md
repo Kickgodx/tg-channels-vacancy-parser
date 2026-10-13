@@ -80,7 +80,7 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # Опционально (для docker compose уже задано в compose-файле):
 # DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
 # CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-# API_KEY=                        # если задан — заголовок X-API-Key для API
+# API_KEY=                        # если задан — заголовок X-API-Key для API (дополнительно к JWT)
 # JWT_SECRET=                     # подпись access-токенов; без него — эфемерный (сессии сгорают при рестарте)
 # JWT_TTL_MINUTES=60              # TTL access-токена
 # AUTH_REGISTRATION_OPEN=true     # false — регистрация закрыта после первого пользователя
@@ -116,7 +116,7 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 | Страница | Описание |
 |----------|----------|
 | **Вход** | `/login` — вход и регистрация; без токена остальные страницы недоступны |
-| **Парсинг** | Форма парсинга (каналы, даты, специализации, формат работы, AI, пороги score) |
+| **Парсинг** | Форма парсинга (каналы, даты, специализации, формат работы, AI, пороги score); запуск и очистка кэша LLM — только для админа |
 | **Прогон** | Статус «В очереди» → running; прогресс (SSE / poll из БД, переживает F5 и рестарт API), метрики, графики, AI (токены), таблица, экспорт |
 | **Импорт** | `/import` — вставка текста вакансии вручную (например, с hh.ru): rules + LLM-разбор и запись в общую базу; ниже — последние импортированные |
 | **HH** | `/hh` — только для админа: sync вакансий с HH.ru (поиск AQA/Python), без LLM; кэш listings + skip detail |
@@ -226,7 +226,9 @@ LLM пишет черновик отклика под конкретную ва�
 резюме/пресеты, созданные до появления пользователей.
 
 - Приватное (по `user_id`): резюме, пресеты фильтров, матчи, письма.
-- Общее: вакансии, прогоны, аналитика, курсы ЦБ — единый корпус.
+- Общее: вакансии, прогоны, аналитика, курсы ЦБ — единый корпус. Читает любой
+  залогиненный пользователь; менять (запуск/отмена прогона, курсы, кэш LLM,
+  HH sync) может только админ.
 - Токен хранится в `localStorage`, уходит в `Authorization: Bearer …`;
   401 → редирект на `/login`. Для SSE (EventSource не умеет заголовки)
   токен передаётся параметром `access_token`.
@@ -268,10 +270,10 @@ uvicorn backend.main:app --reload --port 8000
 | `GET` | `/auth/me` | Текущий пользователь |
 | `GET` | `/config/defaults` | Значения по умолчанию для формы |
 | `GET` | `/config/llm-models` | Каталог моделей из `llm_models.yaml` |
-| `POST` | `/runs` | Постановка прогона в очередь (`queued` → parse-worker / inprocess) |
+| `POST` | `/runs` | Постановка прогона в очередь (admin; `queued` → parse-worker / inprocess) |
 | `GET` | `/runs/{id}` | Статус, метрики и durable `progress` прогона |
-| `GET` | `/runs/{id}/events` | SSE: прогресс (Redis pub/sub или DB poll); после F5 — resume |
-| `POST` | `/runs/{id}/cancel` | Отмена (флаг в БД; работает после рестарта API) |
+| `GET` | `/runs/{id}/events` | SSE: прогресс (Redis pub/sub или DB poll); после F5 — resume; Bearer или `?access_token=` |
+| `POST` | `/runs/{id}/cancel` | Отмена (admin; флаг в БД; работает после рестарта API) |
 | `GET` | `/runs/{id}/vacancies` | Вакансии прогона (`sort_by`, `sort_order`) |
 | `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта |
 | `GET` | `/vacancies` | Глобальный список (slim: `preview` без полных текстов; фильтры, сортировка, пагинация, `resume_id`) |
@@ -288,13 +290,20 @@ uvicorn backend.main:app --reload --port 8000
 | `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Письмо: кэш → 200; иначе 202 `{job_id}` (`force`, `tone`/`extra_notes`) |
 | `GET` | `/llm-jobs/{job_id}` | Статус LLM-задачи; при `done` — payload match/letter |
 | `GET` | `/llm-jobs/{job_id}/events` | SSE статусов (Bearer или `?access_token=`); poll остаётся fallback |
-| `GET` | `/fx/rates`, `POST` `/fx/refresh` \| `/fx/recalculate-rub` | Курсы ЦБ и пересчёт зарплат в ₽ |
+| `GET` | `/fx/rates`, `POST` `/fx/refresh` \| `/fx/recalculate-rub` | Курсы ЦБ и пересчёт зарплат в ₽ (`POST` — admin) |
 | `GET` | `/ai-cache/stats` | Число записей в кэше LLM |
-| `POST` | `/ai-cache/clear` | Полная очистка кэша LLM |
+| `POST` | `/ai-cache/clear` | Полная очистка кэша LLM (admin) |
 
-JWT обязателен для `/auth/me`, `/filters`, `/resumes` (включая match и cover-letter),
-`/llm-jobs/*`, `POST /vacancies/import` и HH (`require_admin`). Остальные эндпоинты
-открыты без логина, но при заданном `API_KEY` требуют заголовок `X-API-Key`.
+Без логина доступны только `/health`, `/auth/register` и `/auth/login`; всё остальное
+требует JWT. Мутации общих данных — `POST /runs`, `POST /runs/{id}/cancel`,
+`POST /fx/*`, `POST /ai-cache/clear` и HH — только админ (`require_admin`, иначе 403).
+`API_KEY`, если задан, — дополнительный заголовок `X-API-Key` поверх JWT, а не замена ему.
+
+Тело `POST /runs` — whitelist overrides поверх `config.yaml`: `channels`,
+`search.date_from|date_to`, `filters.*`, `parser.vacancy_score_threshold|vacancy_min_substantive_score`,
+`ai.enabled|model|fallback_models|use_cache` (модели — только id из `llm_models.yaml`).
+Любое другое поле → 422: `ai.base_url`, лимиты, concurrency и путь к Telethon-сессии
+задаются только на сервере.
 
 Импортированные вручную вакансии помечаются `source_channel = "manual"`
 (по нему их можно отфильтровать в списке); дедупликация — по тому же хэшу

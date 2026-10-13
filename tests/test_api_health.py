@@ -7,6 +7,7 @@ from datetime import UTC
 
 import pytest
 from fastapi.testclient import TestClient
+from tests.conftest import login_as_admin
 
 # SQLite для тестов без Docker
 os.environ.setdefault(
@@ -52,6 +53,7 @@ fx:
 
     init_db()
     with TestClient(app) as c:
+        login_as_admin(c)
         yield c
 
 

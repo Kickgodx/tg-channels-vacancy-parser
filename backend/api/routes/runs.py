@@ -6,17 +6,27 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_db, verify_api_key, verify_api_key_sse
+from backend.api.deps import (
+    _extract_token,
+    _user_from_token,
+    get_current_user,
+    get_db,
+    require_admin,
+    verify_api_key,
+    verify_api_key_sse,
+)
 from backend.config_builder import build_config
 from backend.db import repository as repo
+from backend.db.models import UserRow
 from backend.db.repository import metrics_from_run
 from backend.db.session import session_scope
 from backend.errors import (
     CODE_IDEMPOTENCY_IN_PROGRESS,
+    CODE_NOT_AUTHENTICATED,
     CODE_VALIDATION,
     AppError,
     http_error,
@@ -41,8 +51,13 @@ from tg_jobs_parser.models.parse_result import ParseResult
 
 _LOG = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/runs", tags=["runs"], dependencies=[Depends(verify_api_key)])
-# SSE отдельно: ``?api_key=`` только здесь, не на всём /runs.
+# Чтение — любой залогиненный пользователь; запуск и отмена — только admin.
+router = APIRouter(
+    prefix="/runs",
+    tags=["runs"],
+    dependencies=[Depends(verify_api_key), Depends(get_current_user)],
+)
+# SSE отдельно: ``?api_key=`` / ``?access_token=`` только здесь, не на всём /runs.
 sse_router = APIRouter(prefix="/runs", tags=["runs"])
 
 
@@ -64,6 +79,7 @@ def _row_to_summary(row) -> RunSummary:
 @router.post("", response_model=RunCreateResponse, status_code=202)
 def create_run(
     body: RunCreateRequest,
+    admin: UserRow = Depends(require_admin),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RunCreateResponse | JSONResponse:
     actor = idempotency.ACTOR_API
@@ -92,8 +108,9 @@ def create_run(
         raise
 
     _LOG.info(
-        "Создан прогон %s: каналов=%s, AI=%s",
+        "Создан прогон %s (user=%s): каналов=%s, AI=%s",
         run_id,
+        admin.id,
         len(body.channels) if body.channels else len(config.sources.channels),
         config.ai.enabled,
     )
@@ -139,10 +156,10 @@ def get_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> RunDetail:
 
 
 @router.post("/{run_id}/cancel")
-def cancel_run(run_id: uuid.UUID) -> dict:
+def cancel_run(run_id: uuid.UUID, admin: UserRow = Depends(require_admin)) -> dict:
     if not run_service.cancel_run(run_id):
         raise HTTPException(status_code=404, detail="Run not cancellable or not found")
-    _LOG.info("Прогон %s: отмена запрошена через API", run_id)
+    _LOG.info("Прогон %s: отмена запрошена через API (user=%s)", run_id, admin.id)
     return {"ok": True, "run_id": str(run_id)}
 
 
@@ -266,9 +283,22 @@ async def _sse_done_only() -> AsyncIterator[str]:
 
 
 @sse_router.get("/{run_id}/events", dependencies=[Depends(verify_api_key_sse)])
-async def run_events(run_id: uuid.UUID) -> StreamingResponse:
-    """SSE прогресса прогона. Auth: X-API-Key или ``?api_key=``. Сессия БД не держится на стриме."""
+async def run_events(
+    run_id: uuid.UUID,
+    authorization: str | None = Header(default=None),
+    access_token: str | None = Query(
+        default=None,
+        description="JWT для SSE-эндпоинтов (EventSource не шлёт заголовки)",
+        include_in_schema=False,
+    ),
+) -> StreamingResponse:
+    """SSE прогресса прогона. Auth: Bearer или ``?access_token=``.
+
+    Auth — короткая ``session_scope``; стрим не держит ``get_db``.
+    """
     with session_scope() as session:
+        if _user_from_token(session, _extract_token(authorization, access_token)) is None:
+            raise http_error(401, CODE_NOT_AUTHENTICATED, "Not authenticated")
         row = repo.get_parse_run(session, run_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Run not found")

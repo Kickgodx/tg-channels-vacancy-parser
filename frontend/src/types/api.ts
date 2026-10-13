@@ -395,13 +395,20 @@ export interface ProgressEvent {
   vacancies_preview?: Vacancy[];
 }
 
+/** Whitelist overrides прогона — backend отклоняет любое другое поле (422). */
 export interface RunCreateBody {
   channels?: string[];
-  search?: Record<string, unknown>;
-  filters?: Record<string, unknown>;
-  parser?: Record<string, unknown>;
-  ai?: Record<string, unknown>;
-  telegram_session_file?: string;
+  search?: { date_from?: string; date_to?: string };
+  filters?: {
+    specializations?: string[];
+    any_specialization?: boolean;
+    exclude_keywords?: string[];
+    countries?: string[];
+    cities?: string[];
+    work_formats?: string[];
+  };
+  parser?: { vacancy_score_threshold?: number; vacancy_min_substantive_score?: number };
+  ai?: { enabled?: boolean; model?: string; fallback_models?: string[]; use_cache?: boolean };
 }
 
 export interface ParseFormState {
@@ -416,7 +423,6 @@ export interface ParseFormState {
   workFormats: string[];
   vacancyScoreThreshold: number;
   vacancyMinSubstantive: number;
-  telethonSession: string;
   useAi: boolean;
   aiModel: string;
   aiFallbacks: string[];

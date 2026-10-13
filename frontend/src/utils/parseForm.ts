@@ -66,7 +66,6 @@ export function formFromDefaults(d: ConfigDefaults): ParseFormState {
     workFormats: d.filters.work_formats.length ? d.filters.work_formats : ["any"],
     vacancyScoreThreshold: d.parser.vacancy_score_threshold,
     vacancyMinSubstantive: d.parser.vacancy_min_substantive_score,
-    telethonSession: d.telegram.telethon_session_file,
     useAi: d.ai.enabled,
     aiModel: d.ai.model,
     aiFallbacks: [...d.ai.fallback_models],
@@ -83,7 +82,7 @@ export function buildRunBody(form: ParseFormState, defaults: ConfigDefaults): Ru
     .map((x) => x.trim())
     .filter(Boolean);
 
-  const filters: Record<string, unknown> = {
+  const filters: NonNullable<RunCreateBody["filters"]> = {
     exclude_keywords: exLines.length ? exLines : defaults.filters.exclude_keywords,
     countries: splitCsv(form.countriesText),
     cities: splitCsv(form.citiesText),
@@ -98,7 +97,7 @@ export function buildRunBody(form: ParseFormState, defaults: ConfigDefaults): Ru
     filters.any_specialization = false;
   }
 
-  const ai: Record<string, unknown> = {
+  const ai: NonNullable<RunCreateBody["ai"]> = {
     enabled: form.useAi,
   };
   if (form.useAi) {
@@ -121,6 +120,5 @@ export function buildRunBody(form: ParseFormState, defaults: ConfigDefaults): Ru
       vacancy_min_substantive_score: form.vacancyMinSubstantive,
     },
     ai,
-    telegram_session_file: form.telethonSession.trim() || undefined,
   };
 }

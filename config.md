@@ -91,7 +91,9 @@ Env (не yaml): `LLM_JOB_BACKEND=inprocess|rq`, `REDIS_URL`, `LLM_WORKER_METRIC
 
 **Ошибки API:** `detail` может быть объектом `{code, message, retryable}` (например `CONFLICT_ACTIVE_RUN`).
 
-**Frontend при `API_KEY`:** задайте `VITE_API_KEY` (тот же секрет) — SSE (`?api_key=`) и export (`X-API-Key`).
+**Overrides прогона:** `POST /runs` принимает только whitelist полей (каналы, даты, фильтры, пороги score, `ai.enabled|model|fallback_models|use_cache`); остальное — включая `ai.base_url`, лимиты и `telegram.telethon_session_file` — меняется только в этом файле. Неизвестное поле → 422.
+
+**Frontend при `API_KEY`:** задайте `VITE_API_KEY` (тот же секрет) — SSE (`?api_key=`) и export (`X-API-Key`). Ключ попадает в JS-бандл, поэтому это дополнительный слой поверх JWT, а не защита сам по себе.
 
 ---
 
