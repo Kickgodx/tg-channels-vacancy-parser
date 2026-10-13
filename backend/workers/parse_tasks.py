@@ -55,6 +55,7 @@ def run_parse_job(run_id: str, traceparent: str | None = None) -> None:
 
 
 _LEASE_HEARTBEAT_S = 30.0
+_LEASE_JOIN_TIMEOUT_S = 5.0
 
 
 def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
@@ -93,11 +94,21 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
     lease_lost = threading.Event()
 
     def _poll_cancel() -> None:
+        failing = False
         while not stop_cancel_poll.wait(0.5):
-            with session_scope() as session:
-                if repo.is_parse_run_cancel_requested(session, run_id):
-                    cancel_token.request_cancel()
-                    return
+            try:
+                with session_scope() as session:
+                    requested = repo.is_parse_run_cancel_requested(session, run_id)
+            except Exception as e:
+                # Сбой БД не должен завершать поток: иначе отмена этого прогона перестаёт работать.
+                if not failing:
+                    _LOG.warning("Прогон %s: опрос отмены не удался, повторяем: %s", run_id, e)
+                    failing = True
+                continue
+            failing = False
+            if requested:
+                cancel_token.request_cancel()
+                return
 
     def _mark_lease_lost() -> None:
         if not lease_lost.is_set():
@@ -110,7 +121,9 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             with session_scope() as session:
                 ok = repo.touch_parse_run_lease(session, run_id, lease_owner=lease_owner)
             if not ok:
-                _mark_lease_lost()
+                # После stop_lease прогон финализируется: «не running» — уже не потеря lease.
+                if not stop_lease.is_set():
+                    _mark_lease_lost()
                 return False
             return True
         except Exception as e:
@@ -166,11 +179,16 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
         now = time.monotonic()
         if now - _last_db_progress >= 1.0:
             _last_db_progress = now
-            with session_scope() as session:
-                if not repo.touch_parse_run_lease(session, run_id, lease_owner=lease_owner):
-                    _mark_lease_lost()
-                    return
-                repo.patch_run_progress(session, run_id, payload, lease_owner=lease_owner)
+            try:
+                with session_scope() as session:
+                    if not repo.touch_parse_run_lease(session, run_id, lease_owner=lease_owner):
+                        _mark_lease_lost()
+                        return
+                    repo.patch_run_progress(session, run_id, payload, lease_owner=lease_owner)
+            except Exception as e:
+                # Прогресс необязателен: транзиентный сбой БД не должен ронять прогон.
+                _LOG.warning("Прогон %s: прогресс не записан: %s", run_id, e)
+                return
             publish_parse_run_event(run_id, event="progress", payload=payload)
 
     flushed_ids: set[str] = set()
@@ -213,6 +231,29 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
         flushed_ids.update(v.id for v in remaining)
         return upsert_totals
 
+    def finalize_with_vacancies(res: ParseResult, final_status: str) -> repo.VacancyUpsertStats | None:
+        """Статус прогона и остаток вакансий — одной транзакцией. None — lease потерян.
+
+        Сбой записи вакансий откатывает и статус: прогон остаётся ``running`` и
+        уходит в ``failed`` общим обработчиком, а не в ``completed`` без данных.
+        """
+        nonlocal upsert_totals
+        remaining = [v for v in res.vacancies_unique if v.id not in flushed_ids]
+        with session_scope() as session:
+            # Fenced UPDATE первым: проверяет lease до записи вакансий.
+            if not repo.finalize_parse_run(session, run_id, res, status=final_status, lease_owner=lease_owner):
+                return None
+            stats = repo.upsert_vacancies(session, remaining, parse_run_id=run_id)
+            repo.archive_expired_vacancies(session)
+            totals = repo.VacancyUpsertStats(
+                inserted=upsert_totals.inserted + stats.inserted,
+                updated_existing=upsert_totals.updated_existing + stats.updated_existing,
+            )
+            repo.patch_run_vacancy_upsert_stats(session, run_id, totals)
+        upsert_totals = totals
+        flushed_ids.update(v.id for v in remaining)
+        return totals
+
     fx_rates = None
     if config.fx.enabled:
         try:
@@ -245,31 +286,27 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             error = "lease lost"
             _LOG.warning("Прогон %s: результат отброшен — lease перехвачен recover", run_id)
         else:
-            status = "cancelled" if cancel_token.is_cancelled() else "completed"
-            with session_scope() as session:
-                wrote = repo.finalize_parse_run(session, run_id, result, status=status, lease_owner=lease_owner)
-            if not wrote:
+            final_status = "cancelled" if cancel_token.is_cancelled() else "completed"
+            # Heartbeat останавливаем до финализации: после неё прогон уже не running.
+            stop_lease.set()
+            lease_thread.join(timeout=_LEASE_JOIN_TIMEOUT_S)
+            _LOG.info(
+                "Прогон %s: финальное сохранение в PostgreSQL (%s вакансий уже записано по ходу прогона, осталось %s)…",
+                run_id,
+                len(flushed_ids),
+                len(result.vacancies_unique) - len(flushed_ids),
+            )
+            try:
+                totals = finalize_with_vacancies(result, final_status)
+            except Exception as vac_err:
+                raise RuntimeError(f"Вакансии не сохранены в БД: {vac_err}") from vac_err
+            if totals is None:
                 status = "failed"
                 error = "lease lost"
                 lease_lost.set()
                 _LOG.warning("Прогон %s: finalize no-op (fencing)", run_id)
             else:
-                try:
-                    remaining_count = len(result.vacancies_unique) - len(flushed_ids)
-                    _LOG.info(
-                        "Прогон %s: финальное сохранение в PostgreSQL (%s вакансий уже записано по ходу прогона, осталось %s)…",
-                        run_id,
-                        len(flushed_ids),
-                        remaining_count,
-                    )
-                    totals = persist_remaining(result.vacancies_unique)
-                except Exception as vac_err:
-                    _LOG.exception("Прогон %s: не удалось сохранить вакансии: %s", run_id, vac_err)
-                    with session_scope() as session:
-                        row = repo.get_parse_run(session, run_id)
-                        if row is not None and row.status == status:
-                            row.error_message = f"Вакансии не сохранены в БД: {vac_err}"
-                    raise
+                status = final_status
                 _LOG.info(
                     "Прогон %s завершён: %s уникальных в прогоне, в БД +%s новых, %s уже были",
                     run_id,
@@ -343,9 +380,12 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
         mark_parse_run_stopped()
         if last_progress is not None and not lease_lost.is_set():
             final_payload = snapshot_to_progress_dict(last_progress)
-            with session_scope() as session:
-                if repo.touch_parse_run_lease(session, run_id, lease_owner=lease_owner):
-                    repo.patch_run_progress(session, run_id, final_payload, lease_owner=lease_owner)
-                    publish_parse_run_event(run_id, event="progress", payload=final_payload)
+            try:
+                with session_scope() as session:
+                    if repo.touch_parse_run_lease(session, run_id, lease_owner=lease_owner):
+                        repo.patch_run_progress(session, run_id, final_payload, lease_owner=lease_owner)
+                        publish_parse_run_event(run_id, event="progress", payload=final_payload)
+            except Exception as e:
+                _LOG.warning("Прогон %s: финальный прогресс не записан: %s", run_id, e)
         if not lease_lost.is_set():
             publish_parse_run_event(run_id, event="done", payload={})

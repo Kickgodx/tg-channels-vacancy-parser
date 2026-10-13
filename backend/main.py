@@ -88,6 +88,13 @@ async def lifespan(_app: FastAPI):
     from backend.db.ai_cache import register_db_ai_cache
 
     register_db_ai_cache()
+    env = get_settings()
+    log.info(
+        "APP_ENV=%s: регистрация новых пользователей %s, тела HTTP в логах %s",
+        env.app_env,
+        "открыта" if env.auth_registration_open else "закрыта",
+        "пишутся" if env.http_log_bodies else "не пишутся",
+    )
     log.info("Инициализация БД…")
     init_db()
     _cleanup_expired_vacancies()

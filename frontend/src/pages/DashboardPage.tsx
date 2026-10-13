@@ -42,7 +42,9 @@ export default function DashboardPage() {
     },
   });
 
-  const hasActiveRun = runs.data?.some((r) => r.status === "running" || r.status === "pending");
+  const hasActiveRun = runs.data?.some(
+    (r) => r.status === "queued" || r.status === "running" || r.status === "pending",
+  );
 
   // Запуск прогона и очистка кэша — admin-only на backend (403 остальным).
   const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });

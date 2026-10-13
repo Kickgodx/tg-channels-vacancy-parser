@@ -127,4 +127,8 @@ pub/sub для SSE). Оба типа джоб устроены одинаков�
   `get_settings()` под `lru_cache`: в тестах после `monkeypatch.setenv` нужен
   `get_settings.cache_clear()` (и `reset_engine()` при смене `DATABASE_URL`) —
   см. фикстуру `api_client`.
+- `APP_ENV` (`dev` по умолчанию | `prod`) переключает только умолчания в
+  `Settings._apply_app_env`: регистрация, тела в HTTP-логе, обязательность
+  `JWT_SECRET`. Новое различие dev/prod добавлять туда же (поле `None` →
+  значение по режиму), а не ветками `if is_production` по коду; тесты идут в `dev`.
 - `llm_models.yaml` — каталог моделей и цен для UI и расчёта стоимости токенов.
