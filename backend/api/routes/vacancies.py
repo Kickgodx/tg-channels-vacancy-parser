@@ -58,7 +58,7 @@ def import_vacancies(
         if not any(texts):
             raise http_error(400, CODE_VALIDATION, "Пустой текст вакансии")
         source_url = (body.source_url or "").strip() or None
-        result = import_service.import_vacancy_texts(db, texts, source_url=source_url)
+        result = import_service.import_vacancy_texts(db, texts, source_url=source_url, user_id=user.id)
     except Exception:
         idempotency.abandon(key=idempotency_key, scope=scope, actor=actor)
         raise

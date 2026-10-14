@@ -94,6 +94,7 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # LLM_JOB_LEASE_SECONDS=120       # lease running LLM
 # JOB_RECOVER_INTERVAL_SECONDS=60 # периодический recover: в worker (rq) или в API (inprocess)
 # ANALYTICS_CACHE_SECONDS=30      # кэш агрегатов дашборда/аналитики в памяти API (сек); 0 — выключить
+# LLM_USER_DAILY_CALLS=100        # суточная квота вызовов LLM на не-админа (мэтч, письма, импорт); 0 — без квоты
 # PARSE_JOB_MAX_ATTEMPTS=3        # после стольких попыток зависший прогон → failed вместо requeue
 # LLM_JOB_MAX_ATTEMPTS=2          # то же для LLM-джоб → error
 # PARSE_RQ_JOB_TIMEOUT_SECONDS=43200  # таймаут RQ-джобы parse (сек; по умолчанию 12 ч)
@@ -235,6 +236,14 @@ confidence оценки, пояснение и списки совпадающи
   пик RAM, метрики в том же процессе). Метрики — контейнерный порт 9101
   (Prometheus `dns_sd` по имени `llm-worker`, все реплики; на хост не
   пробрасывается). Локально без Redis: `LLM_JOB_BACKEND=inprocess`.
+- **Лимиты расхода.** `ai.requests_per_minute` при заданном `REDIS_URL` — общий
+  на все процессы (API, parse-worker, все реплики llm-worker): счётчик минутного
+  окна в Redis, а не лимитер в памяти каждого процесса. Без Redis или при его
+  сбое — локальный лимит процесса. Не-админу доступно `LLM_USER_DAILY_CALLS`
+  вызовов LLM в сутки (UTC; по умолчанию 100, `0` — без квоты): каждая
+  поставленная мэтч/письмо-джоба и каждый текст ручного импорта, ушедший в LLM.
+  Сверх квоты — 429 `LLM_QUOTA_EXCEEDED`; импорт дочитывает остаток правилами.
+  Ответы из кэша квоту не тратят; админ (владелец ключа) без квоты.
 - Модель матчинга задаётся отдельно от модели парсинга: `ai.match_model`
   (+ `ai.match_reasoning_enabled` для reasoning-моделей) — качество здесь
   важнее скорости, вызовов на порядок меньше. Глубина рассуждений —
@@ -387,8 +396,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`): один подписчик 
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…019`, head —
-`019_specializations_jsonb_gin`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…020`, head —
+`020_llm_user_usage`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -404,6 +413,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`): один подписчик 
 | `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 | `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
+| `llm_user_usage` | Вызовы LLM пользователя за сутки — квота `LLM_USER_DAILY_CALLS` |
 
 Служебные таблицы чистятся сами (при старте и раз в час): просроченный кэш LLM и ключи идемпотентности, завершённые LLM-джобы старше `retention.llm_jobs_ttl_days` (30) и прогоны старше `retention.parse_runs_ttl_days` (180) — см. [config.md](config.md). Вакансии только архивируются, не удаляются.
 

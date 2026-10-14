@@ -21,6 +21,7 @@ from backend.db import vacancy_repository as vacancy_repo
 from backend.db.models import VacancyRow
 from backend.db.vacancy_mapper import row_to_vacancy
 from backend.observability import record_import_item
+from backend.services.llm_job_service import LlmDailyQuotaError, reserve_user_llm_calls
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import AppConfig
@@ -117,8 +118,13 @@ def import_vacancy_texts(
     texts: list[str],
     *,
     source_url: str | None = None,
+    user_id: int | None = None,
 ) -> ImportResult:
-    """Разобрать и сохранить тексты вакансий. Дедупликация — по хэшу текста (id)."""
+    """Разобрать и сохранить тексты вакансий. Дедупликация — по хэшу текста (id).
+
+    ``user_id`` — для суточной квоты LLM: каждый текст, ушедший в LLM, списывает
+    вызов. Квота кончилась посреди импорта — остальные тексты разбираются правилами.
+    """
     config = load_config(get_settings().config_path)
     result = ImportResult()
 
@@ -164,6 +170,15 @@ def import_vacancy_texts(
                 continue
 
             message = None
+            if ai_service is not None and user_id is not None:
+                try:
+                    reserve_user_llm_calls(session, user_id=user_id, calls=1)
+                except LlmDailyQuotaError as e:
+                    _LOG.warning("Импорт: %s — дальше без LLM", e)
+                    result.warning = f"{e} Остальные тексты разобраны без LLM."
+                    ai_service.log_batch_finished()
+                    ai_service.close()
+                    ai_service = None
             if ai_service is not None:
                 enriched, reject_status, message = _enrich_status(
                     ai_service,

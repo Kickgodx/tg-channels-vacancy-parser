@@ -322,3 +322,13 @@ class TelegramChannelCheckpointRow(Base):
     covered_from: Mapped[date] = mapped_column(Date, nullable=False)
     parse_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class LlmUserUsageRow(Base):
+    """Вызовы LLM пользователя за сутки (UTC) — для квоты ``LLM_USER_DAILY_CALLS``."""
+
+    __tablename__ = "llm_user_usage"
+
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

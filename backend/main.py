@@ -137,6 +137,10 @@ async def lifespan(_app: FastAPI):
     from backend.db.ai_cache import register_db_ai_cache
 
     register_db_ai_cache()
+    from backend.services.llm_rate_gate import register_redis_rate_gate
+
+    # Интерактивный LLM (inprocess) и парсинг в API делят RPM с воркерами.
+    register_redis_rate_gate()
     env = get_settings()
     log.info(
         "APP_ENV=%s: регистрация новых пользователей %s, тела HTTP в логах %s",
