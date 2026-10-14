@@ -174,20 +174,23 @@ def _record_sleeps(monkeypatch, *, cancel_on: int | None = None) -> list[float]:
     return slept
 
 
-def test_no_page_pause_by_default(monkeypatch):
+def test_zero_interval_disables_page_pauses(monkeypatch):
     slept = _record_sleeps(monkeypatch)
     client = FakeClient(PAGED_MESSAGES)
-    posts, _ = _run(_parser(), client)
+    posts, _ = _run(_parser(sleep_between_requests_seconds=0), client)
     assert len(posts) == 250
     assert slept == []
-    # Неявная пауза Telethon (1 с на страницу при limit=None) выключена.
+    # Встроенная пауза Telethon (1 с на страницу при limit=None) выключена — темп только наш.
     assert client.calls[0]["wait_time"] == 0
 
 
-def test_page_pause_before_each_next_history_page(monkeypatch):
+def test_page_interval_before_each_next_history_page(monkeypatch):
+    assert ParserConfig().sleep_between_requests_seconds == 1.0  # как wait_time Telethon
     slept = _record_sleeps(monkeypatch)
     posts, warn = _run(_parser(sleep_between_requests_seconds=2.5), FakeClient(PAGED_MESSAGES))
-    assert slept == [2.5, 2.5]  # после 100-го и 200-го сообщения
+    # После 100-го и 200-го сообщения; время разбора страницы вычитается из интервала.
+    assert slept == [pytest.approx(2.5, abs=0.5)] * 2
+    assert all(s <= 2.5 for s in slept)
     assert warn is None
     assert len(posts) == 250
 

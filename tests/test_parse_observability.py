@@ -143,12 +143,12 @@ def test_telegram_channel_span_and_metrics(exporter):
 def test_telegram_page_pauses_are_measured(exporter):
     paused_before = _sample("telegram_request_pause_seconds_total")
 
-    parser = _parser(sleep_between_requests_seconds=0.01)
+    parser = _parser(sleep_between_requests_seconds=0.2)
     asyncio.run(parser._iter_channel(FakeClient(PAGED_MESSAGES), "chan"))
 
     channel = next(s for s in exporter.get_finished_spans() if s.name == "telegram.channel")
     paused = _sample("telegram_request_pause_seconds_total") - paused_before
-    assert paused >= 0.02  # две паузы по 10 мс
+    assert paused > 0.2  # две паузы почти по 200 мс (минус разбор страницы)
     assert channel.attributes["telegram.pause_seconds"] == pytest.approx(paused, abs=0.001)
 
 

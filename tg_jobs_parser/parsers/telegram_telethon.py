@@ -30,7 +30,7 @@ _TRACER = trace.get_tracer(__name__)
 _MAX_FLOOD_RESUMES = 3
 
 # Страница истории: GetHistoryRequest в ``iter_messages`` отдаёт до 100 сообщений
-# (``_MAX_CHUNK_SIZE`` в Telethon). Пауза ``sleep_between_requests_seconds`` — между страницами.
+# (``_MAX_CHUNK_SIZE`` в Telethon). ``sleep_between_requests_seconds`` — интервал между страницами.
 _HISTORY_PAGE_SIZE = 100
 
 
@@ -355,8 +355,8 @@ class TelegramTelethonParser(BaseChannelParser):
         ``date_from``, — читаем только сообщения новее него (``min_id``). FloodWait
         дольше ``parser.flood_wait_max_seconds`` или ошибка посреди обхода не
         выбрасывают уже прочитанные посты: канал возвращается частично, с предупреждением.
-        ``parser.sleep_between_requests_seconds`` > 0 — пауза перед каждой следующей страницей
-        истории; фактически проспанное время возвращается для метрик.
+        ``parser.sleep_between_requests_seconds`` > 0 — запросы страниц истории не чаще раза в
+        N секунд (как ``wait_time`` Telethon); фактически проспанное время возвращается для метрик.
         """
         from telethon.errors import FloodWaitError
 
@@ -398,6 +398,7 @@ class TelegramTelethonParser(BaseChannelParser):
         offset_id = 0  # продолжение после FloodWait: сообщения старше последнего просмотренного
         flood_resumes = 0
         paused = 0.0
+        page_started = time.monotonic()  # ≈ момент запроса текущей страницы
 
         cancel = self.cancellation
         while True:
@@ -408,8 +409,8 @@ class TelegramTelethonParser(BaseChannelParser):
                     offset_date=offset_date,
                     offset_id=offset_id,
                     min_id=min_id,
-                    # Темп задаём сами (pause_s): иначе Telethon при limit > 3000, в том числе
-                    # limit=None (обход по окну дат), молча спит ~1 с перед каждой страницей.
+                    # Темп задаём сами (pause_s), чтобы его было видно в метриках; встроенный
+                    # Telethon при limit > 3000 (в т.ч. limit=None) — тот же интервал 1 с, но молча.
                     wait_time=0,
                 ):
                     if cancel and cancel.is_cancelled():
@@ -429,13 +430,17 @@ class TelegramTelethonParser(BaseChannelParser):
                     offset_id = msg.id
                     max_seen_id = max(max_seen_id, msg.id)
                     if pause_s > 0 and scanned % _HISTORY_PAGE_SIZE == 0:
-                        # Страница дочитана — пауза перед запросом следующей.
-                        pause_started = time.monotonic()
-                        resumed = await self._sleep_cancellable(pause_s)
-                        paused += time.monotonic() - pause_started
-                        if not resumed:
-                            stopped_early = True
-                            break
+                        # Страница дочитана — до следующего запроса выдерживаем интервал pause_s;
+                        # время запроса и разбора страницы в него уже входит.
+                        wait_s = pause_s - (time.monotonic() - page_started)
+                        if wait_s > 0:
+                            pause_started = time.monotonic()
+                            resumed = await self._sleep_cancellable(wait_s)
+                            paused += time.monotonic() - pause_started
+                            if not resumed:
+                                stopped_early = True
+                                break
+                        page_started = time.monotonic()
 
                     raw = getattr(msg, "message", None)
                     if not raw or not str(raw).strip():

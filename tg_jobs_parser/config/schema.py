@@ -483,12 +483,13 @@ class ParserConfig(BaseModel):
         ),
     )
     sleep_between_requests_seconds: float = Field(
-        default=0.0,
+        default=1.0,
         ge=0,
         le=60,
         description=(
-            "Telethon: пауза перед каждой следующей страницей истории канала (100 сообщений). "
-            "0 — без пауз. Каналы читаются параллельно (channel_concurrency), пауза — внутри канала."
+            "Telethon: страницы истории канала (100 сообщений) запрашиваются не чаще раза в N секунд "
+            "(1 — как встроенный wait_time Telethon). 0 — без пауз. Интервал — внутри канала; "
+            "каналы читаются параллельно (channel_concurrency)."
         ),
     )
     vacancy_fuzzy_duplicate_threshold: int = 88

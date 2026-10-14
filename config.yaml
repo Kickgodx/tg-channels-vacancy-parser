@@ -199,8 +199,8 @@ parser:
   # Сколько каналов опрашивать одновременно через одну Telethon-сессию.
   # 1 = старое последовательное поведение; 3..8 — оптимально; выше повышает риск FloodWait.
   channel_concurrency: 4
-  # Пауза перед каждой следующей страницей истории канала (100 сообщений), 0 — без пауз.
-  sleep_between_requests_seconds: 0
+  # Страницы истории канала (100 сообщений) — не чаще раза в N секунд; 0 — без пауз.
+  sleep_between_requests_seconds: 1
   vacancy_fuzzy_duplicate_threshold: 88
   fuzzy_compare_prefix_len: 500
 
