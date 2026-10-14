@@ -1,0 +1,9 @@
+# Build context — ./frontend (docker-compose.yml); корневой .dockerignore сюда не применяется.
+node_modules
+dist
+*.tsbuildinfo
+.env
+.env.*
+npm-debug.log*
+Dockerfile
+.dockerignore
