@@ -198,16 +198,20 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-async function pollLlmJob(jobId: string): Promise<LlmJob> {
+/** Промежуточные статусы джобы (у импорта — растущий `import_result`). */
+type LlmJobListener = (job: LlmJob) => void;
+
+async function pollLlmJob(jobId: string, onUpdate?: LlmJobListener): Promise<LlmJob> {
   for (;;) {
     const job = await request<LlmJob>(`/llm-jobs/${jobId}`);
     if (job.status === "done" || job.status === "error") return job;
+    onUpdate?.(job);
     await sleep(LLM_JOB_POLL_MS);
   }
 }
 
 /** Ждать завершения через SSE; при обрыве — poll до terminal (без hard timeout). */
-function waitLlmJobSse(jobId: string): Promise<LlmJob> {
+function waitLlmJobSse(jobId: string, onUpdate?: LlmJobListener): Promise<LlmJob> {
   const url = `${API_BASE}/llm-jobs/${jobId}/events${sseAuthQuery()}`;
 
   return new Promise((resolve, reject) => {
@@ -233,13 +237,14 @@ function waitLlmJobSse(jobId: string): Promise<LlmJob> {
       settled = true;
       window.clearTimeout(timer);
       es.close();
-      void pollLlmJob(jobId).then(resolve, reject);
+      void pollLlmJob(jobId, onUpdate).then(resolve, reject);
     };
 
     es.addEventListener("status", (ev) => {
       try {
         last = JSON.parse((ev as MessageEvent).data) as LlmJob;
         if (last.status === "done" || last.status === "error") finish(last);
+        else onUpdate?.(last);
       } catch {
         /* ignore parse */
       }
@@ -266,19 +271,20 @@ function waitLlmJobSse(jobId: string): Promise<LlmJob> {
   });
 }
 
-async function awaitLlmJob(jobId: string): Promise<LlmJob> {
+async function awaitLlmJob(jobId: string, onUpdate?: LlmJobListener): Promise<LlmJob> {
   try {
-    return await waitLlmJobSse(jobId);
+    return await waitLlmJobSse(jobId, onUpdate);
   } catch {
-    return pollLlmJob(jobId);
+    return pollLlmJob(jobId, onUpdate);
   }
 }
 
-/** POST мэтч/письмо: 200 кэш или 202 job → SSE (fallback poll). */
+/** POST мэтч/письмо/импорт: 200 готовый результат или 202 job → SSE (fallback poll). */
 async function postInteractiveLlm<T>(
   path: string,
   init: RequestInit,
   pick: (job: LlmJob) => T | null | undefined,
+  onUpdate?: LlmJobListener,
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -292,7 +298,7 @@ async function postInteractiveLlm<T>(
   if (res.status === 200) return (await res.json()) as T;
   if (res.status === 202) {
     const accepted = (await res.json()) as LlmJobAccepted;
-    const job = await awaitLlmJob(accepted.job_id);
+    const job = await awaitLlmJob(accepted.job_id, onUpdate);
     if (job.status === "error") {
       throw new ApiError(job.error_message || "LLM: ошибка задачи", {
         status: 500,
@@ -487,11 +493,20 @@ export const api = {
     `${API_BASE}/runs/${runId}/export.${kind}`,
 
   /** Ручной импорт: тексты вакансий → rules + LLM → запись в БД. */
-  importVacancies: (texts: string[], sourceUrl?: string) =>
-    request<VacancyImportResponse>("/vacancies/import", {
-      method: "POST",
-      body: JSON.stringify({ texts, source_url: sourceUrl || null }),
-    }),
+  /** Без LLM — сразу 200; с LLM — 202 и джоба, `onProgress` получает частичный итог. */
+  importVacancies: (
+    texts: string[],
+    sourceUrl?: string,
+    onProgress?: (partial: VacancyImportResponse) => void,
+  ) =>
+    postInteractiveLlm<VacancyImportResponse>(
+      "/vacancies/import",
+      { method: "POST", body: JSON.stringify({ texts, source_url: sourceUrl || null }) },
+      (job) => job.import_result,
+      (job) => {
+        if (job.import_result) onProgress?.(job.import_result);
+      },
+    ),
 
   hhStatus: () => request<HhStatus>("/hh/status"),
 

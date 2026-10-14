@@ -367,7 +367,7 @@ export interface CoverLetter {
   cached: boolean;
 }
 
-export type LlmJobKind = "match" | "cover_letter";
+export type LlmJobKind = "match" | "cover_letter" | "import";
 export type LlmJobStatus = "queued" | "running" | "done" | "error";
 
 export interface LlmJobAccepted {
@@ -379,11 +379,14 @@ export interface LlmJob {
   id: string;
   kind: LlmJobKind;
   status: LlmJobStatus;
-  resume_id: number;
-  vacancy_id: string;
+  /** null у импорта (kind=import). */
+  resume_id: number | null;
+  vacancy_id: string | null;
   error_message?: string | null;
   match?: VacancyMatch | null;
   cover_letter?: CoverLetter | null;
+  /** Импорт: итог по уже обработанным текстам — растёт, пока джоба running. */
+  import_result?: VacancyImportResponse | null;
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;
@@ -405,6 +408,8 @@ export interface VacancyImportResponse {
   rejected: number;
   ai_enabled: boolean;
   warning?: string | null;
+  /** Текстов в запросе; у выполняемой джобы items короче — это прогресс. */
+  total: number;
 }
 
 export interface RunDetail {

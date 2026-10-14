@@ -91,6 +91,7 @@ def recover_stuck_llm_jobs(*, requeue_all_queued: bool = False) -> int:
     if not to_requeue:
         return 0
 
+    from backend.services.llm_job_service import rq_job_timeout
     from backend.workers.llm_tasks import run_llm_job
 
     redis_conn = None
@@ -107,6 +108,7 @@ def recover_stuck_llm_jobs(*, requeue_all_queued: bool = False) -> int:
                 if row is None or row.status != "queued":
                     continue
                 rq_job_id = row.rq_job_id
+                timeout = rq_job_timeout(row.kind, row.params)
 
             if backend == "rq":
                 assert redis_conn is not None
@@ -127,7 +129,7 @@ def recover_stuck_llm_jobs(*, requeue_all_queued: bool = False) -> int:
                 rq_job = get_llm_queue().enqueue(
                     run_llm_job,
                     str(jid),
-                    job_timeout=settings.llm_rq_job_timeout_seconds,
+                    job_timeout=timeout,
                     result_ttl=3600,
                     failure_ttl=86400,
                 )

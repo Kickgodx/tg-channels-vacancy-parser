@@ -13,9 +13,9 @@ from opentelemetry.trace import SpanKind
 from backend.db import repository as repo
 from backend.db.session import session_scope
 from backend.observability import record_llm_job, record_llm_worker_job
-from backend.services import cover_letter_service, match_service
+from backend.services import cover_letter_service, import_service, match_service
 from backend.services.llm_job_events import publish_llm_job_event
-from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_MATCH
+from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_IMPORT, KIND_MATCH
 from backend.workers import liveness
 
 _LOG = logging.getLogger(__name__)
@@ -57,9 +57,12 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                     return
                 kind = job.kind
                 span.set_attribute("llm_job.kind", kind)
-                resume = repo.get_resume(session, job.resume_id)
-                vacancy = repo.get_vacancy_row(session, job.vacancy_id)
-                if resume is None or vacancy is None:
+                user_id = job.user_id
+                params = dict(job.params or {})
+                job_result = dict(job.result) if job.result else None
+                resume = repo.get_resume(session, job.resume_id) if job.resume_id is not None else None
+                vacancy = repo.get_vacancy_row(session, job.vacancy_id) if job.vacancy_id is not None else None
+                if kind != KIND_IMPORT and (resume is None or vacancy is None):
                     repo.set_llm_job_status(
                         session,
                         jid,
@@ -79,11 +82,10 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                         duration_seconds=time.perf_counter() - started,
                     )
                     return
-                resume_text = resume.text
-                vacancy_text = vacancy.cleaned_text or vacancy.raw_text or ""
+                resume_text = resume.text if resume is not None else ""
+                vacancy_text = (vacancy.cleaned_text or vacancy.raw_text or "") if vacancy is not None else ""
                 resume_id = job.resume_id
                 vacancy_id = job.vacancy_id
-                params = dict(job.params or {})
             publish_llm_job_event(jid, status="running", kind=kind)
             record_llm_worker_job(kind=kind, outcome="started")
 
@@ -105,7 +107,16 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
             lease_thread = threading.Thread(target=_lease_loop, name=f"llm-lease-{jid}", daemon=True)
             lease_thread.start()
 
-            if kind == KIND_MATCH:
+            if kind == KIND_IMPORT:
+                if not import_service.run_import_job(
+                    jid,
+                    user_id=user_id,
+                    params=params,
+                    result=job_result,
+                    lease_owner=lease_owner,
+                ):
+                    lease_lost.set()
+            elif kind == KIND_MATCH:
                 match_service.match_single(
                     resume_id=resume_id,
                     resume_text=resume_text,

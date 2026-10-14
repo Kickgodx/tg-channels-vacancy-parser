@@ -1,4 +1,4 @@
-"""Репозиторий фоновых LLM-джобов (match / cover letter)."""
+"""Репозиторий фоновых LLM-джобов (match / cover letter / import)."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ def create_llm_job(
     *,
     user_id: int,
     kind: str,
-    resume_id: int,
-    vacancy_id: str,
+    resume_id: int | None = None,
+    vacancy_id: str | None = None,
     force: bool = False,
     params: dict | None = None,
 ) -> LlmJobRow:
@@ -110,6 +110,29 @@ def touch_llm_job_lease(
     )
     session.flush()
     return (result.rowcount or 0) == 1
+
+
+def patch_llm_job_result(
+    session: Session,
+    job_id: uuid.UUID,
+    result: dict,
+    *,
+    lease_owner: str,
+) -> bool:
+    """Промежуточный итог выполняемой джобы; заодно продлевает lease. False — lease уже не наш."""
+    now = datetime.now(UTC)
+    updated = session.execute(
+        update(LlmJobRow)
+        .where(
+            LlmJobRow.id == job_id,
+            LlmJobRow.status == "running",
+            LlmJobRow.lease_owner == lease_owner.strip()[:64],
+        )
+        .values(result=result, lease_until=_lease_deadline(now))
+        .execution_options(synchronize_session=False)
+    )
+    session.flush()
+    return (updated.rowcount or 0) == 1
 
 
 def attempts_exhausted_message(attempts: int) -> str:

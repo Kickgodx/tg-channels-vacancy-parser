@@ -379,16 +379,21 @@ class LlmJobAccepted(BaseModel):
 
 
 class LlmJobOut(BaseModel):
-    """Статус фоновой LLM-задачи; при done — готовый match или cover_letter."""
+    """Статус фоновой LLM-задачи; при done — готовый match или cover_letter.
+
+    Импорт (``kind=import``): резюме и вакансии нет, ``import_result`` — итог по
+    уже обработанным текстам (растёт, пока джоба ``running``).
+    """
 
     id: uuid.UUID
     kind: str
     status: str
-    resume_id: int
-    vacancy_id: str
+    resume_id: int | None = None
+    vacancy_id: str | None = None
     error_message: str | None = None
     match: VacancyMatchOut | None = None
     cover_letter: CoverLetterOut | None = None
+    import_result: VacancyImportResponse | None = None
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -422,6 +427,11 @@ class VacancyImportResponse(BaseModel):
     rejected: int
     ai_enabled: bool
     warning: str | None = None
+    # Текстов в запросе: у выполняемой джобы импорта items короче — это прогресс.
+    total: int = 0
+
+
+LlmJobOut.model_rebuild()
 
 
 class AuthCredentials(BaseModel):

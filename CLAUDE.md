@@ -94,7 +94,8 @@ pub/sub для SSE). Оба типа джоб устроены одинаков�
   рестарт API);
 - прогресс прогона — колонка `parse_runs.progress`; SSE (`/runs/{id}/events`,
   `/llm-jobs/{id}/events`) читает Redis pub/sub с fallback на poll БД;
-- матчинг и письма: кэш в БД → 200, иначе `llm_jobs` + 202 `{job_id}`
+- матчинг и письма: кэш в БД → 200, иначе `llm_jobs` + 202 `{job_id}`; ручной импорт
+  с LLM — тоже `llm_jobs` (`kind=import`, без резюме/вакансии, итог в `result`)
   (`backend/services/llm_job_service.py`, `backend/workers/llm_tasks.py`);
 - мутации parse / HH sync / import принимают `Idempotency-Key`
   (`backend/services/idempotency.py`): резерв коммитится отдельной сессией до
