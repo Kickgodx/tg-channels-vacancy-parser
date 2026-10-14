@@ -145,6 +145,10 @@ def _fx_config(fx_config: FxConfig | None) -> FxConfig:
     return load_config(get_settings().config_path).fx
 
 
+# Строк на один INSERT: ~40 колонок × 200 = 8 000 параметров — ниже лимитов SQLite и Postgres.
+_UPSERT_CHUNK = 200
+
+
 def upsert_vacancies(
     session: Session,
     vacancies: list[Vacancy],
@@ -153,29 +157,29 @@ def upsert_vacancies(
     fx_config: FxConfig | None = None,
 ) -> VacancyUpsertStats:
     """
-    Вставка уникальных вакансий по ``id`` (content hash).
+    Вставка уникальных вакансий по ``id`` (content hash) — пакетами, по INSERT на чанк.
 
     При совпадении текста обновляются ``last_parse_run_id``, ``updated_at``, RUB-зарплата
     и AI-метаданные; извлечённые поля не трогаются. Если пост новее сохранённого
     (канал повторно опубликовал тот же текст), ``post_date`` сдвигается вперёд, а
     вакансия возвращается из архива — иначе TTL по первой публикации прятал бы её навсегда.
     ``parse_run_id=None`` — ручной импорт без прогона: существующая привязка
-    к прогону при update не затирается.
+    к прогону при update не затирается. Повтор ``id`` внутри пачки — берётся последний.
     """
     if not vacancies:
         return VacancyUpsertStats()
     started = time.monotonic()
     now = datetime.now(UTC)
-    ids = [v.id for v in vacancies]
-    existing_ids = set(session.scalars(select(VacancyRow.id).where(VacancyRow.id.in_(ids))).all())
+    by_id = {v.id: v for v in vacancies}
+    existing_ids = set(session.scalars(select(VacancyRow.id).where(VacancyRow.id.in_(list(by_id)))).all())
     fx = _fx_config(fx_config)
-    _LOG.info("Сохранение %s вакансий в БД (уже есть %s)…", len(vacancies), len(existing_ids))
-    rates_cache = preload_fx_rates_for_vacancies(session, vacancies, fx)
+    _LOG.info("Сохранение %s вакансий в БД (уже есть %s)…", len(by_id), len(existing_ids))
+    rates_cache = preload_fx_rates_for_vacancies(session, list(by_id.values()), fx)
     if rates_cache:
         _LOG.info("Курсы для сохранения: %s дат в кэше", len(rates_cache))
-    inserted = 0
-    updated_existing = 0
-    for v in vacancies:
+    new_rows: list[dict] = []
+    existing_rows: list[dict] = []
+    for v in by_id.values():
         is_existing = v.id in existing_ids
         apply_salary_rub_for_vacancy(v, session, fx, rates_cache=rates_cache, force=is_existing)
         row = vacancy_to_row(v, parse_run_id=parse_run_id)
@@ -183,35 +187,32 @@ def upsert_vacancies(
         data.pop("updated_at", None)
         if not data.get("parsed_at"):
             data["parsed_at"] = now
-        stmt = insert(VacancyRow).values(**data)
-        if is_existing:
-            # CASE вместо GREATEST: в SQLite (тесты) его нет, а max() там не игнорирует NULL.
-            reposted_later = stmt.excluded.post_date > VacancyRow.post_date
-            conflict_set = {
-                "updated_at": now,
-                "detected_salary_avg_rub": data["detected_salary_avg_rub"],
-                "ai_notes": data["ai_notes"],
-                "ai_confidence": data["ai_confidence"],
-                "extraction_source": data["extraction_source"],
-                "post_date": case(
-                    (VacancyRow.post_date.is_(None), stmt.excluded.post_date),
-                    (reposted_later, stmt.excluded.post_date),
-                    else_=VacancyRow.post_date,
-                ),
-                "archived_at": case((reposted_later, null()), else_=VacancyRow.archived_at),
-            }
-            if parse_run_id is not None:
-                conflict_set["last_parse_run_id"] = parse_run_id
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["id"],
-                set_=conflict_set,
-            )
-            updated_existing += 1
-        else:
-            stmt = stmt.on_conflict_do_nothing(index_elements=["id"])
-            inserted += 1
-            existing_ids.add(v.id)
-        session.execute(stmt)
+        (existing_rows if is_existing else new_rows).append(data)
+
+    for chunk in _chunks(new_rows):
+        session.execute(insert(VacancyRow).values(chunk).on_conflict_do_nothing(index_elements=["id"]))
+    for chunk in _chunks(existing_rows):
+        stmt = insert(VacancyRow).values(chunk)
+        # CASE вместо GREATEST: в SQLite (тесты) его нет, а max() там не игнорирует NULL.
+        reposted_later = stmt.excluded.post_date > VacancyRow.post_date
+        conflict_set = {
+            "updated_at": now,
+            "detected_salary_avg_rub": stmt.excluded.detected_salary_avg_rub,
+            "ai_notes": stmt.excluded.ai_notes,
+            "ai_confidence": stmt.excluded.ai_confidence,
+            "extraction_source": stmt.excluded.extraction_source,
+            "post_date": case(
+                (VacancyRow.post_date.is_(None), stmt.excluded.post_date),
+                (reposted_later, stmt.excluded.post_date),
+                else_=VacancyRow.post_date,
+            ),
+            "archived_at": case((reposted_later, null()), else_=VacancyRow.archived_at),
+        }
+        if parse_run_id is not None:
+            conflict_set["last_parse_run_id"] = parse_run_id
+        session.execute(stmt.on_conflict_do_update(index_elements=["id"], set_=conflict_set))
+
+    inserted, updated_existing = len(new_rows), len(existing_rows)
     _LOG.info(
         "Сохранение вакансий завершено за %.1f с: +%s новых, %s привязано к прогону",
         time.monotonic() - started,
@@ -222,6 +223,11 @@ def upsert_vacancies(
     if inserted or updated_existing:
         invalidate_vacancy_count_cache()
     return VacancyUpsertStats(inserted=inserted, updated_existing=updated_existing)
+
+
+def _chunks(rows: list[dict]):
+    for i in range(0, len(rows), _UPSERT_CHUNK):
+        yield rows[i : i + _UPSERT_CHUNK]
 
 
 def archive_expired_vacancies(

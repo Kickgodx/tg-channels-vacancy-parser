@@ -13,6 +13,7 @@ from typing import Annotated
 from fastapi import Query
 from pydantic import BeforeValidator
 
+from backend.errors import CODE_VALIDATION, http_error
 from backend.schemas import VacancyQuery
 
 # Пустой параметр (``?date_from=``) — «не задан», как и раньше, а не ошибка формата.
@@ -20,9 +21,22 @@ _EmptyAsNone = BeforeValidator(lambda v: None if v == "" else v)
 
 # OFFSET-пагинация: дальние страницы дороги, а UI до них не доходит.
 MAX_PAGE = 10_000
+# Глубина списка: OFFSET сканирует и отбрасывает все строки до страницы, поэтому
+# листать можно только первые MAX_LIST_DEPTH позиций — дальше уточняют фильтры.
+MAX_LIST_DEPTH = 10_000
 
 Page = Annotated[int, Query(ge=1, le=MAX_PAGE)]
 PageSize = Annotated[int, Query(ge=1, le=500)]
+
+
+def check_list_depth(page: int, page_size: int) -> None:
+    """422, если страница уходит дальше ``MAX_LIST_DEPTH`` позиций списка."""
+    if page * page_size > MAX_LIST_DEPTH:
+        raise http_error(
+            422,
+            CODE_VALIDATION,
+            f"Список листается только до {MAX_LIST_DEPTH} позиций — уточните фильтры или смените сортировку.",
+        )
 
 
 def vacancy_filters(

@@ -22,7 +22,7 @@ from backend.api.deps import (
     verify_api_key,
     verify_api_key_sse,
 )
-from backend.api.params import Page, PageSize
+from backend.api.params import Page, PageSize, check_list_depth
 from backend.api.sse import (
     DB_POLL_INTERVAL_S,
     HEARTBEAT_INTERVAL_S,
@@ -188,6 +188,7 @@ def run_vacancies(
     sort_order: VacancySortOrder = "desc",
     db: Session = Depends(get_db),
 ) -> VacancyListResponse:
+    check_list_depth(page, page_size)
     if repo.get_parse_run(db, run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     q = VacancyQuery(page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order)
