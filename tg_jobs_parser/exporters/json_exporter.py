@@ -25,7 +25,8 @@ def export_json(result: ParseResult, path: str | Path) -> Path:
     return path
 
 
-def export_json_bytes(result: ParseResult) -> bytes:
+def export_json_bytes(result: ParseResult, *, extra: dict | None = None) -> bytes:
+    """JSON результата; ``extra`` — дополнительные ключи верхнего уровня (например, пометка об обрезке)."""
     payload = {
         "run_params": result.run_params,
         "parsed_at": result.parsed_at.isoformat(),
@@ -35,6 +36,7 @@ def export_json_bytes(result: ParseResult) -> bytes:
         "vacancies_unique": [v.model_dump(mode="json") for v in result.vacancies_unique],
         "duplicates": [v.model_dump(mode="json") for v in result.duplicates],
         "metrics": result.metrics.model_dump(mode="json"),
+        **(extra or {}),
     }
     return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
 

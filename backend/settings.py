@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     # Пул SQLAlchemy на процесс. Пусто → по роли процесса (backend/db/session.py: API — под
     # threadpool sync-эндпоинтов, воркеры — 2–4 + overflow): N реплик llm-worker не съедают
     # max_connections Postgres.
+    # Потолок строк экспорта (xlsx списка и прогона, JSON прогона): сверх — обрезка с пометкой в файле.
+    export_max_rows: int = Field(default=50_000, ge=1, alias="EXPORT_MAX_ROWS")
     db_pool_size: int | None = Field(default=None, ge=1, alias="DB_POOL_SIZE")
     db_max_overflow: int | None = Field(default=None, ge=0, alias="DB_MAX_OVERFLOW")
     # Пусто → Postgres из compose с хоста, пароль — POSTGRES_PASSWORD из того же .env

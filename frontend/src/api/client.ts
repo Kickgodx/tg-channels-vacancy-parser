@@ -451,8 +451,11 @@ export const api = {
     return `${API_BASE}/vacancies/export.xlsx${qs ? `?${qs}` : ""}`;
   },
 
-  /** Скачать export с Authorization / X-API-Key (вместо голого &lt;a href&gt;). */
-  downloadExport: async (url: string, filename: string) => {
+  /**
+   * Скачать export с Authorization / X-API-Key (вместо голого &lt;a href&gt;).
+   * Возвращает пометку об обрезке («выгружено N из M»), если backend упёрся в EXPORT_MAX_ROWS.
+   */
+  downloadExport: async (url: string, filename: string): Promise<string | null> => {
     const res = await fetch(url, { headers: authHeaders() });
     if (res.status === 401) handleUnauthorized(url);
     if (!res.ok) {
@@ -472,6 +475,10 @@ export const api = {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(objectUrl);
+    const truncated = res.headers.get("X-Export-Truncated");
+    if (!truncated) return null;
+    const [exported, total] = truncated.split("/");
+    return `Выгружено ${exported} из ${total} — лимит экспорта. Уточните фильтры, чтобы выгрузить остальное.`;
   },
 
   listRunVacancies: (

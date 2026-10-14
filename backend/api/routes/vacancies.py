@@ -10,6 +10,7 @@ from backend.db import repository as repo
 from backend.db.aggregate_cache import cached_aggregate
 from backend.db.models import UserRow
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
+from backend.db.vacancy_repository import counted_vacancies
 from backend.errors import CODE_IDEMPOTENCY_IN_PROGRESS, CODE_RATE_LIMITED, CODE_VALIDATION, AppError, http_error
 from backend.schemas import (
     LlmJobAccepted,
@@ -20,9 +21,8 @@ from backend.schemas import (
     VacancySortField,
     VacancySortOrder,
 )
-from backend.services import idempotency, import_service
+from backend.services import export_service, idempotency, import_service
 from backend.services.llm_job_service import KIND_IMPORT, LlmJobUserLimitError, llm_job_runner
-from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.vacancy import Vacancy
 
@@ -109,15 +109,17 @@ def export_vacancies_xlsx(
     sort_order: VacancySortOrder = "desc",
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    """Excel всех вакансий в БД с учётом фильтров (как в списке)."""
-    query = filters.model_copy(update={"page_size": 500, "sort_by": sort_by, "sort_order": sort_order})
-    items = repo.list_all_vacancies(db, query)
+    """Excel вакансий в БД с учётом фильтров (как в списке), не больше ``EXPORT_MAX_ROWS`` строк."""
+    query = filters.model_copy(update={"sort_by": sort_by, "sort_order": sort_order})
+    limit = export_service.export_row_limit()
+    total = counted_vacancies(db, query, dialect=db.get_bind().dialect.name)
     metrics = aggregate_vacancy_metrics(db, query)
-    data = export_excel_bytes(items, metrics=metrics)
-    return StreamingResponse(
-        iter([data]),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="vacancies.xlsx"'},
+    return export_service.xlsx_response(
+        repo.iter_export_vacancies(db, query, limit=limit),
+        total=total,
+        limit=limit,
+        metrics=metrics,
+        filename="vacancies.xlsx",
     )
 
 
