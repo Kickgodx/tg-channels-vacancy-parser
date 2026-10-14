@@ -22,7 +22,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from backend.api.deps import _extract_token, _user_from_token, require_admin, verify_api_key, verify_api_key_sse
+from backend.api.deps import (
+    _extract_token,
+    _user_from_token,
+    bearer_token,
+    require_admin,
+    verify_api_key,
+    verify_api_key_sse,
+)
 from backend.api.sse import (
     DB_POLL_INTERVAL_S,
     HEARTBEAT_INTERVAL_S,
@@ -348,7 +355,7 @@ async def _sse_hh_sync_redis(job_id: uuid.UUID) -> AsyncIterator[str]:
 @sse_router.get("/sync-jobs/{job_id}/events", dependencies=[Depends(verify_api_key_sse)])
 def hh_sync_job_events(
     job_id: uuid.UUID,
-    authorization: str | None = Header(default=None),
+    authorization: str | None = Depends(bearer_token),
     access_token: str | None = Query(
         default=None,
         description="JWT для SSE-эндпоинтов (EventSource не шлёт заголовки)",

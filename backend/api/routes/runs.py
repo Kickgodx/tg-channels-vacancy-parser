@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from backend.api.deps import (
     _extract_token,
     _user_from_token,
+    bearer_token,
     get_db,
     require_admin,
     verify_api_key,
@@ -299,7 +300,7 @@ async def _sse_done_only() -> AsyncIterator[str]:
 @sse_router.get("/{run_id}/events", dependencies=[Depends(verify_api_key_sse)])
 def run_events(
     run_id: uuid.UUID,
-    authorization: str | None = Header(default=None),
+    authorization: str | None = Depends(bearer_token),
     access_token: str | None = Query(
         default=None,
         description="JWT для SSE-эндпоинтов (EventSource не шлёт заголовки)",

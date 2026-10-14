@@ -8,12 +8,12 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from backend.api.deps import _extract_token, _user_from_token, get_current_user, get_db
+from backend.api.deps import _extract_token, _user_from_token, bearer_token, get_current_user, get_db
 from backend.api.routes.resumes import _letter_to_out, _match_to_out
 from backend.api.sse import (
     DB_POLL_INTERVAL_S,
@@ -180,7 +180,7 @@ async def _sse_llm_job_redis(job_id: uuid.UUID, user_id: int) -> AsyncIterator[s
 @router.get("/{job_id}/events")
 def llm_job_events(
     job_id: uuid.UUID,
-    authorization: str | None = Header(default=None),
+    authorization: str | None = Depends(bearer_token),
     access_token: str | None = Query(
         default=None,
         description="JWT для SSE-эндпоинтов (EventSource не шлёт заголовки)",
