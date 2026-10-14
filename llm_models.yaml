@@ -51,3 +51,6 @@ models:
   - id: xiaomi/mimo-v2.6-flash
     name: Xiaomi Mimo V2.6 Flash
     cost: "0.14/0.28"
+  - id: xiaomi/mimo-v2.6-pro
+    name: Xiaomi Mimo V2.6 Pro
+    cost: "0.435/0.87"
