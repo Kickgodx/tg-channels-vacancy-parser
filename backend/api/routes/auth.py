@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.exc import IntegrityError
@@ -91,12 +92,11 @@ def register(body: RegisterRequest, request: Request, db: Session = Depends(get_
     return _token_response(user)
 
 
-@router.post("/login", response_model=TokenResponse)
-def login(body: AuthCredentials, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
-    email = body.email.strip().lower()
+def _authenticate(email: str, password: str, request: Request, db: Session) -> TokenResponse:
+    email = email.strip().lower()
     _enforce_limits("login", request, email)
     user = users_repo.get_user_by_email(db, email)
-    if user is None or not auth_service.verify_password(body.password, user.password_hash):
+    if user is None or not auth_service.verify_password(password, user.password_hash):
         auth_rate_limit.record_login_failure(email)
         record_auth_event("login", "invalid")
         _LOG.warning("Неудачный вход: %s", email)
@@ -109,6 +109,38 @@ def login(body: AuthCredentials, request: Request, db: Session = Depends(get_db)
     record_auth_event("login", "success")
     _LOG.info("Вход выполнен: %s (id=%s)", user.email, user.id)
     return _token_response(user)
+
+
+@router.post("/login", response_model=TokenResponse)
+def login(body: AuthCredentials, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
+    return _authenticate(body.email, body.password, request, db)
+
+
+async def _password_form(request: Request) -> tuple[str, str]:
+    """``username``/``password`` из urlencoded-тела OAuth2 password flow.
+
+    Вручную, а не ``OAuth2PasswordRequestForm``: тому нужен python-multipart,
+    лишняя зависимость ради одного эндпоинта.
+    """
+    form = parse_qs((await request.body()).decode("utf-8", errors="replace"))
+    username = form.get("username", [""])[0]
+    password = form.get("password", [""])[0]
+    if not username or not password:
+        raise http_error(422, CODE_VALIDATION, "username and password are required")
+    return username, password
+
+
+@router.post("/token", response_model=TokenResponse, include_in_schema=False)
+def token(
+    request: Request,
+    form: tuple[str, str] = Depends(_password_form),
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    """OAuth2 password flow для кнопки «Authorize» в Swagger UI: ``username`` — email.
+
+    Те же лимиты и проверки, что у ``/login``; клиентам — JSON ``/login``.
+    """
+    return _authenticate(form[0], form[1], request, db)
 
 
 @router.get("/me", response_model=UserOut)

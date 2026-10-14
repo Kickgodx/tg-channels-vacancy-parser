@@ -308,6 +308,10 @@ LLM пишет черновик отклика под конкретную ва�
 - Токен хранится в `localStorage`, уходит в `Authorization: Bearer …`;
   401 → редирект на `/login`. Для SSE (EventSource не умеет заголовки)
   токен передаётся параметром `access_token`.
+- Swagger (`/docs`) → кнопка «Authorize»: либо вставить готовый JWT в `HTTPBearer`
+  (без слова `Bearer`), либо войти в `OAuth2PasswordBearer` — email в поле
+  `username`, `client_id`/`secret` пустые (form-эндпоинт `POST /auth/token`, те же
+  лимиты, что у `/auth/login`). `X-API-Key` — там же, если задан `API_KEY`.
 - Отзыв токенов: в JWT — версия `users.token_version`; `POST /auth/change-password`
   и `POST /auth/logout-all` увеличивают её, и все ранее выданные токены
   (включая SSE) перестают приниматься. `is_active=false` отключает пользователя целиком.

@@ -101,6 +101,33 @@ def test_me_requires_token(client: TestClient):
     assert r.status_code == 401
 
 
+def test_token_form_login_for_swagger(client: TestClient):
+    """OAuth2 password flow (кнопка Authorize в Swagger): urlencoded, email в username."""
+    _register(client, "Swagger@Example.com")
+    url = "/api/v1/auth/token"
+    form = {"grant_type": "password", "username": "swagger@example.com", "password": "wrong-pass"}
+    assert client.post(url, data=form).status_code == 401
+    assert client.post(url, data={"username": "swagger@example.com"}).status_code == 422
+
+    r = client.post(url, data={**form, "password": "secret1"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["token_type"] == "bearer"
+    assert client.get("/api/v1/auth/me", headers=_auth(body["access_token"])).status_code == 200
+
+
+def test_openapi_declares_auth_schemes(client: TestClient):
+    """Без security-схем Swagger UI не шлёт Authorization (header-параметр он игнорирует)."""
+    spec = client.get("/openapi.json").json()
+    schemes = spec["components"]["securitySchemes"]
+    assert schemes["HTTPBearer"]["scheme"] == "bearer"
+    assert schemes["OAuth2PasswordBearer"]["flows"]["password"]["tokenUrl"] == "/api/v1/auth/token"
+    assert schemes["APIKeyHeader"]["name"] == "X-API-Key"
+    me = spec["paths"]["/api/v1/auth/me"]["get"]
+    assert {"HTTPBearer": []} in me["security"]
+    assert all(p["name"].lower() != "authorization" for p in me.get("parameters", []))
+
+
 def test_resumes_are_per_user(client: TestClient):
     t1 = _register(client, "a@example.com").json()["access_token"]
     t2 = _register(client, "b@example.com").json()["access_token"]
