@@ -212,8 +212,5 @@ dictionaries:
 
 output:
   directory: output
-  excel_filename: vacancies.xlsx
-  json_filename: vacancies.json
-  charts_directory: charts
   save_progress_batches: false
   partial_batches_subdirectory: partial
