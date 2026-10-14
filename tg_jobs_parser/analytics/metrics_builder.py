@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from statistics import mean, median
-
-import pandas as pd
 
 from tg_jobs_parser.extraction.grade_extractor import GRADE_RANK
 from tg_jobs_parser.models.metrics import (
@@ -26,6 +24,17 @@ def _salary_values_rub(vs: Iterable[Vacancy]) -> list[float]:
         if v.detected_salary_avg_rub is not None:
             out.append(float(v.detected_salary_avg_rub))
     return out
+
+
+def _week_period(d: date) -> str:
+    """Неделя пн–вс в виде ``YYYY-MM-DD/YYYY-MM-DD``."""
+    start = d - timedelta(days=d.weekday())
+    return f"{start.isoformat()}/{(start + timedelta(days=6)).isoformat()}"
+
+
+def _buckets(periods: Iterable[str]) -> list[TimeSeriesBucket]:
+    """Счётчик по периодам; ISO-строки сортируются хронологически."""
+    return [TimeSeriesBucket(period=p, count=c) for p, c in sorted(Counter(periods).items())]
 
 
 def _grade_rank(g: str | None) -> float:
@@ -121,16 +130,10 @@ def build_metrics(
         if v.post_date:
             dates.append(v.post_date)
     if dates:
-        naive = [d.astimezone(UTC).replace(tzinfo=None) if getattr(d, "tzinfo", None) else d for d in dates]
-        idx = pd.DatetimeIndex(naive)
-        daily = idx.floor("D").value_counts().sort_index()
-        ms.daily = [TimeSeriesBucket(period=str(i.date()), count=int(c)) for i, c in daily.items()]
-
-        weekly = idx.to_period("W").value_counts().sort_index()
-        ms.weekly = [TimeSeriesBucket(period=str(p), count=int(c)) for p, c in weekly.items()]
-
-        monthly = idx.to_period("M").value_counts().sort_index()
-        ms.monthly = [TimeSeriesBucket(period=str(p), count=int(c)) for p, c in monthly.items()]
+        days = [(d.astimezone(UTC) if d.tzinfo else d).date() for d in dates]
+        ms.daily = _buckets(d.isoformat() for d in days)
+        ms.weekly = _buckets(_week_period(d) for d in days)
+        ms.monthly = _buckets(f"{d.year:04d}-{d.month:02d}" for d in days)
 
     # technologies
     tech_counter: Counter[str] = Counter()
