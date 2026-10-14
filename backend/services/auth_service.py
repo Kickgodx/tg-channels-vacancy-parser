@@ -47,23 +47,27 @@ def _jwt_secret() -> str:
     return _ephemeral_secret
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, token_version: int = 0) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
+        "ver": token_version,
         "iat": now,
         "exp": now + timedelta(minutes=get_settings().jwt_ttl_minutes),
     }
     return jwt.encode(payload, _jwt_secret(), algorithm=_ALGO)
 
 
-def decode_access_token(token: str) -> int | None:
-    """user_id из токена или None (невалиден/истёк)."""
+def decode_access_token(token: str) -> tuple[int, int] | None:
+    """``(user_id, token_version)`` из токена или None (невалиден/истёк).
+
+    Токен без ``ver`` (выпущен до появления отзыва) считается версией 0.
+    """
     try:
         payload = jwt.decode(token, _jwt_secret(), algorithms=[_ALGO])
     except jwt.PyJWTError:
         return None
     try:
-        return int(payload["sub"])
+        return int(payload["sub"]), int(payload.get("ver", 0))
     except (KeyError, TypeError, ValueError):
         return None

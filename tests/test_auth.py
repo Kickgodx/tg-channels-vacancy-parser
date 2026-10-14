@@ -224,3 +224,172 @@ def test_registration_closed_by_default_in_prod(client: TestClient, monkeypatch)
         assert _register(client, "second@example.com").status_code == 403
     finally:
         get_settings.cache_clear()
+
+
+def _login(client: TestClient, email: str, password: str = "secret1"):
+    return client.post("/api/v1/auth/login", json={"email": email, "password": password})
+
+
+@pytest.fixture
+def auth_limits(monkeypatch):
+    """Включить лимиты /auth (в conftest они выключены) на чистых счётчиках и фиксированном окне."""
+    from backend.services import auth_rate_limit
+    from backend.settings import get_settings
+
+    def _set(*, per_minute: int = 0, max_failed: int = 0) -> None:
+        monkeypatch.setenv("AUTH_RATE_LIMIT_PER_MINUTE", str(per_minute))
+        monkeypatch.setenv("AUTH_MAX_FAILED_LOGINS", str(max_failed))
+        get_settings.cache_clear()
+
+    # Окно не перещёлкивается посреди теста — иначе счётчик обнулится и тест моргнёт.
+    monkeypatch.setattr(auth_rate_limit, "_window", lambda window_s: (1, 42.0))
+    auth_rate_limit.reset_auth_rate_limits()
+    yield _set
+    auth_rate_limit.reset_auth_rate_limits()
+    get_settings.cache_clear()
+
+
+def test_register_rejects_invalid_email(client: TestClient):
+    r = _register(client, "not-an-email")
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "VALIDATION"
+    assert _register(client, "user@localhost").status_code == 422
+
+
+def test_login_accepts_legacy_email_without_validation(client: TestClient):
+    """Пользователи, заведённые до проверки формата email, входят как раньше."""
+    from backend.db import user_content_repository as users_repo
+    from backend.db.session import session_scope
+    from backend.services.auth_service import hash_password
+
+    with session_scope() as s:
+        users_repo.create_user(s, email="admin", password_hash=hash_password("secret1"), is_admin=True)
+    assert _login(client, "admin").status_code == 200
+
+
+def test_register_duplicate_race_is_conflict_not_500(client: TestClient, monkeypatch):
+    """Параллельная регистрация того же email: проверка прошла, UNIQUE сработал на вставке."""
+    from backend.db import user_content_repository as users_repo
+
+    assert _register(client, "race@example.com").status_code == 201
+    monkeypatch.setattr(users_repo, "get_user_by_email", lambda session, email: None)
+    r = _register(client, "race@example.com")
+    assert r.status_code == 409
+    assert r.json()["detail"]["code"] == "EMAIL_TAKEN"
+
+
+def test_failed_logins_lock_email_before_password_check(client: TestClient, auth_limits, monkeypatch):
+    auth_limits(max_failed=2)
+    assert _register(client, "victim@example.com").status_code == 201
+    assert _login(client, "victim@example.com", "wrong-1").status_code == 401
+    assert _login(client, "Victim@Example.com", "wrong-2").status_code == 401
+
+    from backend.services import auth_service
+
+    verified = []
+    monkeypatch.setattr(auth_service, "verify_password", lambda *a: verified.append(1) or True)
+    r = _login(client, "victim@example.com", "secret1")
+    assert r.status_code == 429
+    assert r.json()["detail"] == {
+        "code": "RATE_LIMITED",
+        "message": r.json()["detail"]["message"],
+        "retryable": True,
+    }
+    assert r.headers["Retry-After"] == "42"
+    assert verified == []  # argon2 не вызывался
+    # Другой email не задет.
+    assert _register(client, "other@example.com").status_code == 201
+
+
+def test_successful_login_resets_failures(client: TestClient, auth_limits):
+    auth_limits(max_failed=2)
+    assert _register(client, "u@example.com").status_code == 201
+    assert _login(client, "u@example.com", "wrong-pass").status_code == 401
+    assert _login(client, "u@example.com").status_code == 200
+    assert _login(client, "u@example.com", "wrong-pass").status_code == 401
+    assert _login(client, "u@example.com").status_code == 200
+
+
+def test_auth_attempts_limited_per_ip(client: TestClient, auth_limits):
+    auth_limits(per_minute=3)
+    assert _register(client, "ip@example.com").status_code == 201
+    assert _login(client, "ip@example.com").status_code == 200
+    assert _login(client, "ip@example.com", "wrong-pass").status_code == 401
+    r = _login(client, "ip@example.com")
+    assert r.status_code == 429
+    assert _register(client, "ip2@example.com").status_code == 429
+
+
+def test_failed_logins_counted_in_redis(client: TestClient, auth_limits, monkeypatch):
+    """С REDIS_URL счётчики общие для процессов API — лежат в Redis, а не в памяти."""
+    import fakeredis
+
+    from backend.services import auth_rate_limit
+
+    server = fakeredis.FakeStrictRedis()
+    monkeypatch.setattr(auth_rate_limit, "_redis", lambda: server)
+    auth_limits(max_failed=1)
+    assert _register(client, "r@example.com").status_code == 201
+    assert _login(client, "r@example.com", "wrong-pass").status_code == 401
+    assert int(server.get("auth:rate:fail:r@example.com:1")) == 1
+    assert _login(client, "r@example.com").status_code == 429
+    auth_rate_limit.reset_auth_rate_limits()  # память пуста — лимит держит Redis
+    assert _login(client, "r@example.com").status_code == 429
+
+
+def test_change_password_revokes_old_tokens(client: TestClient):
+    old = _register(client, "cp@example.com").json()["access_token"]
+    second_session = _login(client, "cp@example.com").json()["access_token"]
+
+    bad = client.post(
+        "/api/v1/auth/change-password",
+        headers=_auth(old),
+        json={"current_password": "wrong", "new_password": "secret2"},
+    )
+    assert bad.status_code == 400
+    assert client.get("/api/v1/auth/me", headers=_auth(old)).status_code == 200
+
+    r = client.post(
+        "/api/v1/auth/change-password",
+        headers=_auth(old),
+        json={"current_password": "secret1", "new_password": "secret2"},
+    )
+    assert r.status_code == 200
+    new = r.json()["access_token"]
+
+    assert client.get("/api/v1/auth/me", headers=_auth(old)).status_code == 401
+    assert client.get("/api/v1/auth/me", headers=_auth(second_session)).status_code == 401
+    assert client.get("/api/v1/auth/me", headers=_auth(new)).status_code == 200
+    assert _login(client, "cp@example.com", "secret1").status_code == 401
+    assert _login(client, "cp@example.com", "secret2").status_code == 200
+
+
+def test_logout_all_revokes_tokens(client: TestClient):
+    token = _register(client, "out@example.com").json()["access_token"]
+    other = _register(client, "keep@example.com").json()["access_token"]
+    assert client.post("/api/v1/auth/logout-all", headers=_auth(token)).status_code == 204
+    assert client.get("/api/v1/auth/me", headers=_auth(token)).status_code == 401
+    # SSE-токен из query отозван так же.
+    assert (
+        client.get(
+            "/api/v1/llm-jobs/00000000-0000-0000-0000-000000000000/events", params={"access_token": token}
+        ).status_code
+        == 401
+    )
+    assert client.get("/api/v1/auth/me", headers=_auth(other)).status_code == 200
+    fresh = _login(client, "out@example.com").json()["access_token"]
+    assert client.get("/api/v1/auth/me", headers=_auth(fresh)).status_code == 200
+
+
+def test_token_without_version_claim_still_valid(client: TestClient):
+    """Токены, выданные до появления ``ver``, живут до своего exp, пока версия не менялась."""
+    from datetime import UTC, datetime, timedelta
+
+    import jwt
+
+    user_id = _register(client, "legacy-token@example.com").json()["user"]["id"]
+    now = datetime.now(UTC)
+    legacy = jwt.encode(
+        {"sub": str(user_id), "iat": now, "exp": now + timedelta(minutes=5)}, "test-secret", algorithm="HS256"
+    )
+    assert client.get("/api/v1/auth/me", headers=_auth(legacy)).status_code == 200

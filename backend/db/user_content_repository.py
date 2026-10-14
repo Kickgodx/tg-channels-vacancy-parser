@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from backend.db.models import (
@@ -26,6 +26,21 @@ def get_user_by_email(session: Session, email: str) -> UserRow | None:
 
 def count_users(session: Session) -> int:
     return int(session.scalar(select(func.count(UserRow.id))) or 0)
+
+
+# Ключ pg_advisory_xact_lock регистрации (рядом — HH_SYNC_ADVISORY_LOCK_KEY = 874_291_001).
+_REGISTRATION_LOCK_KEY = 874_291_002
+
+
+def lock_user_registration(session: Session) -> None:
+    """Сериализовать регистрации до конца транзакции.
+
+    Без этого две параллельные регистрации при пустой ``users`` обе видят
+    ``count_users == 0``: два admin'а, а в закрытом режиме — два «первых».
+    Postgres — advisory lock до commit/rollback; SQLite (только тесты) — no-op.
+    """
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _REGISTRATION_LOCK_KEY})
 
 
 def create_user(session: Session, *, email: str, password_hash: str, is_admin: bool = False) -> UserRow:

@@ -7,7 +7,7 @@ from datetime import UTC
 
 import pytest
 from fastapi.testclient import TestClient
-from tests.conftest import login_as_admin
+from tests.conftest import login_as_admin, metrics_text
 
 # SQLite для тестов без Docker
 os.environ.setdefault(
@@ -66,9 +66,8 @@ def test_health(client: TestClient):
 
 
 def test_prometheus_metrics(client: TestClient):
-    r = client.get("/metrics")
-    assert r.status_code == 200
-    body = r.text
+    assert client.get("/api/v1/health").status_code == 200
+    body = metrics_text()
     assert "http_requests_total" in body
     assert "http_request_duration_seconds" in body
     assert "llm_requests_total" in body

@@ -155,6 +155,9 @@ class UserRow(Base):
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Версия выданных токенов (claim ``ver``): +1 при смене пароля и «выйти везде»
+    # отзывает все ранее выданные JWT пользователя.
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 

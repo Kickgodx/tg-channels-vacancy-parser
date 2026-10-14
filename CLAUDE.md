@@ -22,7 +22,8 @@ docker compose up --build                 # UI :5173, API :9000/docs
 # observability (Prometheus/Grafana/Loki/Alloy/Tempo) — только при COMPOSE_PROFILES=observability в .env
 
 # backend локально без Docker и без Redis
-# env: PARSE_JOB_BACKEND=inprocess LLM_JOB_BACKEND=inprocess DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@127.0.0.1:5432/tgjobs
+# env: PARSE_JOB_BACKEND=inprocess LLM_JOB_BACKEND=inprocess
+# DATABASE_URL не нужен: без него — tgjobs:<POSTGRES_PASSWORD из .env>@127.0.0.1:5432/tgjobs
 # (127.0.0.1, не localhost: порт опубликован только на IPv4, через ::1 psycopg на Windows ждёт connect timeout)
 .venv/Scripts/python.exe -m uvicorn backend.main:app --reload --port 8000
 

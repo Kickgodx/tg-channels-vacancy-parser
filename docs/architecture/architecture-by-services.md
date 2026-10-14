@@ -45,7 +45,7 @@ flowchart LR
   BE --> OR
   BE --> HH
   BE --> CBR
-  BE -->|"/metrics"| PROM
+  BE -->|"/metrics :9100"| PROM
   W -->|"/metrics :9101"| PROM
   BE -->|"OTLP :4318"| ALLOY
   W -->|"OTLP"| ALLOY
@@ -59,7 +59,7 @@ flowchart LR
 | Сервис | Порт | Роль |
 |--------|------|------|
 | frontend | 5173 | Web UI |
-| backend | 9000→8000 | API, парсинг, JWT, `/metrics`, enqueue LLM jobs |
+| backend | 9000→8000; 9100 (только Docker-сеть) | API, парсинг, JWT, enqueue LLM jobs; `/metrics` — на :9100 |
 | llm-worker | 9101 (только Docker-сеть) | RQ `SimpleWorker`: мэтч/письма; `/metrics` без DB COUNT-collector, с `db_pool_*` |
 | redis | 6379 | Очередь RQ `llm` + pub/sub статуса SSE |
 | postgres | 5432 | Вакансии, runs, users, FX, cache, `llm_jobs` |

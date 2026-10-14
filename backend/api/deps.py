@@ -73,11 +73,13 @@ def _extract_token(
 def _user_from_token(db: Session, token: str | None) -> UserRow | None:
     if not token:
         return None
-    user_id = auth_service.decode_access_token(token)
-    if user_id is None:
+    claims = auth_service.decode_access_token(token)
+    if claims is None:
         return None
+    user_id, token_version = claims
     user = db.get(UserRow, user_id)
-    if user is None or not user.is_active:
+    # Версия меняется при смене пароля и «выйти везде» — старые токены отозваны.
+    if user is None or not user.is_active or token_version != user.token_version:
         return None
     return user
 

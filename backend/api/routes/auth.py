@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db
-from backend.db import repository as repo
+from backend.db import user_content_repository as users_repo
 from backend.db.models import UserRow
+from backend.errors import CODE_EMAIL_TAKEN, CODE_VALIDATION, http_error
 from backend.observability import record_auth_event
-from backend.schemas import AuthCredentials, TokenResponse, UserOut
-from backend.services import auth_service
+from backend.schemas import AuthCredentials, ChangePasswordRequest, RegisterRequest, TokenResponse, UserOut
+from backend.services import auth_rate_limit, auth_service
 from backend.settings import get_settings
 
 _LOG = logging.getLogger(__name__)
@@ -29,49 +31,81 @@ def _to_out(row: UserRow) -> UserOut:
 
 def _token_response(user: UserRow) -> TokenResponse:
     return TokenResponse(
-        access_token=auth_service.create_access_token(user.id),
+        access_token=auth_service.create_access_token(user.id, user.token_version),
         expires_in=get_settings().jwt_ttl_minutes * 60,
         user=_to_out(user),
     )
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_limits(event: str, request: Request, email: str | None = None) -> None:
+    """Лимит попыток с IP и, для входа, неудачных входов на email — до argon2."""
+    try:
+        auth_rate_limit.check_ip(_client_ip(request))
+        if email is not None:
+            auth_rate_limit.check_login_allowed(email)
+    except HTTPException:
+        record_auth_event(event, "rate_limited")
+        _LOG.warning("%s отклонён лимитом попыток: ip=%s email=%s", event, _client_ip(request), email or "-")
+        raise
+
+
+def _email_taken(email: str) -> HTTPException:
+    record_auth_event("register", "conflict")
+    _LOG.warning("Регистрация отклонена (email занят): %s", email)
+    return http_error(409, CODE_EMAIL_TAKEN, "Email already registered")
+
+
 @router.post("/register", response_model=TokenResponse, status_code=201)
-def register(body: AuthCredentials, db: Session = Depends(get_db)) -> TokenResponse:
+def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
     """Регистрация. Первый пользователь → admin и наследует legacy-строки (user_id IS NULL)."""
-    if not get_settings().auth_registration_open and repo.count_users(db) > 0:
-        record_auth_event("register", "closed")
-        _LOG.warning("Регистрация отклонена (закрыта): %s", body.email.strip().lower())
-        raise HTTPException(status_code=403, detail="Registration is closed")
+    _enforce_limits("register", request)
     email = body.email.strip().lower()
-    if repo.get_user_by_email(db, email) is not None:
-        record_auth_event("register", "conflict")
-        _LOG.warning("Регистрация отклонена (email занят): %s", email)
-        raise HTTPException(status_code=409, detail="Email already registered")
-    is_first = repo.count_users(db) == 0
-    user = repo.create_user(
-        db,
-        email=email,
-        password_hash=auth_service.hash_password(body.password),
-        is_admin=is_first,
-    )
+    # До commit: проверка «первый ли» и вставка атомарны относительно других регистраций.
+    users_repo.lock_user_registration(db)
+    is_first = users_repo.count_users(db) == 0
+    if not get_settings().auth_registration_open and not is_first:
+        record_auth_event("register", "closed")
+        _LOG.warning("Регистрация отклонена (закрыта): %s", email)
+        raise HTTPException(status_code=403, detail="Registration is closed")
+    if users_repo.get_user_by_email(db, email) is not None:
+        raise _email_taken(email)
+    try:
+        user = users_repo.create_user(
+            db,
+            email=email,
+            password_hash=auth_service.hash_password(body.password),
+            is_admin=is_first,
+        )
+    except IntegrityError:
+        # Параллельная регистрация того же email мимо lock'а (SQLite, CLI).
+        db.rollback()
+        raise _email_taken(email) from None
     if is_first:
-        repo.claim_legacy_rows(db, user.id)
+        users_repo.claim_legacy_rows(db, user.id)
     record_auth_event("register", "success")
     _LOG.info("Зарегистрирован пользователь %s (id=%s, admin=%s)", email, user.id, is_first)
     return _token_response(user)
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: AuthCredentials, db: Session = Depends(get_db)) -> TokenResponse:
-    user = repo.get_user_by_email(db, body.email.strip())
+def login(body: AuthCredentials, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
+    email = body.email.strip().lower()
+    _enforce_limits("login", request, email)
+    user = users_repo.get_user_by_email(db, email)
     if user is None or not auth_service.verify_password(body.password, user.password_hash):
+        auth_rate_limit.record_login_failure(email)
         record_auth_event("login", "invalid")
-        _LOG.warning("Неудачный вход: %s", body.email.strip().lower())
+        _LOG.warning("Неудачный вход: %s", email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user.is_active:
         record_auth_event("login", "disabled")
         _LOG.warning("Вход отклонён (пользователь отключён): %s", user.email)
         raise HTTPException(status_code=403, detail="User is disabled")
+    auth_rate_limit.reset_login_failures(email)
     record_auth_event("login", "success")
     _LOG.info("Вход выполнен: %s (id=%s)", user.email, user.id)
     return _token_response(user)
@@ -80,3 +114,37 @@ def login(body: AuthCredentials, db: Session = Depends(get_db)) -> TokenResponse
 @router.get("/me", response_model=UserOut)
 def me(user: UserRow = Depends(get_current_user)) -> UserOut:
     return _to_out(user)
+
+
+@router.post("/change-password", response_model=TokenResponse)
+def change_password(
+    body: ChangePasswordRequest,
+    request: Request,
+    user: UserRow = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    """Смена пароля отзывает все выданные токены; в ответе — новый токен этой сессии."""
+    _enforce_limits("change_password", request, user.email)
+    if not auth_service.verify_password(body.current_password, user.password_hash):
+        # Неверный текущий пароль — тот же перебор, что и на /login.
+        auth_rate_limit.record_login_failure(user.email)
+        record_auth_event("change_password", "invalid")
+        _LOG.warning("Смена пароля отклонена (неверный текущий пароль): %s", user.email)
+        raise http_error(400, CODE_VALIDATION, "Current password is incorrect")
+    user.password_hash = auth_service.hash_password(body.new_password)
+    user.token_version += 1
+    db.flush()
+    auth_rate_limit.reset_login_failures(user.email)
+    record_auth_event("change_password", "success")
+    _LOG.info("Пароль изменён, выданные токены отозваны: %s (id=%s)", user.email, user.id)
+    return _token_response(user)
+
+
+@router.post("/logout-all", status_code=204)
+def logout_all(user: UserRow = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
+    """Отозвать все выданные токены пользователя, включая текущий."""
+    user.token_version += 1
+    db.flush()
+    record_auth_event("logout_all", "success")
+    _LOG.info("Все сессии отозваны: %s (id=%s)", user.email, user.id)
+    return Response(status_code=204)

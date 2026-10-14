@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from prometheus_client import REGISTRY
+from tests.conftest import metrics_text
 from tests.llm_job_helpers import await_llm_job
 
 from backend.db import repository as repo
@@ -163,9 +164,7 @@ def test_upsert_and_archive_metrics(api_client):
 
 def test_db_stats_collector_in_metrics(api_client):
     _register(api_client, "db@example.com")
-    r = api_client.get("/metrics")
-    assert r.status_code == 200
-    body = r.text
+    body = metrics_text()
     for name in (
         "db_vacancies",
         "db_resumes",
@@ -236,8 +235,6 @@ def test_db_parse_runs_finished_24h_counts_recent(api_client):
     finally:
         session.close()
 
-    r = api_client.get("/metrics")
-    assert r.status_code == 200
     assert _sample("db_parse_runs_finished_24h", {"status": "completed"}) >= 1
     assert _sample("db_parse_posts_fetched_24h", {}) >= 12
 
@@ -264,3 +261,96 @@ def test_parse_run_started_timestamp_gauge():
     assert PARSE_RUN_STARTED_TIMESTAMP._value.get() > 0.0
     mark_parse_run_stopped()
     assert PARSE_RUN_STARTED_TIMESTAMP._value.get() == 0.0
+
+
+def test_metrics_not_served_on_api_port(api_client):
+    # /metrics — на отдельном порту (API_METRICS_PORT), клиентам API он недоступен.
+    assert api_client.get("/metrics").status_code == 404
+
+
+def test_metrics_server_on_separate_port(api_client, monkeypatch):
+    import socket
+    import urllib.request
+
+    from backend.main import _start_metrics_server
+    from backend.settings import get_settings
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    monkeypatch.setenv("API_METRICS_PORT", str(port))
+    get_settings.cache_clear()
+    _register(api_client, "scrape@example.com")
+    server = _start_metrics_server()
+    assert server is not None
+    try:
+        body = urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=5).read().decode()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert "http_requests_total" in body
+    assert "auth_events_total" in body
+    assert "db_users 1.0" in body
+
+
+def test_db_stats_collector_caches_reads(monkeypatch):
+    from backend.observability import _DBStatsCollector
+    from backend.settings import get_settings
+
+    calls = []
+    empty = (
+        {
+            k: 0
+            for k in (
+                "vacancies_active",
+                "vacancies_archived",
+                "resumes",
+                "users",
+                "matches",
+                "cover_letters",
+                "ai_cache",
+            )
+        },
+        {},
+        {},
+        0,
+        None,
+        {"total": 0, "with_detail": 0, "without_detail": 0},
+        {},
+    )
+
+    def _read_db():
+        calls.append(1)
+        return empty
+
+    monkeypatch.setattr(_DBStatsCollector, "_read_db", staticmethod(_read_db))
+    collector = _DBStatsCollector()
+
+    monkeypatch.setenv("METRICS_DB_STATS_CACHE_SECONDS", "60")
+    get_settings.cache_clear()
+    list(collector.collect())
+    list(collector.collect())
+    assert len(calls) == 1
+
+    monkeypatch.setenv("METRICS_DB_STATS_CACHE_SECONDS", "0")
+    get_settings.cache_clear()
+    list(collector.collect())
+    list(collector.collect())
+    assert len(calls) == 3
+    get_settings.cache_clear()
+
+
+def test_db_stats_collector_does_not_cache_failures(monkeypatch):
+    from backend.observability import _DBStatsCollector
+    from backend.settings import get_settings
+
+    def _down():
+        raise RuntimeError("postgres down")
+
+    monkeypatch.setattr(_DBStatsCollector, "_read_db", staticmethod(_down))
+    monkeypatch.setenv("METRICS_DB_STATS_CACHE_SECONDS", "60")
+    get_settings.cache_clear()
+    collector = _DBStatsCollector()
+    assert list(collector.collect()) == []
+    assert collector._cached is None
+    get_settings.cache_clear()
