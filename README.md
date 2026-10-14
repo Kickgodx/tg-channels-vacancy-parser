@@ -93,6 +93,8 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # PARSE_JOB_LEASE_SECONDS=120     # lease running parse; recover при истечении
 # LLM_JOB_LEASE_SECONDS=120       # lease running LLM
 # JOB_RECOVER_INTERVAL_SECONDS=60 # периодический recover: в worker (rq) или в API (inprocess)
+# ANALYTICS_CACHE_SECONDS=30      # кэш агрегатов дашборда/аналитики в памяти API (сек); 0 — выключить
+# LLM_USER_DAILY_CALLS=100        # суточная квота вызовов LLM на не-админа (мэтч, письма, импорт); 0 — без квоты
 # PARSE_JOB_MAX_ATTEMPTS=3        # после стольких попыток зависший прогон → failed вместо requeue
 # LLM_JOB_MAX_ATTEMPTS=2          # то же для LLM-джоб → error
 # PARSE_RQ_JOB_TIMEOUT_SECONDS=43200  # таймаут RQ-джобы parse (сек; по умолчанию 12 ч)
@@ -202,6 +204,8 @@ JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(4
 Зарплаты приводятся к рублям по курсам ЦБ (`exchange_rates`), метка
 `salary_display` показывает дату курса.
 
+Агрегаты (`/vacancies/metrics`, `/analytics/*`) кэшируются в памяти API на `ANALYTICS_CACHE_SECONDS` (30 с) по набору фильтров; запись вакансий в том же процессе сбрасывает кэш сразу, запись из воркера видна не позже чем через TTL. Фильтр по специализации на Postgres идёт по GIN-индексу (`detected_specializations` — `JSONB`, миграция 019). `config.yaml` перечитывается только при изменении файла (кэш по mtime).
+
 ### Матчинг резюме к вакансиям
 
 Резюме хранятся текстом и управляются на вкладке **Резюме** (создание,
@@ -232,6 +236,14 @@ confidence оценки, пояснение и списки совпадающи
   пик RAM, метрики в том же процессе). Метрики — контейнерный порт 9101
   (Prometheus `dns_sd` по имени `llm-worker`, все реплики; на хост не
   пробрасывается). Локально без Redis: `LLM_JOB_BACKEND=inprocess`.
+- **Лимиты расхода.** `ai.requests_per_minute` при заданном `REDIS_URL` — общий
+  на все процессы (API, parse-worker, все реплики llm-worker): счётчик минутного
+  окна в Redis, а не лимитер в памяти каждого процесса. Без Redis или при его
+  сбое — локальный лимит процесса. Не-админу доступно `LLM_USER_DAILY_CALLS`
+  вызовов LLM в сутки (UTC; по умолчанию 100, `0` — без квоты): каждая
+  поставленная мэтч/письмо-джоба и каждый текст ручного импорта, ушедший в LLM.
+  Сверх квоты — 429 `LLM_QUOTA_EXCEEDED`; импорт дочитывает остаток правилами.
+  Ответы из кэша квоту не тратят; админ (владелец ключа) без квоты.
 - Модель матчинга задаётся отдельно от модели парсинга: `ai.match_model`
   (+ `ai.match_reasoning_enabled` для reasoning-моделей) — качество здесь
   важнее скорости, вызовов на порядок меньше. Глубина рассуждений —
@@ -301,6 +313,15 @@ uvicorn backend.main:app --reload --port 8000
 - **Неполный прогон.** Если в `ai.mode: primary` LLM отключился по лимиту, оставшиеся посты не разбираются. Такой прогон получает статус `failed` с причиной в `error_message`; уже разобранные вакансии сохранены, а неразобранные посты не кэшируются — повторный прогон после сброса лимита обработает их.
 - **Docker Compose:** у сервисов приложения `restart: unless-stopped` и healthcheck; воркеры стартуют после того, как backend стал healthy (то есть применил миграции).
 
+SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`): один подписчик `redis.asyncio` на процесс API раздаёт события всем стримам — соединения не занимают потоки, а БД читается вне event loop. Каждые 15 с тишины стрим шлёт комментарий `: ping` (прокси не рвут соединение по idle-timeout), раз в 5 с сверяет статус с БД на случай пропущенного `done`. Без Redis или при его сбое стрим переходит на опрос БД и живёт до терминального статуса.
+
+Инкрементальная вычитка каналов:
+
+- **Чекпоинты.** После `completed`-прогона для каждого канала, прочитанного сплошь до границы окна, сохраняется чекпоинт «прочитано всё с даты X по сообщение N» (`telegram_channel_checkpoints`). Следующий прогон читает из канала только сообщения новее N — ежедневный запуск не перечитывает недельное окно заново. Чекпоинт не двигается, если канал прочитан не до конца или пост потерян (`failed`, отмена, в `primary` — сбой LLM на посте). Полный перечит окна (после смены фильтров или промпта) — галочка «Перечитать окно дат целиком» в форме запуска. Подробности — `parser.incremental_fetch` в [config.md](config.md).
+- **Окно в прошлом.** Если `date_to` раньше сегодняшнего дня, обход начинается с `date_to` (`offset_date`), а не перебирает всё, что новее окна, расходуя `max_posts_per_channel`.
+- **FloodWait.** Ожидание до `parser.flood_wait_max_seconds` пережидается с продолжением обхода с места остановки; более долгое или ошибка посреди канала возвращают уже прочитанные посты с предупреждением, а не пустой канал.
+- **Дедуп** внутри прогона сравнивает fuzzy-ключи только в блоке с тем же набором специализаций (`parser.fuzzy_dedup_block_by_specializations`), а снимок прогресса несёт последние 30 вакансий, а не копию всех уникальных.
+
 ---
 
 ## Backend API (FastAPI)
@@ -343,8 +364,14 @@ uvicorn backend.main:app --reload --port 8000
 `POST /fx/*`, `POST /ai-cache/clear` и HH — только админ (`require_admin`, иначе 403).
 `API_KEY`, если задан, — дополнительный заголовок `X-API-Key` поверх JWT, а не замена ему.
 
+Query-параметры списка, метрик, аналитики и экспорта типизированы на уровне FastAPI:
+`page` 1…10 000, `page_size` 1…500, даты — `YYYY-MM-DD` (пустое значение = не задано), `q` до 500
+символов; нарушение — 422 `VALIDATION` с описанием поля, а не 500. Тексты в телах ограничены:
+резюме — 50 000 символов, вакансия в импорте — 30 000.
+
 Тело `POST /runs` — whitelist overrides поверх `config.yaml`: `channels`,
-`search.date_from|date_to`, `filters.*`, `parser.vacancy_score_threshold|vacancy_min_substantive_score`,
+`search.date_from|date_to`, `filters.*`,
+`parser.vacancy_score_threshold|vacancy_min_substantive_score|incremental_fetch`,
 `ai.enabled|model|fallback_models|use_cache` (модели — только id из `llm_models.yaml`).
 Любое другое поле → 422: `ai.base_url`, лимиты, concurrency и путь к Telethon-сессии
 задаются только на сервере.
@@ -374,8 +401,8 @@ uvicorn backend.main:app --reload --port 8000
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…016`, head —
-`016_job_attempts`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…020`, head —
+`020_llm_user_usage`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -390,6 +417,10 @@ uvicorn backend.main:app --reload --port 8000
 | `llm_jobs` | Фоновые LLM-задачи мэтчинга/писем (`queued`/`running`/`done`/`error`) |
 | `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
+| `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
+| `llm_user_usage` | Вызовы LLM пользователя за сутки — квота `LLM_USER_DAILY_CALLS` |
+
+Служебные таблицы чистятся сами (при старте и раз в час): просроченный кэш LLM и ключи идемпотентности, завершённые LLM-джобы старше `retention.llm_jobs_ttl_days` (30) и прогоны старше `retention.parse_runs_ttl_days` (180) — см. [config.md](config.md). Вакансии только архивируются, не удаляются.
 
 **Если меняете колонки/таблицы** — добавьте новую миграцию (`alembic revision`) и обновите модели в `backend/db/models.py`; при следующем `docker compose up` она применится автоматически, данные сохранятся.
 

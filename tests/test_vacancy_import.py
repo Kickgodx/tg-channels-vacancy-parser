@@ -136,3 +136,48 @@ def test_import_with_ai_enrichment(api_client, monkeypatch, default_test_config)
     assert "не похож" in rejected["message"]
     # score-гейт перед LLM отключён: оба текста дошли до модели
     assert len(llm_calls) == 2
+
+
+def test_import_falls_back_to_rules_when_daily_quota_ends(api_client, monkeypatch, default_test_config):
+    """Квота не-админа кончилась посреди импорта — остальные тексты разбираются правилами."""
+    from backend.settings import get_settings
+    from tg_jobs_parser.ai.enricher import RunAIStats
+    from tg_jobs_parser.config.loader import load_config
+
+    monkeypatch.setenv("LLM_USER_DAILY_CALLS", "1")
+    get_settings.cache_clear()
+    real_cfg = load_config(default_test_config)
+    ai_cfg = real_cfg.model_copy(update={"ai": real_cfg.ai.model_copy(update={"enabled": True})})
+    monkeypatch.setattr(import_service, "load_config", lambda *a, **k: ai_cfg)
+    llm_calls: list[str] = []
+
+    class _FakeAI:
+        def __init__(self, config):
+            self.stats = RunAIStats()
+
+        def begin_batch(self, total):
+            pass
+
+        def enrich(self, vacancy, *, cancel=None):
+            llm_calls.append(vacancy.id)
+            return vacancy.model_copy(update={"extraction_source": "hybrid"})
+
+        def log_batch_finished(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", _FakeAI, raising=True)
+    _register(api_client, "owner@example.com")  # первый — admin, квота на него не действует
+    token = _register(api_client, "guest@example.com")
+
+    r = _import(api_client, token, [VACANCY_TEXT, NOT_VACANCY_TEXT])
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(llm_calls) == 1
+    assert [it["status"] for it in body["items"]] == ["created", "created"]
+    assert body["items"][0]["vacancy"]["extraction_source"] == "hybrid"
+    assert body["items"][1]["vacancy"]["extraction_source"] == "rules"
+    assert "квота" in body["warning"]

@@ -427,10 +427,35 @@ class ParserConfig(BaseModel):
             "1 = последовательно (старое поведение). Разумный диапазон — 3..8: больше повышает риск FloodWait."
         ),
     )
+    incremental_fetch: bool = Field(
+        default=True,
+        description=(
+            "Telethon: читать из канала только сообщения новее чекпоинта прошлого успешного прогона "
+            "(если окно дат до «сегодня» и чекпоинт покрывает date_from). Чекпоинты хранит backend; "
+            "false — каждый прогон перечитывает всё окно."
+        ),
+    )
+    flood_wait_max_seconds: int = Field(
+        default=300,
+        ge=0,
+        le=3600,
+        description=(
+            "Telethon: FloodWait не дольше N секунд пережидаем и продолжаем обход канала с места остановки; "
+            "дольше — канал возвращается частично (с предупреждением). Короткие (до 60 с) Telethon ждёт сам."
+        ),
+    )
     request_timeout_seconds: float = 20.0
     sleep_between_requests_seconds: float = 1.0
     vacancy_fuzzy_duplicate_threshold: int = 88
     fuzzy_compare_prefix_len: int = 500
+    fuzzy_dedup_block_by_specializations: bool = Field(
+        default=True,
+        description=(
+            "Fuzzy-дедуп сравнивает вакансию только с группами с тем же набором специализаций. "
+            "Убирает квадрат по всем группам прогона; дубли с разными специализациями fuzzy не ловит "
+            "(точные по хэшу текста — ловит всегда). false — сравнение со всеми группами."
+        ),
+    )
 
 
 class FxConfig(BaseModel):
@@ -453,13 +478,29 @@ class FxConfig(BaseModel):
 
 
 class RetentionConfig(BaseModel):
-    """Хранение вакансий: TTL → soft delete (archived_at)."""
+    """Хранение: TTL вакансий (soft delete, archived_at) и очистка служебных таблиц."""
 
     vacancy_ttl_days: int = Field(
         default=40,
         ge=0,
         description=(
             "Через сколько дней архивировать вакансию (по post_date, а без неё — по parsed_at). 0 — не архивировать."
+        ),
+    )
+    parse_runs_ttl_days: int = Field(
+        default=180,
+        ge=0,
+        description=(
+            "Через сколько дней после завершения удалять прогон из parse_runs (снимок конфига, метрики). "
+            "Вакансии остаются. 0 — хранить всегда."
+        ),
+    )
+    llm_jobs_ttl_days: int = Field(
+        default=30,
+        ge=0,
+        description=(
+            "Через сколько дней удалять завершённые LLM-джобы (done/error). Матчи и письма хранятся "
+            "отдельно и не удаляются. 0 — хранить всегда."
         ),
     )
 

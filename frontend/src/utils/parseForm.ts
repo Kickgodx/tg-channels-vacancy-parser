@@ -70,6 +70,7 @@ export function formFromDefaults(d: ConfigDefaults): ParseFormState {
     aiModel: d.ai.model,
     aiFallbacks: [...d.ai.fallback_models],
     ignoreLlmCache: false,
+    fullRescan: false,
   };
 }
 
@@ -118,6 +119,7 @@ export function buildRunBody(form: ParseFormState, defaults: ConfigDefaults): Ru
     parser: {
       vacancy_score_threshold: form.vacancyScoreThreshold,
       vacancy_min_substantive_score: form.vacancyMinSubstantive,
+      ...(form.fullRescan ? { incremental_fetch: false } : {}),
     },
     ai,
   };

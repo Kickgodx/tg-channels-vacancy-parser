@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from backend.db.models import ParseRunRow
@@ -456,3 +456,21 @@ def metrics_from_run(row: ParseRunRow) -> MetricsSummary | None:
     if not row.metrics:
         return None
     return MetricsSummary.model_validate(row.metrics)
+
+
+def purge_old_parse_runs(session: Session, *, older_than: datetime, limit: int = 200) -> int:
+    """Удалить до ``limit`` завершённых прогонов старше ``older_than``.
+
+    Каждый прогон несёт снимок конфигурации, ``run_params`` и метрики. Вакансии не
+    трогаются: ``vacancies.last_parse_run_id`` — не FK, вакансия остаётся в корпусе.
+    """
+    old = (
+        select(ParseRunRow.id)
+        .where(
+            ParseRunRow.status.in_(_TERMINAL_PARSE_STATUSES),
+            func.coalesce(ParseRunRow.finished_at, ParseRunRow.created_at) < older_than,
+        )
+        .limit(limit)
+    )
+    result = session.execute(delete(ParseRunRow).where(ParseRunRow.id.in_(old)))
+    return int(result.rowcount or 0)

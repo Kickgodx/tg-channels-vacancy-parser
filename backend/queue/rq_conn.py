@@ -28,6 +28,16 @@ def get_redis_connection(*, force_new: bool = False):
     return _connection
 
 
+def get_async_redis_client():
+    """Новый ``redis.asyncio.Redis`` из ``REDIS_URL`` — для SSE-хаба (один на event loop)."""
+    url = (get_settings().redis_url or "").strip()
+    if not url:
+        raise RuntimeError("REDIS_URL не задан")
+    from redis.asyncio import Redis
+
+    return Redis.from_url(url)
+
+
 def reset_redis_connection() -> None:
     global _connection
     if _connection is not None:

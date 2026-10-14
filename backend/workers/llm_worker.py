@@ -52,7 +52,11 @@ def main() -> None:
     # Регистрация доменных метрик (counters/histograms).
     import backend.observability  # noqa: F401
     from backend.queue.rq_conn import LLM_QUEUE_NAME, get_redis_connection
+    from backend.services.llm_rate_gate import register_redis_rate_gate
     from backend.workers.recover import recover_stuck_llm_jobs
+
+    # Реплики llm-worker делят один ai.requests_per_minute, а не умножают его.
+    register_redis_rate_gate()
 
     if settings.llm_job_backend_normalized != "rq":
         log.warning(

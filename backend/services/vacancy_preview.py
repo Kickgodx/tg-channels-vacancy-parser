@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.parse_progress import PROGRESS_PREVIEW_LIMIT
 
 
-def build_vacancies_preview(vacancies: list[Vacancy] | None, *, limit: int = 30) -> list[dict]:
+def build_vacancies_preview(vacancies: list[Vacancy] | None, *, limit: int = PROGRESS_PREVIEW_LIMIT) -> list[dict]:
     """Последние ``limit`` вакансий с уникальным ``id`` (для React keys в live-таблице)."""
     by_id: dict[str, Vacancy] = {}
     order: list[str] = []

@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -19,7 +20,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.db.base import Base
@@ -101,7 +102,10 @@ class VacancyRow(Base):
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     cleaned_text: Mapped[str] = mapped_column(Text, nullable=False)
 
-    detected_specializations: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Postgres — JSONB + GIN (миграция 019): фильтр по специализации идёт по индексу.
+    detected_specializations: Mapped[list[str]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), default=list
+    )
     detected_grade: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
     detected_salary_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     detected_salary_max: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -255,8 +259,13 @@ class LlmJobRow(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     kind: Mapped[str] = mapped_column(String(32), nullable=False)  # match | cover_letter
-    resume_id: Mapped[int] = mapped_column(Integer, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
-    vacancy_id: Mapped[str] = mapped_column(String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), nullable=False)
+    # Индексы на FK (миграция 018): каскадное удаление резюме / вакансии без seq scan.
+    resume_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    vacancy_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
     force: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     params: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -298,3 +307,28 @@ class AIExtractionCacheRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class TelegramChannelCheckpointRow(Base):
+    """Чекпоинт инкрементальной вычитки канала: прочитано всё с ``covered_from`` по ``last_message_id``.
+
+    Пишется вместе с финализацией ``completed``-прогона (см. ``ChannelCheckpoint``).
+    """
+
+    __tablename__ = "telegram_channel_checkpoints"
+
+    channel: Mapped[str] = mapped_column(String(128), primary_key=True)
+    last_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    covered_from: Mapped[date] = mapped_column(Date, nullable=False)
+    parse_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class LlmUserUsageRow(Base):
+    """Вызовы LLM пользователя за сутки (UTC) — для квоты ``LLM_USER_DAILY_CALLS``."""
+
+    __tablename__ = "llm_user_usage"
+
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

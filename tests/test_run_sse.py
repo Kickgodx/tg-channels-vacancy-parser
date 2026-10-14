@@ -5,6 +5,7 @@ import time
 from datetime import UTC, datetime
 
 import fakeredis
+import fakeredis.aioredis
 
 from backend.db import parse_run_repository as pr
 from backend.db.models import ParseRunRow
@@ -77,7 +78,8 @@ def test_run_events_terminal_emits_done_immediately(admin_client):
 
 def test_run_events_emits_initial_progress_from_db(admin_client, monkeypatch):
     """Initial progress из БД; live-ветка Redis (TestClient буферит до конца стрима)."""
-    server = fakeredis.FakeStrictRedis()
+    fake_server = fakeredis.FakeServer()
+    server = fakeredis.FakeStrictRedis(server=fake_server)
     monkeypatch.setenv("REDIS_URL", "redis://fake:6379/0")
     from backend.queue import rq_conn
     from backend.settings import get_settings
@@ -85,6 +87,7 @@ def test_run_events_emits_initial_progress_from_db(admin_client, monkeypatch):
     get_settings.cache_clear()
     rq_conn.reset_redis_connection()
     monkeypatch.setattr(rq_conn, "get_redis_connection", lambda force_new=False: server)
+    monkeypatch.setattr(rq_conn, "get_async_redis_client", lambda: fakeredis.aioredis.FakeRedis(server=fake_server))
 
     with session_scope() as session:
         rid = pr.create_parse_run(session, config_snapshot={}, status="running").id

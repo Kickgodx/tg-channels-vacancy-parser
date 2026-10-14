@@ -73,6 +73,18 @@ export default function ParseForm({ onSubmit, disabled, isSubmitting }: Props) {
           Сессия Telethon: <code>{d.telegram.telethon_session_file}</code> — задаётся в config.yaml на
           backend. Нужны TELEGRAM_API_ID / TELEGRAM_API_HASH в .env.
         </p>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={form.fullRescan}
+            onChange={(e) => patch({ fullRescan: e.target.checked })}
+          />
+          Перечитать окно дат целиком
+        </label>
+        <p className="caption">
+          По умолчанию из канала читаются только сообщения новее прошлого успешного прогона. Полный
+          перечит нужен после смены фильтров или промпта, чтобы старые посты прошли разбор заново.
+        </p>
       </section>
 
       <section>

@@ -23,6 +23,7 @@ from backend.schemas import (
 from backend.services.llm_job_service import (
     KIND_COVER_LETTER,
     KIND_MATCH,
+    LlmDailyQuotaError,
     LlmJobUserLimitError,
     llm_job_runner,
 )
@@ -166,6 +167,10 @@ def match_single_vacancy(
         from backend.errors import CODE_RATE_LIMITED, http_error
 
         raise http_error(429, CODE_RATE_LIMITED, str(e), retryable=True) from e
+    except LlmDailyQuotaError as e:
+        from backend.errors import CODE_LLM_QUOTA_EXCEEDED, http_error
+
+        raise http_error(429, CODE_LLM_QUOTA_EXCEEDED, str(e), retryable=False) from e
     body = LlmJobAccepted(job_id=result.job_id, status="queued")
     return JSONResponse(status_code=202, content=body.model_dump(mode="json"))
 
@@ -238,6 +243,10 @@ def generate_cover_letter(
         from backend.errors import CODE_RATE_LIMITED, http_error
 
         raise http_error(429, CODE_RATE_LIMITED, str(e), retryable=True) from e
+    except LlmDailyQuotaError as e:
+        from backend.errors import CODE_LLM_QUOTA_EXCEEDED, http_error
+
+        raise http_error(429, CODE_LLM_QUOTA_EXCEEDED, str(e), retryable=False) from e
     accepted = LlmJobAccepted(job_id=result.job_id, status="queued")
     return JSONResponse(status_code=202, content=accepted.model_dump(mode="json"))
 

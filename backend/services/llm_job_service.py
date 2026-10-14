@@ -29,6 +29,29 @@ class LlmJobUserLimitError(RuntimeError):
     """Пользователь исчерпал лимит параллельных LLM-джоб."""
 
 
+class LlmDailyQuotaError(RuntimeError):
+    """Пользователь исчерпал суточную квоту вызовов LLM (``LLM_USER_DAILY_CALLS``)."""
+
+
+def reserve_user_llm_calls(session, *, user_id: int, calls: int) -> None:
+    """Списать вызовы из суточной квоты пользователя; админ и квота 0 — без ограничений.
+
+    Квота защищает ключ OpenRouter владельца от остальных зарегистрированных
+    пользователей. Списание — в транзакции вызывающего: откат запроса возвращает квоту.
+    """
+    from backend.db.llm_usage_repository import try_reserve_llm_calls
+    from backend.db.models import UserRow
+
+    limit = get_settings().llm_user_daily_calls
+    if limit <= 0:
+        return
+    user = session.get(UserRow, user_id)
+    if user is not None and user.is_admin:
+        return
+    if not try_reserve_llm_calls(session, user_id=user_id, calls=calls, daily_limit=limit):
+        raise LlmDailyQuotaError(f"Суточная квота LLM исчерпана ({limit} вызовов в сутки, сброс в 00:00 UTC).")
+
+
 @dataclass(frozen=True)
 class EnqueueResult:
     job_id: uuid.UUID
@@ -114,6 +137,11 @@ class LlmJobRunner:
                     raise LlmJobUserLimitError(
                         f"Слишком много параллельных LLM-задач (лимит {per_user}). Дождитесь завершения."
                     )
+                try:
+                    reserve_user_llm_calls(session, user_id=user_id, calls=1)
+                except LlmDailyQuotaError:
+                    record_llm_job_enqueue(backend=backend, kind=kind, outcome="rejected_quota")
+                    raise
 
                 row = repo.create_llm_job(
                     session,

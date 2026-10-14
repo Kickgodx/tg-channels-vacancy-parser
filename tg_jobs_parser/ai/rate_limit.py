@@ -7,12 +7,15 @@ import re
 import threading
 import time
 from datetime import UTC, datetime
+from typing import Protocol
 
 from tg_jobs_parser.utils.logger import get_logger
 
 _LOG = get_logger(__name__)
 
 _TRANSIENT_BACKOFF_CAP_S = 30.0
+# Один API-ключ OpenRouter на все процессы — один общий счётчик.
+_GLOBAL_RATE_KEY = "openrouter"
 
 _RESET_MS_RE = re.compile(r"X-RateLimit-Reset['\"]?\s*[:=]\s*['\"]?(\d+)", re.I)
 _REMAINING_RE = re.compile(r"X-RateLimit-Remaining['\"]?\s*[:=]\s*['\"]?(\d+)", re.I)
@@ -20,6 +23,30 @@ _REMAINING_RE = re.compile(r"X-RateLimit-Remaining['\"]?\s*[:=]\s*['\"]?(\d+)", 
 
 class LlmQuotaExhausted(RuntimeError):
     """Квота LLM исчерпана — до конца прогона только rule-based разбор."""
+
+
+class GlobalRateGate(Protocol):
+    """Порт общего (между процессами) лимита запросов к провайдеру LLM.
+
+    Локальный ``OpenRouterRateLimiter`` разносит запросы только внутри процесса:
+    N воркеров дают N × RPM. Backend регистрирует реализацию на Redis
+    (``register_global_rate_gate``); ядро о Redis не знает.
+    """
+
+    def wait_seconds(self, key: str, per_minute: float) -> float:
+        """Занять слот под запрос. 0 — можно идти сейчас, иначе через сколько секунд повторить."""
+        ...
+
+
+_global_gate: GlobalRateGate | None = None
+# Шаг ожидания общего слота: между шагами проверяется отключение LLM.
+_GLOBAL_WAIT_STEP_S = 5.0
+
+
+def register_global_rate_gate(gate: GlobalRateGate | None) -> None:
+    """Включить общий лимит для всех ``OpenRouterRateLimiter`` процесса (``None`` — выключить)."""
+    global _global_gate
+    _global_gate = gate
 
 
 def extract_rate_limit_headers(error: Exception) -> dict[str, str]:
@@ -89,6 +116,7 @@ class OpenRouterRateLimiter:
         self.llm_disabled_until_epoch: float | None = None
         self.total_waits_seconds: float = 0.0
         self.rate_limit_retries: int = 0
+        self._global_gate_failed = False
 
     @property
     def daily_limit_exceeded(self) -> bool:
@@ -152,6 +180,29 @@ class OpenRouterRateLimiter:
                 time.sleep(delay)
                 self.total_waits_seconds += delay
             self._last_request_at = time.monotonic()
+        self._acquire_global_slot()
+
+    def _acquire_global_slot(self) -> None:
+        """Слот общего лимита (если backend его зарегистрировал). Сбой хранилища — не блокирует запрос."""
+        gate = _global_gate
+        if gate is None:
+            return
+        while True:
+            try:
+                wait = gate.wait_seconds(_GLOBAL_RATE_KEY, self._rpm)
+            except Exception as e:
+                if not self._global_gate_failed:
+                    self._global_gate_failed = True
+                    _LOG.warning("Общий лимит LLM недоступен (%s) — только локальный лимит процесса.", e)
+                return
+            self._global_gate_failed = False
+            if wait <= 0:
+                return
+            if self.llm_disabled:
+                raise LlmQuotaExhausted(self.llm_disabled_reason or "LLM отключён (rate limit)")
+            step = min(wait, _GLOBAL_WAIT_STEP_S)
+            time.sleep(step)
+            self.total_waits_seconds += step
 
     def wait_after_429(self, error: Exception) -> None:
         """Краткая пауза перед повтором (только если LLM ещё не отключён)."""

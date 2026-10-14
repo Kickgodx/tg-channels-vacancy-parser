@@ -158,6 +158,9 @@ fx:
 retention:
   # Через сколько дней архивировать вакансию (post_date, а без неё — parsed_at). 0 — не архивировать.
   vacancy_ttl_days: 40
+  # Очистка служебных таблиц (раз в час): завершённые прогоны и LLM-джобы старше N дней. 0 — хранить.
+  parse_runs_ttl_days: 180
+  llm_jobs_ttl_days: 30
 
 hh:
   enabled: true

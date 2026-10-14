@@ -53,6 +53,9 @@ def main() -> None:
 
     # Парсинг с ai.cache_backend=postgres идёт в этом процессе, не в API.
     register_db_ai_cache()
+    from backend.services.llm_rate_gate import register_redis_rate_gate
+
+    register_redis_rate_gate()
 
     if settings.parse_job_backend_normalized != "rq":
         log.warning(

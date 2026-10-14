@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db, verify_api_key
-from backend.api.params import vacancy_query_from_params
+from backend.api.params import Page, PageSize, vacancy_filters
 from backend.db import repository as repo
+from backend.db.aggregate_cache import cached_aggregate
 from backend.db.models import UserRow
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
 from backend.errors import CODE_IDEMPOTENCY_IN_PROGRESS, CODE_VALIDATION, AppError, http_error
@@ -15,6 +16,7 @@ from backend.schemas import (
     VacancyImportRequest,
     VacancyImportResponse,
     VacancyListResponse,
+    VacancyQuery,
     VacancySortField,
     VacancySortOrder,
 )
@@ -57,7 +59,7 @@ def import_vacancies(
         if not any(texts):
             raise http_error(400, CODE_VALIDATION, "Пустой текст вакансии")
         source_url = (body.source_url or "").strip() or None
-        result = import_service.import_vacancy_texts(db, texts, source_url=source_url)
+        result = import_service.import_vacancy_texts(db, texts, source_url=source_url, user_id=user.id)
     except Exception:
         idempotency.abandon(key=idempotency_key, scope=scope, actor=actor)
         raise
@@ -87,35 +89,13 @@ def import_vacancies(
 
 @router.get("/export.xlsx")
 def export_vacancies_xlsx(
-    source_channel: str | None = None,
-    grade: str | None = None,
-    specialization: list[str] = Query(default=[]),
-    work_format: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    has_salary: bool | None = None,
-    q: str | None = None,
-    include_archived: bool = False,
+    filters: VacancyQuery = Depends(vacancy_filters),
     sort_by: VacancySortField = "post_date",
     sort_order: VacancySortOrder = "desc",
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """Excel всех вакансий в БД с учётом фильтров (как в списке)."""
-    query = vacancy_query_from_params(
-        page=1,
-        page_size=500,
-        source_channel=source_channel,
-        grade=grade,
-        specialization=specialization,
-        work_format=work_format,
-        date_from=date_from,
-        date_to=date_to,
-        has_salary=has_salary,
-        q=q,
-        include_archived=include_archived,
-        sort_by=sort_by,
-        sort_order=sort_order,
-    )
+    query = filters.model_copy(update={"page_size": 500, "sort_by": sort_by, "sort_order": sort_order})
     items = repo.list_all_vacancies(db, query)
     metrics = aggregate_vacancy_metrics(db, query)
     data = export_excel_bytes(items, metrics=metrics)
@@ -128,49 +108,18 @@ def export_vacancies_xlsx(
 
 @router.get("/metrics", response_model=MetricsSummary)
 def vacancy_metrics(
-    source_channel: str | None = None,
-    grade: str | None = None,
-    specialization: list[str] = Query(default=[]),
-    work_format: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    has_salary: bool | None = None,
-    q: str | None = None,
-    include_archived: bool = False,
+    query: VacancyQuery = Depends(vacancy_filters),
     db: Session = Depends(get_db),
 ) -> MetricsSummary:
     """Агрегаты для графиков (SQL GROUP BY, без загрузки всех вакансий)."""
-    query = vacancy_query_from_params(
-        page=1,
-        page_size=1,
-        source_channel=source_channel,
-        grade=grade,
-        specialization=specialization,
-        work_format=work_format,
-        date_from=date_from,
-        date_to=date_to,
-        has_salary=has_salary,
-        q=q,
-        include_archived=include_archived,
-        sort_by="post_date",
-        sort_order="desc",
-    )
-    return aggregate_vacancy_metrics(db, query)
+    return cached_aggregate("vacancy_metrics", query, lambda: aggregate_vacancy_metrics(db, query))
 
 
 @router.get("", response_model=VacancyListResponse)
 def list_vacancies(
-    page: int = 1,
-    page_size: int = 50,
-    source_channel: str | None = None,
-    grade: str | None = None,
-    specialization: list[str] = Query(default=[]),
-    work_format: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    has_salary: bool | None = None,
-    q: str | None = None,
-    include_archived: bool = False,
+    filters: VacancyQuery = Depends(vacancy_filters),
+    page: Page = 1,
+    page_size: PageSize = 50,
     sort_by: VacancySortField = "post_date",
     sort_order: VacancySortOrder = "desc",
     resume_id: int | None = None,
@@ -181,21 +130,14 @@ def list_vacancies(
         resume = repo.get_resume(db, resume_id)
         if resume is None or resume.user_id != user.id:
             raise HTTPException(status_code=404, detail="Resume not found")
-    query = vacancy_query_from_params(
-        page=page,
-        page_size=page_size,
-        source_channel=source_channel,
-        grade=grade,
-        specialization=specialization,
-        work_format=work_format,
-        date_from=date_from,
-        date_to=date_to,
-        has_salary=has_salary,
-        q=q,
-        include_archived=include_archived,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        resume_id=resume_id,
+    query = filters.model_copy(
+        update={
+            "page": page,
+            "page_size": page_size,
+            "sort_by": sort_by,
+            "sort_order": sort_order,
+            "resume_id": resume_id,
+        }
     )
     items, total = repo.list_vacancies(db, query)
     return VacancyListResponse(items=items, total=total, page=page, page_size=page_size)
