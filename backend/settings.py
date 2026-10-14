@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     parse_job_lease_seconds: int = Field(default=120, alias="PARSE_JOB_LEASE_SECONDS")
     llm_job_lease_seconds: int = Field(default=120, alias="LLM_JOB_LEASE_SECONDS")
     job_recover_interval_seconds: int = Field(default=60, alias="JOB_RECOVER_INTERVAL_SECONDS")
+    # Кэш агрегатов дашборда и аналитики в памяти API (сек); 0 — без кэша.
+    analytics_cache_seconds: float = Field(default=30.0, ge=0, alias="ANALYTICS_CACHE_SECONDS")
     # Сколько раз джобу берут в работу, прежде чем recover завершит её ошибкой
     # вместо очередного requeue (воркер стабильно падает на ней, напр. OOM).
     parse_job_max_attempts: int = Field(default=3, ge=1, alias="PARSE_JOB_MAX_ATTEMPTS")

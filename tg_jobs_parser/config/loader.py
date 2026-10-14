@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +15,7 @@ from tg_jobs_parser.ai.llm_models_registry import (
     LlmModelsLoadError,
     apply_ai_defaults_from_registry,
     load_llm_models_registry,
+    resolve_llm_models_path,
 )
 from tg_jobs_parser.config.schema import AppConfig
 
@@ -20,11 +24,71 @@ class ConfigLoadError(RuntimeError):
     """Ошибка чтения или валидации конфигурации."""
 
 
+@dataclass(frozen=True)
+class _CachedConfig:
+    config_sig: tuple[int, int]
+    models_explicit: str | None
+    models_path: Path
+    models_sig: tuple[int, int] | None
+    config: AppConfig
+
+
+_cache_lock = threading.Lock()
+_cache: dict[str, _CachedConfig] = {}
+
+
+def _file_sig(path: Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return st.st_mtime_ns, st.st_size
+
+
 def load_config(path: str | Path) -> AppConfig:
-    """Загружает ``config.yaml`` и возвращает ``AppConfig``."""
+    """Загружает ``config.yaml`` и возвращает ``AppConfig``.
+
+    Результат кэшируется по mtime/размеру ``config.yaml`` и ``llm_models.yaml``:
+    функцию зовут на каждый запрос метрик, батч upsert и постановку джобы, а разбор
+    YAML с валидацией стоит ~5 мс. Правка любого из файлов подхватывается сразу.
+    Возвращается копия — вызывающий может менять её без влияния на кэш.
+    """
     path = Path(path)
     if not path.is_file():
         raise ConfigLoadError(f"Файл конфигурации не найден: {path}")
+    key = f"{path.resolve()}|{os.getcwd()}|{os.getenv('LLM_MODELS_PATH', '')}"
+    config_sig = _file_sig(path)
+    with _cache_lock:
+        hit = _cache.get(key)
+    if (
+        hit is not None
+        and hit.config_sig == config_sig
+        and resolve_llm_models_path(path, explicit=hit.models_explicit) == hit.models_path
+        and _file_sig(hit.models_path) == hit.models_sig
+    ):
+        return hit.config.model_copy(deep=True)
+
+    cfg, models_explicit = _load_config_uncached(path)
+    models_path = resolve_llm_models_path(path, explicit=models_explicit)
+    if config_sig is not None:
+        with _cache_lock:
+            _cache[key] = _CachedConfig(
+                config_sig=config_sig,
+                models_explicit=models_explicit,
+                models_path=models_path,
+                models_sig=_file_sig(models_path),
+                config=cfg,
+            )
+    return cfg.model_copy(deep=True)
+
+
+def clear_config_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
+def _load_config_uncached(path: Path) -> tuple[AppConfig, str | None]:
+    """Разбор и валидация; второй элемент — ``ai.llm_models_path`` из YAML (для ключа кэша)."""
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
@@ -47,7 +111,8 @@ def load_config(path: str | Path) -> AppConfig:
         raw = dict(raw)
         raw["ai"] = apply_ai_defaults_from_registry(ai_dict, registry)
         cfg = AppConfig.model_validate(raw)
-        return cfg.model_copy(update={"llm_model_catalog": registry.catalog()})
+        explicit = str(explicit_models) if explicit_models else None
+        return cfg.model_copy(update={"llm_model_catalog": registry.catalog()}), explicit
     except ValidationError as e:
         raise ConfigLoadError(str(e)) from e
 

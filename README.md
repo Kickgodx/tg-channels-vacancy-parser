@@ -93,6 +93,7 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # PARSE_JOB_LEASE_SECONDS=120     # lease running parse; recover при истечении
 # LLM_JOB_LEASE_SECONDS=120       # lease running LLM
 # JOB_RECOVER_INTERVAL_SECONDS=60 # периодический recover: в worker (rq) или в API (inprocess)
+# ANALYTICS_CACHE_SECONDS=30      # кэш агрегатов дашборда/аналитики в памяти API (сек); 0 — выключить
 # PARSE_JOB_MAX_ATTEMPTS=3        # после стольких попыток зависший прогон → failed вместо requeue
 # LLM_JOB_MAX_ATTEMPTS=2          # то же для LLM-джоб → error
 # PARSE_RQ_JOB_TIMEOUT_SECONDS=43200  # таймаут RQ-джобы parse (сек; по умолчанию 12 ч)
@@ -201,6 +202,8 @@ JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(4
 
 Зарплаты приводятся к рублям по курсам ЦБ (`exchange_rates`), метка
 `salary_display` показывает дату курса.
+
+Агрегаты (`/vacancies/metrics`, `/analytics/*`) кэшируются в памяти API на `ANALYTICS_CACHE_SECONDS` (30 с) по набору фильтров; запись вакансий в том же процессе сбрасывает кэш сразу, запись из воркера видна не позже чем через TTL. Фильтр по специализации на Postgres идёт по GIN-индексу (`detected_specializations` — `JSONB`, миграция 019). `config.yaml` перечитывается только при изменении файла (кэш по mtime).
 
 ### Матчинг резюме к вакансиям
 
@@ -384,8 +387,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`): один подписчик 
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…018`, head —
-`018_llm_jobs_fk_indexes`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…019`, head —
+`019_specializations_jsonb_gin`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|

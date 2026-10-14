@@ -25,6 +25,10 @@ def reset_engine() -> None:
         _engine.dispose()
     _engine = None
     _SessionLocal = None
+    # Кэши чтения корпуса относятся к прежней БД.
+    from backend.db.vacancy_repository import invalidate_vacancy_count_cache
+
+    invalidate_vacancy_count_cache()
 
 
 def get_engine():

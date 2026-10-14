@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.api.deps import get_current_user, get_db, verify_api_key
 from backend.api.params import vacancy_query_from_params
 from backend.db import repository as repo
+from backend.db.aggregate_cache import cached_aggregate
 from backend.db.models import UserRow
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
 from backend.errors import CODE_IDEMPOTENCY_IN_PROGRESS, CODE_VALIDATION, AppError, http_error
@@ -155,7 +156,7 @@ def vacancy_metrics(
         sort_by="post_date",
         sort_order="desc",
     )
-    return aggregate_vacancy_metrics(db, query)
+    return cached_aggregate("vacancy_metrics", query, lambda: aggregate_vacancy_metrics(db, query))
 
 
 @router.get("", response_model=VacancyListResponse)

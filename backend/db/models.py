@@ -20,7 +20,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.db.base import Base
@@ -102,7 +102,10 @@ class VacancyRow(Base):
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     cleaned_text: Mapped[str] = mapped_column(Text, nullable=False)
 
-    detected_specializations: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Postgres — JSONB + GIN (миграция 019): фильтр по специализации идёт по индексу.
+    detected_specializations: Mapped[list[str]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), default=list
+    )
     detected_grade: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
     detected_salary_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     detected_salary_max: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.db import fx_repository as fx_repo
+from backend.db.aggregate_cache import invalidate_aggregate_cache
 from backend.db.models import VacancyRow
 from backend.db.vacancy_mapper import row_to_vacancy, vacancy_to_row
 from backend.fx.apply import apply_salary_rub_for_vacancy
@@ -89,6 +90,8 @@ def backfill_vacancies_salary_rub(
             updated += 1
         else:
             skipped += 1
+    # Зарплаты в ₽ поменялись — агрегаты дашборда в кэше устарели.
+    invalidate_aggregate_cache()
     return SalaryRubBackfillStats(
         processed=processed,
         updated=updated,

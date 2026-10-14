@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from backend.api.deps import get_current_user, get_db, verify_api_key
 from backend.api.params import vacancy_query_from_params
 from backend.db import analytics
+from backend.db.aggregate_cache import cached_aggregate
 from backend.schemas import CompanyAnalytics, SalaryAnalytics, SourceAnalytics
 
 router = APIRouter(
@@ -64,7 +65,7 @@ def salary_analytics(
         q,
         include_archived,
     )
-    return analytics.salary_analytics(db, query)
+    return cached_aggregate("salaries", query, lambda: analytics.salary_analytics(db, query))
 
 
 @router.get("/sources", response_model=SourceAnalytics)
@@ -92,7 +93,7 @@ def source_stats(
         q,
         include_archived,
     )
-    return SourceAnalytics(items=analytics.source_quality(db, query))
+    return cached_aggregate("sources", query, lambda: SourceAnalytics(items=analytics.source_quality(db, query)))
 
 
 @router.get("/companies", response_model=CompanyAnalytics)
@@ -121,4 +122,9 @@ def company_stats(
         q,
         include_archived,
     )
-    return CompanyAnalytics(items=analytics.top_companies(db, query, limit=limit))
+    return cached_aggregate(
+        "companies",
+        query,
+        lambda: CompanyAnalytics(items=analytics.top_companies(db, query, limit=limit)),
+        limit=limit,
+    )

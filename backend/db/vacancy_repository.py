@@ -13,6 +13,7 @@ from sqlalchemy import and_, case, func, literal_column, null, or_, select, upda
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, defer
 
+from backend.db.aggregate_cache import invalidate_aggregate_cache
 from backend.db.models import (
     VacancyMatchRow,
     VacancyRow,
@@ -89,8 +90,10 @@ def _set_cached_vacancy_count(key: str, total: int) -> None:
 
 
 def invalidate_vacancy_count_cache() -> None:
+    """Сбросить кэши чтения корпуса в этом процессе: COUNT списка и агрегаты аналитики."""
     with _count_cache_lock:
         _count_cache.clear()
+    invalidate_aggregate_cache()
 
 
 def counted_vacancies(session: Session, query: VacancyQuery, *, dialect: str) -> int:
