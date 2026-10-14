@@ -28,6 +28,7 @@ from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.ai.token_cost import cost_usd_for_tokens, rates_for_model
 from tg_jobs_parser.config.schema import AiConfig
 from tg_jobs_parser.observability.llm_metrics import (
+    init_model_series,
     record_cost,
     record_rate_gate_wait,
     record_request,
@@ -184,6 +185,8 @@ class OpenRouterClient:
             stop_llm_when_rate_limited=ai.stop_llm_when_rate_limited,
         )
         self._sdk: Any | None = None
+        # Модели снимка прогона могут отличаться от config.yaml, по которому серии заведены на старте.
+        init_model_series(ai.resolved_models())
 
     @property
     def rate_limiter(self) -> OpenRouterRateLimiter:

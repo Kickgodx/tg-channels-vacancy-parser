@@ -61,6 +61,19 @@ PARSE_PHASE_DURATION = Histogram(
     buckets=(1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1200.0, 3600.0, 7200.0),
 )
 
+# Серия с лейблами попадает в /metrics только после первого ``.labels()`` — сразу с ненулевым
+# значением, и increase()/rate() этот первый прирост не видят: им не с чем сравнить. Для
+# короткого прогона на свежем процессе это весь прогон. Заводим известные лейблы нулями.
+for _result in ("ok", "partial", "error"):
+    TELEGRAM_CHANNELS.labels(result=_result)
+for _handled_by in ("telethon", "resumed", "gave_up"):
+    TELEGRAM_FLOOD_WAITS.labels(handled_by=_handled_by)
+    TELEGRAM_FLOOD_WAIT_SECONDS.labels(handled_by=_handled_by)
+for _result in ("candidate", "dropped"):
+    PARSE_POSTS_PROCESSED.labels(result=_result)
+for _phase in ("fetch", "process", "dedup"):
+    PARSE_PHASE_DURATION.labels(phase=_phase)
+
 
 def record_channel_fetched(*, result: str, posts: int, scanned: int, duration_seconds: float) -> None:
     TELEGRAM_CHANNELS.labels(result=result).inc()

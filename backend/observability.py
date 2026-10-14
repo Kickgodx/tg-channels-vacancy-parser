@@ -29,7 +29,7 @@ _LOG = logging.getLogger(__name__)
 PARSE_RUNS = Counter(
     "parse_runs_total",
     "Завершённые прогоны парсинга",
-    labelnames=("status",),  # completed | failed | cancelled
+    labelnames=("status",),  # completed | partial | failed | cancelled
 )
 
 PARSE_RUNS_ACTIVE = Gauge(
@@ -81,6 +81,30 @@ VACANCY_ARCHIVED = Counter(
     "vacancies_archived_total",
     "Вакансий отправлено в архив по TTL",
 )
+
+
+# Нули для известных лейблов: иначе первый прирост серии не виден increase()/rate()
+# (см. tg_jobs_parser/observability/parse_metrics.py).
+for _status in ("completed", "partial", "failed", "cancelled"):
+    PARSE_RUNS.labels(status=_status)
+for _result in ("inserted", "updated"):
+    VACANCY_UPSERTS.labels(result=_result)
+
+
+def init_llm_model_series() -> None:
+    """Нулевые LLM-серии для моделей ``config.yaml`` — на старте процесса, который ходит в LLM.
+
+    Клиент создаётся непосредственно перед первым вызовом (в прогоне — после fetch), и
+    заведённые им серии не успевают попасть в scrape до первого инкремента.
+    """
+    from backend.settings import get_settings
+    from tg_jobs_parser.config.loader import load_config
+    from tg_jobs_parser.observability.llm_metrics import init_model_series
+
+    try:
+        init_model_series(load_config(get_settings().config_path).ai.resolved_models())
+    except Exception as e:
+        _LOG.warning("LLM-метрики: модели из конфига не заведены: %s", e)
 
 
 def record_vacancy_upsert(*, inserted: int, updated_existing: int) -> None:
