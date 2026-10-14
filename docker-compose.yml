@@ -139,6 +139,7 @@ services:
       start_period: 60s
 
   # Параллелизм LLM = число реплик: docker compose up --scale llm-worker=4
+  # Пул БД у воркера 2+2 (DB_POOL_SIZE / DB_MAX_OVERFLOW) — реплики не выбирают max_connections.
   # Метрики :9101 только в Docker-сети (Prometheus dns_sd → все реплики);
   # host port mapping убран — иначе --scale конфликтует по 9101 на хосте.
   # Entrypoint: SimpleWorker (без fork) — метрики и экономия RAM.

@@ -12,6 +12,36 @@ from backend.settings import get_settings
 _engine = None
 _SessionLocal: sessionmaker[Session] | None = None
 
+# (pool_size, max_overflow) по роли процесса. API: 20 + 20 = 40 — столько же, сколько потоков
+# у threadpool sync-эндпоинтов (anyio). Воркер выполняет одну джобу за раз; parse-worker —
+# с LLM-потоками прогона, которые ходят в AI-кэш в БД. API + parse + hh + 4 llm-worker
+# укладываются в ~76 соединений при max_connections=100.
+POOL_BY_ROLE: dict[str, tuple[int, int]] = {
+    "api": (20, 20),
+    "parse-worker": (4, 12),
+    "llm-worker": (2, 2),
+    "hh-worker": (2, 2),
+}
+_pool_role = "api"
+
+
+def set_pool_role(role: str) -> None:
+    """Роль процесса для размера пула; вызывать в entrypoint до первого запроса к БД."""
+    global _pool_role
+    _pool_role = role if role in POOL_BY_ROLE else "api"
+    if _engine is not None:
+        reset_engine()
+
+
+def pool_limits(settings) -> tuple[int, int]:
+    """(pool_size, max_overflow): ``DB_POOL_SIZE`` / ``DB_MAX_OVERFLOW`` перекрывают умолчание роли."""
+    size, overflow = POOL_BY_ROLE[_pool_role]
+    if settings.db_pool_size is not None:
+        size = settings.db_pool_size
+    if settings.db_max_overflow is not None:
+        overflow = settings.db_max_overflow
+    return size, overflow
+
 
 def _json_serializer(obj: object) -> str:
     """UTF-8 JSON без \\uXXXX — читаемее в БД и компактнее для кириллицы."""
@@ -44,8 +74,7 @@ def get_engine():
             connect_args["timeout"] = 30
         pool_kw: dict = {"pool_pre_ping": True}
         if url.startswith("postgresql"):
-            pool_kw["pool_size"] = 10
-            pool_kw["max_overflow"] = 20
+            pool_kw["pool_size"], pool_kw["max_overflow"] = pool_limits(settings)
         # Через модуль, а не `from sqlalchemy import create_engine`: OTel-инструментация
         # подменяет `sqlalchemy.create_engine` уже после импорта этого модуля.
         _engine = sqlalchemy.create_engine(

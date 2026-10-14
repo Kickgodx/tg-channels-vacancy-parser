@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     api_metrics_port: int = Field(default=9100, ge=0, alias="API_METRICS_PORT")
     # Кэш COUNT-агрегатов db_* для /metrics (сек): частые scrape не нагружают Postgres; 0 — без кэша.
     metrics_db_stats_cache_seconds: float = Field(default=30.0, ge=0, alias="METRICS_DB_STATS_CACHE_SECONDS")
+    # Пул SQLAlchemy на процесс. Пусто → по роли процесса (backend/db/session.py: API — под
+    # threadpool sync-эндпоинтов, воркеры — 2–4 + overflow): N реплик llm-worker не съедают
+    # max_connections Postgres.
+    db_pool_size: int | None = Field(default=None, ge=1, alias="DB_POOL_SIZE")
+    db_max_overflow: int | None = Field(default=None, ge=0, alias="DB_MAX_OVERFLOW")
     # Пусто → Postgres из compose с хоста, пароль — POSTGRES_PASSWORD из того же .env
     # (см. _apply_app_env): backend, CLI и alembic с хоста работают без своего DATABASE_URL.
     database_url: str = Field(default="", alias="DATABASE_URL")
