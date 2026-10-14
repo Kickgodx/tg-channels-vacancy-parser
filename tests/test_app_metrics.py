@@ -354,3 +354,28 @@ def test_db_stats_collector_does_not_cache_failures(monkeypatch):
     assert list(collector.collect()) == []
     assert collector._cached is None
     get_settings.cache_clear()
+
+
+def test_worker_imports_do_not_register_db_stats_collector():
+    """Регрессия: воркеры отдавали db_* (sum(db_users) на дашборде — ×число процессов)."""
+    import subprocess
+    import sys
+
+    code = (
+        "import backend.workers.parse_worker, backend.workers.llm_worker, backend.workers.hh_worker\n"
+        "import backend.workers.recover, backend.workers.recover_parse, backend.workers.parse_tasks\n"
+        "import backend.workers.llm_tasks\n"
+        "from prometheus_client import REGISTRY\n"
+        "print(sorted({type(c).__name__ for c in REGISTRY._collector_to_names}))\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
+    assert "_DBPoolCollector" in out
+    assert "_DBStatsCollector" not in out
+
+
+def test_register_db_stats_collector_is_idempotent():
+    from backend.observability import _DBStatsCollector, register_db_stats_collector
+
+    register_db_stats_collector()
+    register_db_stats_collector()
+    assert sum(isinstance(c, _DBStatsCollector) for c in REGISTRY._collector_to_names) == 1

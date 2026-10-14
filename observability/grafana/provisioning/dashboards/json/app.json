@@ -16,7 +16,7 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": null,
-  "links": [],
+  "links": [{ "title": "Parse run", "type": "link", "url": "/d/tg-jobs-parse-run" }],
   "panels": [
     {
       "collapsed": false,
@@ -119,7 +119,7 @@
       },
       "targets": [
         {
-          "expr": "sum(db_parse_runs_finished_24h{status=\"completed\"})",
+          "expr": "sum(db_parse_runs_finished_24h{job=\"tg-jobs-backend\", status=\"completed\"})",
           "legendFormat": "completed",
           "refId": "A"
         }
@@ -155,7 +155,7 @@
       },
       "targets": [
         {
-          "expr": "sum(db_parse_runs_finished_24h{status=\"failed\"})",
+          "expr": "sum(db_parse_runs_finished_24h{job=\"tg-jobs-backend\", status=\"failed\"})",
           "legendFormat": "failed",
           "refId": "A"
         }
@@ -188,7 +188,7 @@
       },
       "targets": [
         {
-          "expr": "sum(db_parse_runs_finished_24h{status=\"cancelled\"})",
+          "expr": "sum(db_parse_runs_finished_24h{job=\"tg-jobs-backend\", status=\"cancelled\"})",
           "legendFormat": "cancelled",
           "refId": "A"
         }
@@ -221,7 +221,7 @@
       },
       "targets": [
         {
-          "expr": "sum(db_parse_posts_fetched_24h)",
+          "expr": "sum(db_parse_posts_fetched_24h{job=\"tg-jobs-backend\"})",
           "legendFormat": "posts",
           "refId": "A"
         }
@@ -276,7 +276,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(parse_posts_fetched_total[5m])) * 60",
+          "expr": "sum(rate(telegram_posts_fetched_total[5m])) * 60",
           "legendFormat": "posts fetched",
           "refId": "A"
         }
@@ -460,7 +460,7 @@
       },
       "targets": [
         {
-          "expr": "sum(db_vacancies{state=\"active\"})",
+          "expr": "sum(db_vacancies{job=\"tg-jobs-backend\", state=\"active\"})",
           "legendFormat": "vacancies",
           "refId": "A"
         }
@@ -493,7 +493,7 @@
       },
       "targets": [
         {
-          "expr": "sum(db_vacancies{state=\"archived\"})",
+          "expr": "sum(db_vacancies{job=\"tg-jobs-backend\", state=\"archived\"})",
           "legendFormat": "archived",
           "refId": "A"
         }
@@ -525,7 +525,7 @@
         "textMode": "auto"
       },
       "targets": [
-        { "expr": "sum(db_resumes)", "legendFormat": "resumes", "refId": "A" }
+        { "expr": "sum(db_resumes{job=\"tg-jobs-backend\"})", "legendFormat": "resumes", "refId": "A" }
       ],
       "title": "Резюме",
       "type": "stat"
@@ -555,7 +555,7 @@
       },
       "targets": [
         {
-          "expr": "sum(db_vacancy_matches)",
+          "expr": "sum(db_vacancy_matches{job=\"tg-jobs-backend\"})",
           "legendFormat": "matches",
           "refId": "A"
         }
@@ -587,7 +587,7 @@
         "textMode": "auto"
       },
       "targets": [
-        { "expr": "sum(db_users)", "legendFormat": "users", "refId": "A" }
+        { "expr": "sum(db_users{job=\"tg-jobs-backend\"})", "legendFormat": "users", "refId": "A" }
       ],
       "title": "Пользователей",
       "type": "stat"
@@ -617,7 +617,7 @@
       },
       "targets": [
         {
-          "expr": "sum(db_ai_cache_entries)",
+          "expr": "sum(db_ai_cache_entries{job=\"tg-jobs-backend\"})",
           "legendFormat": "cache",
           "refId": "A"
         }
@@ -642,7 +642,7 @@
       },
       "targets": [
         {
-          "expr": "sum(db_vacancies) by (state)",
+          "expr": "sum(db_vacancies{job=\"tg-jobs-backend\"}) by (state)",
           "legendFormat": "{{state}}",
           "refId": "A"
         }
@@ -667,7 +667,7 @@
       },
       "targets": [
         {
-          "expr": "sum(db_parse_runs) by (status)",
+          "expr": "sum(db_parse_runs{job=\"tg-jobs-backend\"}) by (status)",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -704,7 +704,7 @@
       },
       "targets": [
         {
-          "expr": "time() - fx_latest_rate_timestamp_seconds",
+          "expr": "time() - fx_latest_rate_timestamp_seconds{job=\"tg-jobs-backend\"}",
           "legendFormat": "lag",
           "refId": "A"
         }

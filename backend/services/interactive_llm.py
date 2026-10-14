@@ -48,7 +48,7 @@ def get_interactive_client() -> OpenRouterClient:
                 retry_base_delay_seconds=cfg.ai.retry_base_delay_seconds,
                 stop_llm_when_rate_limited=cfg.ai.stop_llm_when_rate_limited,
             )
-            _client = OpenRouterClient(cfg.ai, rate_limiter=limiter)
+            _client = OpenRouterClient(cfg.ai, rate_limiter=limiter, catalog=cfg.llm_model_catalog)
             _ai_fingerprint = fp
         return _client
 

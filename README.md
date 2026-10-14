@@ -719,16 +719,19 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
 | **`GET /metrics`** | Эндпоинт Prometheus на отдельном порту `API_METRICS_PORT` (`backend:9100`, только Docker-сеть; не путать с `/api/v1/vacancies/metrics`) |
 | **Prometheus** | Scrape backend, llm-worker, parse-worker и hh-worker каждые 15 с (`observability/prometheus.yml`) |
-| **Grafana** | Дашборды **API**, **LLM**, **LLM jobs / queue**, **Pipeline**, **HH.ru sync**, **DB pool** |
-| **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
+| **Grafana** | Дашборды **API**, **LLM**, **LLM jobs / queue**, **Pipeline**, **Parse run**, **HH.ru sync**, **DB pool** |
+| **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment; ожидание RPM-лимита (`llm_rate_gate_wait_seconds`), повторы (`llm_retries_total{reason}`), оценка стоимости по ценам `llm_models.yaml` (`llm_cost_usd_total{model}`) |
+| **Метрики прогона** | Живые, во время прогона: каналы и посты Telegram (`telegram_channels_fetched_total{result}`, `telegram_posts_fetched_total`, `telegram_channel_fetch_duration_seconds`), FloodWait — в т.ч. короткие, которые Telethon пережидает сам (`telegram_flood_waits_total{handled_by}`), поток обработанных постов (`parse_posts_processed_total{result}`), длительность фаз (`parse_phase_duration_seconds{phase}`) |
 | **Доменные метрики** | прогоны, UPSERT/TTL, импорт, матчинг, письма, LLM-джобы (`llm_job_enqueue_*`, `llm_worker_*`, `llm_rq_queue_jobs`, `llm_jobs_by_status`, recover), parse recover (`parse_jobs_recover_total`), auth, ЦБ |
-| **`db_*` gauges** | COUNT-агрегаты по таблицам с кэшем `METRICS_DB_STATS_CACHE_SECONDS` (30 с) между scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |
+| **`db_*` gauges** | COUNT-агрегаты по таблицам с кэшем `METRICS_DB_STATS_CACHE_SECONDS` (30 с) между scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ); только на backend (`job="tg-jobs-backend"`) |
 | **`db_pool_*` gauges** | SQLAlchemy QueuePool: занято / свободно / overflow / лимит (`pool_size` + `max_overflow`); на backend, llm-worker и parse-worker |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
-| **Alloy** | Собирает stdout контейнеров compose-проекта через `docker-socket-proxy` (только чтение контейнеров, сетей и логов; сам `docker.sock` в Alloy не монтируется, Alloy работает не под root), парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и отправляет в Tempo (`observability/alloy-config.alloy`) |
+| **Alloy** | Собирает stdout контейнеров compose-проекта через `docker-socket-proxy` (только чтение контейнеров, сетей и логов; сам `docker.sock` в Alloy не монтируется, Alloy работает не под root), парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и воркеров, отбрасывает шумные span'ы `connect` SQLAlchemy и отправляет в Tempo (`observability/alloy-config.alloy`) |
 | **Tempo** | Хранение трасс (local, retention 7 дней — `observability/tempo-config.yml`) |
 
 **Затор очереди LLM:** смотреть дашборд **LLM jobs / queue** — растут `llm_rq_queue_jobs` и `llm_jobs_by_status{status="queued"}`; worker latency в `llm_worker_job_duration_seconds`. TraceQL: `{ name = "llm_job.run" }`, `{ name = "llm_job.enqueue" }`.
+
+**Прогон парсинга:** дашборд **Parse run** — итоги за выбранный период (посты, кандидаты, LLM-вызовы, стоимость, FloodWait), время по фазам, воронка AI, живой поток постов, Telegram fetch, LLM (полный вызов vs ожидание RPM-лимита, повторы, $/мин), воркеры (heartbeat, RAM, CPU, `up`), таблица трасс `parse_run` и логи parse-worker. Трасса: `parse_run` → `parse.fetch_posts` → `telegram.channel` (канал, постов, просмотрено, events `telegram.flood_wait`); `parse.process_posts` → `chat <model>` (атрибуты `llm.rate_gate.wait_seconds`, `llm.retries`, `llm.cost_usd`) и `parse.flush_vacancies`. У каждого процесса свой `service.name` (`OTEL_SERVICE_NAME`): `tg-jobs-parser-parse-worker` и т.д. TraceQL: `{ resource.service.name = "tg-jobs-parser-parse-worker" && name = "parse_run" }`.
 
 **Пул БД:** дашборд **DB pool** — `db_pool_checked_out` / `db_pool_checked_in` / `db_pool_overflow` / `db_pool_max_connections`. Утилизация ≈ `checked_out / max_connections` (по job).
 
