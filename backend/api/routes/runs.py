@@ -195,7 +195,7 @@ def run_vacancies(
     return VacancyListResponse(items=items, total=total, page=page, page_size=page_size)
 
 
-_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "partial", "failed", "cancelled"})
 
 
 def _sse_progress_line(payload: dict) -> str:

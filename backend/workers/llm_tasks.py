@@ -16,6 +16,7 @@ from backend.observability import record_llm_job, record_llm_worker_job
 from backend.services import cover_letter_service, match_service
 from backend.services.llm_job_events import publish_llm_job_event
 from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_MATCH
+from backend.workers import liveness
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)
@@ -95,6 +96,7 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                             _LOG.warning("LLM job %s: lease lost (fencing)", jid)
                             lease_lost.set()
                             return
+                        liveness.beat()
                     except Exception as e:
                         _LOG.debug("LLM job %s lease heartbeat: %s", jid, e)
                     if stop_lease.wait(timeout=_LEASE_HEARTBEAT_S):

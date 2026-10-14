@@ -17,6 +17,7 @@ from backend.errors import CODE_CONFLICT_ACTIVE_RUN, AppError
 from backend.schemas import RunCreateRequest
 from backend.services.parse_run_events import publish_parse_run_event
 from backend.settings import get_settings
+from backend.tracing import current_traceparent
 from backend.workers.parse_tasks import run_parse_job
 from tg_jobs_parser.config.schema import AppConfig
 
@@ -24,17 +25,6 @@ _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)
 
 _ACTIVE_PARSE_MSG = "Уже выполняется прогон парсинга. Дождитесь завершения или отмените его."
-
-
-def _current_traceparent() -> str | None:
-    try:
-        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
-
-        carrier: dict[str, str] = {}
-        TraceContextTextMapPropagator().inject(carrier)
-        return carrier.get("traceparent")
-    except Exception:
-        return None
 
 
 def start_parse_run(config: AppConfig, _body: RunCreateRequest) -> uuid.UUID:
@@ -61,7 +51,7 @@ def start_parse_run(config: AppConfig, _body: RunCreateRequest) -> uuid.UUID:
 
     settings = get_settings()
     backend = settings.parse_job_backend_normalized
-    traceparent = _current_traceparent()
+    traceparent = current_traceparent()
 
     with _TRACER.start_as_current_span(
         "parse_run.enqueue",

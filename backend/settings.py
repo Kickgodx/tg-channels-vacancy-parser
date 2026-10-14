@@ -101,6 +101,20 @@ class Settings(BaseSettings):
     parse_job_max_attempts: int = Field(default=3, ge=1, alias="PARSE_JOB_MAX_ATTEMPTS")
     llm_job_max_attempts: int = Field(default=2, ge=1, alias="LLM_JOB_MAX_ATTEMPTS")
 
+    # HH sync jobs: inprocess (поток в API) или rq (Redis Queue + hh-worker).
+    hh_sync_job_backend: str = Field(default="inprocess", alias="HH_SYNC_JOB_BACKEND")
+    hh_worker_metrics_port: int = Field(default=9103, alias="HH_WORKER_METRICS_PORT")
+    hh_sync_rq_job_timeout_seconds: int = Field(default=3600, alias="HH_SYNC_RQ_JOB_TIMEOUT_SECONDS")
+    hh_sync_job_lease_seconds: int = Field(default=120, alias="HH_SYNC_JOB_LEASE_SECONDS")
+    hh_sync_job_stuck_minutes: int = Field(default=15, alias="HH_SYNC_JOB_STUCK_MINUTES")
+    # Sync безопасно повторять (detail уже скачанных listings не перекачивается).
+    hh_sync_job_max_attempts: int = Field(default=2, ge=1, alias="HH_SYNC_JOB_MAX_ATTEMPTS")
+
+    # RQ-воркер, чей heartbeat (цикл RQ или lease джобы) молчит дольше — завершает процесс,
+    # чтобы restart policy его перезапустила (Docker unhealthy-контейнер сам не рестартит).
+    # 0 — watchdog выключен. Порог healthcheck — WORKER_HEARTBEAT_MAX_AGE_SECONDS (180).
+    worker_stall_exit_seconds: int = Field(default=900, ge=0, alias="WORKER_STALL_EXIT_SECONDS")
+
     @field_validator("app_env", mode="before")
     @classmethod
     def _normalize_app_env(cls, value: Any) -> Any:
@@ -146,6 +160,11 @@ class Settings(BaseSettings):
     @property
     def parse_job_backend_normalized(self) -> str:
         v = (self.parse_job_backend or "inprocess").strip().lower()
+        return v if v in ("inprocess", "rq") else "inprocess"
+
+    @property
+    def hh_sync_job_backend_normalized(self) -> str:
+        v = (self.hh_sync_job_backend or "inprocess").strip().lower()
         return v if v in ("inprocess", "rq") else "inprocess"
 
     @property

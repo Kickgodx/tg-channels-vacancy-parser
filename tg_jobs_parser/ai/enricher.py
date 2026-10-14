@@ -122,6 +122,7 @@ class AIEnrichmentService:
         self._progress_total: int = 0
         self._progress_done: int = 0
         self._daily_limit_hit = False
+        self._consecutive_errors = 0
 
     def close(self) -> None:
         self._client.close()
@@ -221,11 +222,16 @@ class AIEnrichmentService:
             except Exception as e:
                 with self.stats._lock:
                     self.stats.errors += 1
+                    self._consecutive_errors += 1
+                    consecutive = self._consecutive_errors
                 record_enrich_event("error")
                 _LOG.warning("AI ошибка для %s: %s", vacancy.id, e)
+                self._trip_breaker_if_needed(consecutive, e)
                 if self._ai.mode == "primary":
                     return None
                 return vacancy
+            with self.stats._lock:
+                self._consecutive_errors = 0
             cache_model = (usage.model or self._ai.model).strip() or self._ai.model
             self.stats.record_api_tokens(
                 cache_model,
@@ -263,6 +269,25 @@ class AIEnrichmentService:
             merged = merged.model_copy(update={"vacancy_score": threshold})
         record_enrich_event("merged")
         return merged
+
+    def _trip_breaker_if_needed(self, consecutive: int, error: Exception) -> None:
+        """Circuit breaker: при полном отказе провайдера каждый пост ждал бы повторов и таймаутов.
+
+        После ``ai.circuit_breaker_errors`` ошибок подряд LLM отключается до конца прогона —
+        дальше тот же путь, что при исчерпанной квоте: посты идут без LLM (assist) или
+        пропускаются, а прогон помечается неполным (primary).
+        """
+        threshold = self._ai.circuit_breaker_errors
+        limiter = self._client.rate_limiter
+        if threshold <= 0 or consecutive < threshold or limiter.llm_disabled:
+            return
+        detail = str(error)
+        if len(detail) > 200:
+            detail = detail[:199] + "…"
+        limiter.disable_llm_for_run(f"circuit breaker: {consecutive} ошибок LLM подряд, последняя: {detail}")
+        with self.stats._lock:
+            self.stats.llm_disabled_mid_run = True
+        record_enrich_event("circuit_open")
 
     def log_batch_finished(self) -> None:
         if self._progress_total <= 0:

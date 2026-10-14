@@ -46,7 +46,10 @@ flowchart TB
   end
 
   subgraph HH["HH sync admin"]
-    H1["Search listings"] --> H2["Dedup + detail"] --> H3["Mapper → vacancies"]
+    H0["POST /hh/sync"] --> HQ["hh_sync_jobs 202"]
+    HQ --> HR["Redis RQ hh"] --> HW["hh-worker"]
+    HW --> H1["Search listings"] --> H2["Dedup + detail"] --> H3["Mapper → vacancies"]
+    HQ --> HS["SSE / poll GET"]
   end
 
   subgraph Match

@@ -21,6 +21,7 @@ from backend.observability import (
 )
 from backend.services.parse_progress_serialize import snapshot_to_progress_dict
 from backend.services.parse_run_events import publish_parse_run_event
+from backend.workers import liveness
 from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -127,6 +128,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
                 if not stop_lease.is_set():
                     _mark_lease_lost()
                 return False
+            liveness.beat()
             return True
         except Exception as e:
             _LOG.debug("Parse run %s lease heartbeat: %s", run_id, e)
@@ -249,7 +251,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
                 res,
                 status=final_status,
                 lease_owner=lease_owner,
-                error_message=res.incomplete_reason if final_status == "failed" else None,
+                error_message=res.incomplete_reason if final_status == "partial" else None,
             ):
                 return None
             stats = repo.upsert_vacancies(session, remaining, parse_run_id=run_id)
@@ -312,9 +314,9 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             if cancel_token.is_cancelled():
                 final_status = "cancelled"
             elif result.incomplete_reason:
-                # Часть постов не разобрана (LLM отключился в primary): собранное
-                # сохраняем, но «completed» скрыл бы потерю остатка.
-                final_status = "failed"
+                # Часть постов не разобрана (LLM отключился или много ошибок в primary):
+                # собранное сохраняем, но «completed» скрыл бы потерю остатка.
+                final_status = "partial"
             else:
                 final_status = "completed"
             # Heartbeat останавливаем до финализации: после неё прогон уже не running.
@@ -344,9 +346,9 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
                     totals.inserted,
                     totals.updated_existing,
                 )
-                if final_status == "failed":
+                if final_status == "partial":
                     error = result.incomplete_reason
-                    _LOG.error("Прогон %s неполный, статус failed: %s", run_id, error)
+                    _LOG.error("Прогон %s неполный, статус partial: %s", run_id, error)
     except ParseCancelled:
         if lease_lost.is_set():
             status = "failed"

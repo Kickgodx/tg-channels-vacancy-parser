@@ -46,6 +46,11 @@ class HhSyncNotConfigured(RuntimeError):
     """HH выключен или нет токена/email."""
 
 
+# (phase, result, done, total): search → details (done/total групп) → purge.
+# Исключение из колбэка прерывает sync (так воркер останавливает его при потере lease).
+HhSyncProgressCallback = Callable[[str, "HhSyncResult", int, int], None]
+
+
 @dataclass
 class HhSyncResult:
     searched: int = 0
@@ -107,6 +112,7 @@ def run_hh_sync(
     config: AppConfig,
     settings: Settings,
     search_window: ResolvedHhSearchWindow | None = None,
+    progress_callback: HhSyncProgressCallback | None = None,
 ) -> HhSyncResult:
     thread_locked = _SYNC_LOCK.acquire(blocking=False)
     if not thread_locked:
@@ -120,6 +126,11 @@ def run_hh_sync(
     result.period = resolved.period
     result.date_from = resolved.date_from
     result.date_to = resolved.date_to
+
+    def report(phase: str, done: int = 0, total: int = 0) -> None:
+        if progress_callback is not None:
+            progress_callback(phase, result, done, total)
+
     try:
         if not db_lock.try_acquire():
             raise HhSyncConflict("HH sync already in progress")
@@ -128,6 +139,7 @@ def run_hh_sync(
             hh = config.hh
             client = _client_from(settings, hh)
             try:
+                report("search")
                 span.set_attribute("hh.window", resolved.window)
                 if resolved.period is not None:
                     span.set_attribute("hh.period", resolved.period)
@@ -153,6 +165,7 @@ def run_hh_sync(
                     dedup_span.set_attribute("hh.unique", result.unique)
                     dedup_span.set_attribute("hh.duplicates", result.duplicates)
                 shorts.clear()
+                report("details", 0, len(groups))
 
                 batch_size = hh.db_flush_batch_size
                 buffer: list[Vacancy] = []
@@ -180,7 +193,7 @@ def run_hh_sync(
                     )
                     buffer.clear()
 
-                for group in groups:
+                for done, group in enumerate(groups, 1):
                     _process_group(
                         client,
                         session,
@@ -194,8 +207,10 @@ def run_hh_sync(
                     for dup_id, _ in group.duplicates:
                         by_id.pop(dup_id, None)
                     flush_buffer()
+                    report("details", done, len(groups))
 
                 flush_buffer(force=True)
+                report("purge", len(groups), len(groups))
                 groups.clear()
                 by_id.clear()
 

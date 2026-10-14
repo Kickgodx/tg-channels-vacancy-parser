@@ -131,6 +131,18 @@ def setup_tracing(app: FastAPI, settings: Settings) -> bool:
     return True
 
 
+def current_traceparent() -> str | None:
+    """W3C ``traceparent`` текущего span'а — передаётся в джобу, чтобы воркер продолжил трассу."""
+    try:
+        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+        carrier: dict[str, str] = {}
+        TraceContextTextMapPropagator().inject(carrier)
+        return carrier.get("traceparent")
+    except Exception:
+        return None
+
+
 def shutdown_tracing() -> None:
     """Дослать буфер BatchSpanProcessor при остановке backend."""
     global _provider

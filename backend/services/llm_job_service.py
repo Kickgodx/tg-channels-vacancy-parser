@@ -9,12 +9,12 @@ from dataclasses import dataclass
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from backend.db import repository as repo
 from backend.db.session import session_scope
 from backend.observability import record_llm_job, record_llm_job_enqueue
 from backend.settings import get_settings
+from backend.tracing import current_traceparent
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.utils.thread_pool import DaemonThreadPoolExecutor
 
@@ -56,12 +56,6 @@ def reserve_user_llm_calls(session, *, user_id: int, calls: int) -> None:
 class EnqueueResult:
     job_id: uuid.UUID
     reused: bool
-
-
-def _current_traceparent() -> str | None:
-    carrier: dict[str, str] = {}
-    TraceContextTextMapPropagator().inject(carrier)
-    return carrier.get("traceparent")
 
 
 class LlmJobRunner:
@@ -180,7 +174,7 @@ class LlmJobRunner:
     def _dispatch(self, job_id: uuid.UUID, *, backend: str, pool_workers: int) -> None:
         from backend.workers.llm_tasks import run_llm_job
 
-        traceparent = _current_traceparent()
+        traceparent = current_traceparent()
         if backend == "rq":
             from backend.queue.rq_conn import get_llm_queue
             from backend.settings import get_settings

@@ -30,7 +30,7 @@ class ParseResult(BaseModel):
         default=None,
         description=(
             "Прогон дошёл до конца, но часть постов осталась неразобранной (LLM отключён "
-            "в режиме primary). Собранные вакансии валидны; статус прогона — не completed."
+            "или много ошибок LLM в режиме primary). Собранные вакансии валидны; статус прогона — partial."
         ),
     )
     channel_checkpoints: dict[str, ChannelCheckpoint] = Field(

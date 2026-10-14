@@ -101,6 +101,7 @@ def _start_inprocess_job_recovery() -> list[threading.Event]:
     409 CONFLICT_ACTIVE_RUN), а LLM-джобы съедают лимит пользователя.
     """
     from backend.workers.recover import recover_stuck_llm_jobs
+    from backend.workers.recover_hh_sync import recover_stuck_hh_sync_jobs
     from backend.workers.recover_loop import start_periodic_recover
     from backend.workers.recover_parse import recover_stuck_parse_runs
 
@@ -110,6 +111,7 @@ def _start_inprocess_job_recovery() -> list[threading.Event]:
     for job_backend, recover_fn, name in (
         (settings.parse_job_backend_normalized, recover_stuck_parse_runs, "parse-recover-loop"),
         (settings.llm_job_backend_normalized, recover_stuck_llm_jobs, "llm-recover-loop"),
+        (settings.hh_sync_job_backend_normalized, recover_stuck_hh_sync_jobs, "hh-recover-loop"),
     ):
         if job_backend != "inprocess":
             continue
@@ -251,6 +253,7 @@ app.include_router(runs.router, prefix="/api/v1")
 app.include_router(runs.sse_router, prefix="/api/v1")
 app.include_router(vacancies.router, prefix="/api/v1")
 app.include_router(hh.router, prefix="/api/v1")
+app.include_router(hh.sse_router, prefix="/api/v1")
 app.include_router(ai_cache.router, prefix="/api/v1")
 app.include_router(fx.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")

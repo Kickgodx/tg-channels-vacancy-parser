@@ -120,15 +120,29 @@ def _message_content(message: Any) -> str:
     return ""
 
 
+def _status_code(exc: BaseException) -> int | None:
+    """HTTP-статус ошибки SDK; ищется и в цепочке ``__cause__`` (клиент оборачивает её в RuntimeError)."""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        status = getattr(cur, "status_code", None)
+        if isinstance(status, int):
+            return status
+        cur = cur.__cause__
+    return None
+
+
 def _is_rate_limit_error(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return "429" in msg or "rate limit" in msg
+    # По статусу, а не по подстроке "429" в тексте: она встречается и в id запроса,
+    # и в теле ответа модели — такой сбой не получал fallback-моделей.
+    return _status_code(exc) == 429
 
 
 def _is_transient_error(exc: Exception) -> bool:
     """Сбой, который имеет смысл повторить: 5xx/408/409, таймаут, обрыв соединения."""
-    status = getattr(exc, "status_code", None)
-    if isinstance(status, int):
+    status = _status_code(exc)
+    if status is not None:
         return status in (408, 409) or status >= 500
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return True

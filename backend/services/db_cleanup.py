@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from backend.db import ai_cache_repository as ai_cache_repo
+from backend.db import hh_sync_job_repository as hh_sync_repo
 from backend.db import idempotency_repository as idem_repo
 from backend.db import llm_job_repository as llm_repo
 from backend.db import parse_run_repository as run_repo
@@ -34,10 +35,11 @@ class CleanupStats:
     llm_jobs: int = 0
     idempotency_keys: int = 0
     parse_runs: int = 0
+    hh_sync_jobs: int = 0
 
     @property
     def total(self) -> int:
-        return self.ai_cache + self.llm_jobs + self.idempotency_keys + self.parse_runs
+        return self.ai_cache + self.llm_jobs + self.idempotency_keys + self.parse_runs + self.hh_sync_jobs
 
 
 def _purge_in_batches(purge: Callable[[Session, int], int], *, batch: int = _BATCH) -> int:
@@ -66,6 +68,9 @@ def purge_service_tables(retention: RetentionConfig, *, now: datetime | None = N
     if retention.parse_runs_ttl_days > 0:
         runs_cutoff = now - timedelta(days=retention.parse_runs_ttl_days)
         steps.append(("parse_runs", lambda s, n: run_repo.purge_old_parse_runs(s, older_than=runs_cutoff, limit=n)))
+        steps.append(
+            ("hh_sync_jobs", lambda s, n: hh_sync_repo.purge_old_hh_sync_jobs(s, older_than=runs_cutoff, limit=n))
+        )
 
     for name, purge in steps:
         try:

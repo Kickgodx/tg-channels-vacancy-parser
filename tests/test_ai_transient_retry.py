@@ -164,3 +164,145 @@ def test_assist_mode_falls_back_to_rules_and_stays_complete(monkeypatch):
     assert len(result.vacancies_unique) == 5  # остаток разобран rules
     assert result.incomplete_reason is None
     assert "только rules" in (result.parse_warnings or "")
+
+
+def _run_with_extract(monkeypatch, fake_extract, *, mode: str, posts: int, **ai_overrides):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    config = AppConfig(
+        sources=SourcesConfig(channels=["chan"]),
+        parser=ParserConfig(
+            vacancy_score_threshold=1,
+            vacancy_min_substantive_score=1,
+            vacancy_fuzzy_duplicate_threshold=101,
+        ),
+        output=OutputConfig(save_progress_batches=False),
+        fx=FxConfig(enabled=False),
+        ai=AiConfig(enabled=True, mode=mode, use_cache=False, concurrency=1, requests_per_minute=500, **ai_overrides),
+    )
+    monkeypatch.setattr(OpenRouterClient, "extract_with_fallback", fake_extract)
+    monkeypatch.setattr(
+        parse_runner,
+        "_channel_parser",
+        lambda config, cancellation=None: _FakeChannelParser([_post(i) for i in range(posts)]),
+    )
+    return parse_runner.run_parse(config)
+
+
+_OK = VacancyAIExtraction(is_job_post=True, detected_specializations=["Python"], confidence=0.9)
+
+
+def test_circuit_breaker_stops_llm_after_consecutive_errors(monkeypatch):
+    calls = 0
+
+    def always_fails(self, *, text, search_context):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("OpenRouter API: upstream error 503")
+
+    result = _run_with_extract(monkeypatch, always_fails, mode="primary", posts=10, circuit_breaker_errors=3)
+
+    assert calls == 3  # остальные 7 постов не ждут повторов и таймаутов
+    assert result.vacancies_unique == []
+    assert result.incomplete_reason is not None
+    assert "circuit breaker" in result.incomplete_reason
+    assert "не разобрано постов: 7" in result.incomplete_reason
+
+
+def test_circuit_breaker_resets_on_success(monkeypatch):
+    calls = 0
+
+    def every_other_fails(self, *, text, search_context):
+        nonlocal calls
+        calls += 1
+        if calls % 2:
+            raise RuntimeError("OpenRouter API: upstream error 503")
+        return _OK, LLMUsage()
+
+    result = _run_with_extract(
+        monkeypatch, every_other_fails, mode="assist", posts=8, circuit_breaker_errors=2, max_error_ratio=1
+    )
+
+    assert calls == 8  # ошибок подряд не больше одной — breaker не срабатывает
+    assert result.incomplete_reason is None
+    assert "LLM отключён" not in (result.parse_warnings or "")
+
+
+def test_circuit_breaker_in_assist_mode_falls_back_to_rules(monkeypatch):
+    def always_fails(self, *, text, search_context):
+        raise RuntimeError("OpenRouter API: upstream error 503")
+
+    result = _run_with_extract(monkeypatch, always_fails, mode="assist", posts=6, circuit_breaker_errors=2)
+
+    assert len(result.vacancies_unique) == 6
+    assert result.incomplete_reason is None
+    assert "circuit breaker" in (result.parse_warnings or "")
+
+
+def _fails_on(call_numbers: set[int]):
+    calls = 0
+
+    def extract(self, *, text, search_context):
+        nonlocal calls
+        calls += 1
+        if calls in call_numbers:
+            raise RuntimeError("OpenRouter API: bad JSON")
+        return _OK, LLMUsage()
+
+    return extract
+
+
+def test_primary_error_ratio_above_threshold_marks_run_incomplete(monkeypatch):
+    result = _run_with_extract(monkeypatch, _fails_on({2, 5}), mode="primary", posts=10, max_error_ratio=0.1)
+
+    assert len(result.vacancies_unique) == 8
+    assert result.incomplete_reason is not None
+    assert "ошибок LLM 2 из 10" in result.incomplete_reason
+
+
+def test_primary_error_ratio_within_threshold_stays_complete(monkeypatch):
+    result = _run_with_extract(monkeypatch, _fails_on({2, 5}), mode="primary", posts=10, max_error_ratio=0.2)
+
+    assert len(result.vacancies_unique) == 8
+    assert result.incomplete_reason is None
+
+
+class _StatusError(Exception):
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def test_rate_limit_is_detected_by_status_code_not_text():
+    from tg_jobs_parser.ai.clients.openrouter import _is_rate_limit_error
+
+    assert _is_rate_limit_error(_StatusError(429, "Too Many Requests")) is True
+    # Клиент оборачивает ошибку SDK: статус ищется по цепочке __cause__.
+    try:
+        try:
+            raise _StatusError(429, "slow down")
+        except _StatusError as inner:
+            raise RuntimeError(f"OpenRouter API: {inner}") from inner
+    except RuntimeError as wrapped:
+        assert _is_rate_limit_error(wrapped) is True
+    # «429» в тексте (id запроса, ответ модели) — не rate limit.
+    assert _is_rate_limit_error(_StatusError(500, "request req-4291 failed")) is False
+    assert _is_rate_limit_error(RuntimeError("OpenRouter API: model said 429")) is False
+
+
+def test_text_with_429_still_gets_fallback_model(monkeypatch, sleeps):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = OpenRouterClient(AiConfig(requests_per_minute=500, fallback_models=["fb/model"]))
+    used: list[str | None] = []
+
+    def fake_extract(*, text, search_context, model=None):
+        used.append(model)
+        if model is None:
+            raise RuntimeError("OpenRouter API: invalid JSON near offset 429")
+        return _OK, LLMUsage(model=model)
+
+    monkeypatch.setattr(client, "extract", fake_extract)
+
+    _, usage = client.extract_with_fallback(text="t", search_context=None)
+
+    assert used == [None, "fb/model"]
+    assert usage.model == "fb/model"
