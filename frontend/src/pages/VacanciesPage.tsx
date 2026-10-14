@@ -9,6 +9,9 @@ import VacancyTable from "../components/VacancyTable";
 import type { SavedFilter, SavedFilterParams } from "../types/api";
 import { SORTABLE_COLUMNS, type VacancySortField, type VacancySortOrder } from "../types/sort";
 
+/** Совпадает с MAX_LIST_DEPTH в backend/api/params.py. */
+const MAX_LIST_DEPTH = 10_000;
+
 type VacanciesTab = "list" | "analytics";
 
 function vacancyFilterParams(
@@ -210,7 +213,10 @@ export default function VacanciesPage() {
   };
 
   const presets = presetsQ.data?.items ?? [];
-  const totalPages = data ? Math.ceil(data.total / data.page_size) : 1;
+  // Backend листает только первые MAX_LIST_DEPTH позиций (OFFSET дальше дорог) — дальше 422.
+  const pagesByTotal = data ? Math.ceil(data.total / data.page_size) : 1;
+  const maxPages = data ? Math.max(1, Math.floor(MAX_LIST_DEPTH / data.page_size)) : 1;
+  const totalPages = Math.min(pagesByTotal, maxPages);
   const gradeOptions = defaultsQ.data?.grade_options ?? [];
   const specOptions = defaultsQ.data?.specialization_options ?? [];
 
@@ -452,6 +458,12 @@ export default function VacanciesPage() {
               <p>
                 Всего: <strong>{data.total}</strong> (стр. {data.page} / {totalPages})
               </p>
+              {pagesByTotal > maxPages && (
+                <p className="caption">
+                  Листаются первые {MAX_LIST_DEPTH.toLocaleString()} вакансий — уточните фильтры или
+                  смените сортировку, чтобы увидеть остальные.
+                </p>
+              )}
               {data.items.length > 0 ? (
                 <VacancyTable
                   items={data.items}

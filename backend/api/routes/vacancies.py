@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db, verify_api_key
-from backend.api.params import Page, PageSize, vacancy_filters
+from backend.api.params import Page, PageSize, check_list_depth, vacancy_filters
 from backend.db import repository as repo
 from backend.db.aggregate_cache import cached_aggregate
 from backend.db.models import UserRow
@@ -141,6 +141,7 @@ def list_vacancies(
     db: Session = Depends(get_db),
     user: UserRow = Depends(get_current_user),
 ) -> VacancyListResponse:
+    check_list_depth(page, page_size)
     if resume_id is not None:
         resume = repo.get_resume(db, resume_id)
         if resume is None or resume.user_id != user.id:
