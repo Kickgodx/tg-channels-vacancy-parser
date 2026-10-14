@@ -110,6 +110,7 @@ def test_duplicate_id_in_batch_is_written_once(db):
 def test_list_depth_is_capped(api_client):
     from backend.api.params import MAX_LIST_DEPTH
 
+    # Первый пользователь — admin: /runs/* admin-only.
     token = api_client.post("/api/v1/auth/register", json={"email": "d@example.com", "password": "secret1"})
     headers = {"Authorization": f"Bearer {token.json()['access_token']}"}
 

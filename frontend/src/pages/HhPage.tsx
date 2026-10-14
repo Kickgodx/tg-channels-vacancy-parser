@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { HhSyncJob, HhSyncProgress, HhSyncWindow } from "../types/api";
 
@@ -35,17 +34,14 @@ export default function HhPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me() });
   const statusQ = useQuery({
     queryKey: ["hh-status"],
     queryFn: () => api.hhStatus(),
-    enabled: Boolean(meQ.data?.is_admin),
   });
   // Последний sync: после перезагрузки страницы видно идущий или итог прошлого.
   const lastJobQ = useQuery({
     queryKey: ["hh-sync-jobs"],
     queryFn: () => api.hhSyncJobs(1),
-    enabled: Boolean(meQ.data?.is_admin),
   });
 
   const [liveJob, setLiveJob] = useState<HhSyncJob | null>(null);
@@ -81,13 +77,6 @@ export default function HhPage() {
     },
     onSuccess: (created) => setLiveJob(created),
   });
-
-  if (meQ.isLoading) {
-    return <p className="muted">Загрузка…</p>;
-  }
-  if (meQ.data && !meQ.data.is_admin) {
-    return <Navigate to="/" replace />;
-  }
 
   const status = statusQ.data;
   const result = job?.result ?? null;

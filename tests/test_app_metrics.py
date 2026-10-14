@@ -74,7 +74,7 @@ def test_auth_events_metric(api_client):
 
 
 def test_import_items_metric(api_client):
-    token = _register(api_client, "imp@example.com")
+    token = _register(api_client, "imp@example.com")  # первый — admin: импорт admin-only
 
     before_created = _sample("vacancy_import_items_total", {"status": "created"})
     r = api_client.post("/api/v1/vacancies/import", headers=_auth(token), json={"texts": [VACANCY_TEXT]})

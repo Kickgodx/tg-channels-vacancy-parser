@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_current_user, get_db, verify_api_key
+from backend.api.deps import get_current_user, get_db, require_admin, verify_api_key
 from backend.api.params import Page, PageSize, check_list_depth, vacancy_filters
 from backend.db import repository as repo
 from backend.db.aggregate_cache import cached_aggregate
@@ -44,10 +44,10 @@ router = APIRouter(
 def import_vacancies(
     body: VacancyImportRequest,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: UserRow = Depends(require_admin),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
-    """Импорт вакансий из текста: rules + LLM-разбор и запись в БД (как в прогоне).
+    """Импорт вакансий из текста: rules + LLM-разбор и запись в БД (как в прогоне). Только admin.
 
     Без LLM (AI выключен или все тексты уже в базе) — сразу 200 с итогом. Нужен LLM —
     202 ``{job_id}``: разбор идёт LLM-джобой, итог по текстам растёт в

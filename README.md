@@ -300,9 +300,11 @@ LLM пишет черновик отклика под конкретную ва�
 резюме/пресеты, созданные до появления пользователей.
 
 - Приватное (по `user_id`): резюме, пресеты фильтров, матчи, письма.
-- Общее: вакансии, прогоны, аналитика, курсы ЦБ — единый корпус. Читает любой
-  залогиненный пользователь; менять (запуск/отмена прогона, курсы, кэш LLM,
-  HH sync) может только админ.
+- Общее: вакансии, аналитика, курсы ЦБ — единый корпус. Читает любой
+  залогиненный пользователь; менять (курсы, кэш LLM) может только админ.
+- Только админ: прогоны целиком (запуск, отмена, история, экспорт, SSE), ручной
+  импорт и HH sync. Вкладки «Парсинг», «Импорт» и «HH» не-админу не показываются,
+  прямой переход по URL уводит на «Вакансии».
 - Токен хранится в `localStorage`, уходит в `Authorization: Bearer …`;
   401 → редирект на `/login`. Для SSE (EventSource не умеет заголовки)
   токен передаётся параметром `access_token`.
@@ -381,14 +383,14 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `GET` | `/config/defaults` | Значения по умолчанию для формы |
 | `GET` | `/config/llm-models` | Каталог моделей из `llm_models.yaml` |
 | `POST` | `/runs` | Постановка прогона в очередь (admin; `queued` → parse-worker / inprocess) |
-| `GET` | `/runs/{id}` | Статус, метрики и durable `progress` прогона |
-| `GET` | `/runs/{id}/events` | SSE: прогресс (Redis pub/sub или DB poll); после F5 — resume; Bearer или `?access_token=` |
+| `GET` | `/runs` \| `/runs/{id}` | История прогонов / статус, метрики и durable `progress` (admin) |
+| `GET` | `/runs/{id}/events` | SSE: прогресс (admin; Redis pub/sub или DB poll); после F5 — resume; Bearer или `?access_token=` |
 | `POST` | `/runs/{id}/cancel` | Отмена (admin; флаг в БД; работает после рестарта API) |
-| `GET` | `/runs/{id}/vacancies` | Вакансии прогона (`sort_by`, `sort_order`) |
-| `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта |
+| `GET` | `/runs/{id}/vacancies` | Вакансии прогона (admin; `sort_by`, `sort_order`) |
+| `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта (admin) |
 | `GET` | `/vacancies` | Глобальный список (slim: `preview` без полных текстов; фильтры, сортировка, пагинация, `resume_id`) |
 | `GET` | `/vacancies/{id}` | Полная вакансия (`raw_text` / `cleaned_text`) для карточки |
-| `POST` | `/vacancies/import` | Импорт вакансий из текста: `{texts, source_url?}` → rules + LLM → запись в БД |
+| `POST` | `/vacancies/import` | Импорт вакансий из текста (admin): `{texts, source_url?}` → rules + LLM → запись в БД |
 | `GET` | `/hh/status` | Статус HH sync (admin): токен задан?, TTL listings, счётчики кэша |
 | `POST` | `/hh/sync` | HH sync в фоне (admin): 202 `{job_id}`; 409, если sync уже идёт. Поиск → dedup → detail только для новых → БД |
 | `GET` | `/hh/sync-jobs` \| `/hh/sync-jobs/{id}` | Последние sync / один sync (admin): статус, прогресс, итог (у `failed` — частичный) |
@@ -407,8 +409,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `POST` | `/ai-cache/clear` | Полная очистка кэша LLM (admin) |
 
 Без логина доступны только `/health`, `/auth/register` и `/auth/login`; всё остальное
-требует JWT. Мутации общих данных — `POST /runs`, `POST /runs/{id}/cancel`,
-`POST /fx/*`, `POST /ai-cache/clear` и HH — только админ (`require_admin`, иначе 403).
+требует JWT. Только админ (`require_admin`, иначе 403): весь `/runs/*`,
+`POST /vacancies/import`, `POST /fx/*`, `POST /ai-cache/clear` и HH.
 `API_KEY`, если задан, — дополнительный заголовок `X-API-Key` поверх JWT, а не замена ему.
 
 Query-параметры списка, метрик, аналитики и экспорта типизированы на уровне FastAPI:

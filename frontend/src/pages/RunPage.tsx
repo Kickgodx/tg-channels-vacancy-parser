@@ -157,9 +157,6 @@ export default function RunPage() {
   });
 
   const [cancelError, setCancelError] = useState<string | null>(null);
-  // Отмена прогона — admin-only на backend.
-  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
-  const isAdmin = Boolean(meQ.data?.is_admin);
 
   const cancel = useMutation({
     mutationFn: () => api.cancelRun(runId!),
@@ -311,11 +308,9 @@ export default function RunPage() {
                 {(run.data.status === "queued" || run.data.status === "pending" ||
                   (run.data.status === "running" && progress?.phase !== "post_processing_done")) && (
                   <>
-                    {isAdmin && (
-                      <button className="secondary" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
-                        {cancel.isPending ? "Отмена…" : "Отменить"}
-                      </button>
-                    )}
+                    <button className="secondary" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
+                      {cancel.isPending ? "Отмена…" : "Отменить"}
+                    </button>
                     {cancelError && <p className="error">{cancelError}</p>}
                     {streamError &&
                       streamError.runId === runId &&

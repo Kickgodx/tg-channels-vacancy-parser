@@ -1,4 +1,4 @@
-"""Доступ к общим эндпоинтам: чтение — JWT, мутации — admin; overrides прогона — whitelist."""
+"""Доступ к общим эндпоинтам: чтение — JWT, мутации и прогоны — admin; overrides прогона — whitelist."""
 
 from __future__ import annotations
 
@@ -39,10 +39,14 @@ _READS = [
 _ADMIN_MUTATIONS = [
     "/api/v1/runs",
     f"/api/v1/runs/{_RUN_ID}/cancel",
+    "/api/v1/vacancies/import",
     "/api/v1/fx/refresh",
     "/api/v1/fx/recalculate-rub",
     "/api/v1/ai-cache/clear",
 ]
+
+# Прогоны (вкладка «Парсинг») не-админу не отдаются даже на чтение.
+_ADMIN_READS = [p for p in _READS if p.startswith("/api/v1/runs")]
 
 
 def _register(client, email: str) -> dict:
@@ -88,8 +92,18 @@ def test_mutations_forbidden_for_non_admin(api_client, path):
 def test_non_admin_can_read(api_client):
     _register(api_client, "admin@example.com")
     headers = _auth(_register(api_client, "user@example.com")["access_token"])
-    for path in ("/api/v1/vacancies", "/api/v1/runs", "/api/v1/ai-cache/stats", "/api/v1/config/defaults"):
+    for path in ("/api/v1/vacancies", "/api/v1/ai-cache/stats", "/api/v1/config/defaults"):
         assert api_client.get(path, headers=headers).status_code == 200, path
+
+
+@pytest.mark.parametrize("path", _ADMIN_READS)
+def test_run_reads_forbidden_for_non_admin(api_client, path):
+    _register(api_client, "admin@example.com")
+    token = _register(api_client, "user@example.com")["access_token"]
+    # 403 раньше поиска прогона — сама строка не нужна.
+    r = api_client.get(path, headers=_auth(token))
+    assert r.status_code == 403, path
+    assert r.json()["detail"]["code"] == "FORBIDDEN"
 
 
 def test_run_events_accept_access_token_query_rest_does_not(api_client):

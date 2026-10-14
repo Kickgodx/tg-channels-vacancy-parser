@@ -95,6 +95,14 @@ def test_import_requires_auth(api_client):
     assert api_client.post("/api/v1/vacancies/import", json={"texts": [VACANCY_TEXT]}).status_code == 401
 
 
+def test_import_is_admin_only(api_client):
+    _register(api_client, "owner@example.com")  # первый — admin
+    token = _register(api_client, "guest@example.com")
+    r = _import(api_client, token, [VACANCY_TEXT])
+    assert r.status_code == 403
+    assert r.json()["detail"]["code"] == "FORBIDDEN"
+
+
 class _FakeAI:
     """AIEnrichmentService без сети: «пикник» — не вакансия, остальное — hybrid."""
 
@@ -184,22 +192,30 @@ def test_import_job_replays_by_idempotency_key(api_client, fake_ai):
 
 
 def test_import_falls_back_to_rules_when_daily_quota_ends(api_client, monkeypatch, fake_ai):
-    """Квота не-админа кончилась посреди импорта — остальные тексты разбираются правилами."""
+    """Квота не-админа кончилась посреди импорта — остальные тексты разбираются правилами.
+
+    Через API импорт только у админа (без квоты); джоба не-админа — например, если
+    права сняли после постановки, — по-прежнему упирается в квоту.
+    """
+    from backend.db.models import VacancyRow
+    from backend.db.session import session_scope
     from backend.settings import get_settings
 
     monkeypatch.setenv("LLM_USER_DAILY_CALLS", "1")
     get_settings.cache_clear()
-    _register(api_client, "owner@example.com")  # первый — admin, квота на него не действует
-    token = _register(api_client, "guest@example.com")
+    job_id, user_id = _running_import_job([VACANCY_TEXT, "Вакансия: QA-инженер, удалёнка, Selenium и pytest."])
 
-    r = _import(api_client, token, [VACANCY_TEXT, "Вакансия: QA-инженер, удалёнка, Selenium и pytest."])
-    job = await_llm_job(api_client, token, r)
+    ok = import_service.run_import_job(
+        job_id, user_id=user_id, params=_job_row(job_id).params, result=None, lease_owner="owner-1"
+    )
 
-    body = job["import_result"]
+    assert ok is True
+    body = _job_row(job_id).result
     assert len(fake_ai) == 1
     assert [it["status"] for it in body["items"]] == ["created", "created"]
-    assert body["items"][0]["vacancy"]["extraction_source"] == "hybrid"
-    assert body["items"][1]["vacancy"]["extraction_source"] == "rules"
+    with session_scope() as session:
+        sources = [session.get(VacancyRow, it["vacancy_id"]).extraction_source for it in body["items"]]
+    assert sources == ["hybrid", "rules"]
     assert "квота" in body["warning"]
 
 

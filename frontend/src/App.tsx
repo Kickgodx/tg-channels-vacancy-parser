@@ -17,6 +17,14 @@ function RequireAuth({ children }: { children: JSX.Element }) {
   return children;
 }
 
+/** Парсинг, импорт и HH — только admin (backend отвечает 403); остальных — на вакансии. */
+function RequireAdmin({ children }: { children: JSX.Element }) {
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
+  if (meQ.isLoading) return <p className="muted">Загрузка…</p>;
+  if (!meQ.data?.is_admin) return <Navigate to="/vacancies" replace />;
+  return children;
+}
+
 function UserBadge() {
   const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
   return (
@@ -29,10 +37,14 @@ function UserBadge() {
   );
 }
 
-function AdminNavLink({ to, children }: { to: string; children: string }) {
+function AdminNavLink({ to, end, children }: { to: string; end?: boolean; children: string }) {
   const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
   if (!meQ.data?.is_admin) return null;
-  return <NavLink to={to}>{children}</NavLink>;
+  return (
+    <NavLink to={to} end={end}>
+      {children}
+    </NavLink>
+  );
 }
 
 export default function App() {
@@ -43,10 +55,10 @@ export default function App() {
       <h1>Telegram Jobs Parser</h1>
       {authed && (
         <nav>
-          <NavLink to="/" end>
+          <AdminNavLink to="/" end>
             Парсинг
-          </NavLink>
-          <NavLink to="/import">Импорт</NavLink>
+          </AdminNavLink>
+          <AdminNavLink to="/import">Импорт</AdminNavLink>
           <AdminNavLink to="/hh">HH</AdminNavLink>
           <NavLink to="/vacancies">Вакансии</NavLink>
           <NavLink to="/resumes">Резюме</NavLink>
@@ -59,7 +71,9 @@ export default function App() {
           path="/"
           element={
             <RequireAuth>
-              <DashboardPage />
+              <RequireAdmin>
+                <DashboardPage />
+              </RequireAdmin>
             </RequireAuth>
           }
         />
@@ -67,7 +81,9 @@ export default function App() {
           path="/runs/:runId"
           element={
             <RequireAuth>
-              <RunPage />
+              <RequireAdmin>
+                <RunPage />
+              </RequireAdmin>
             </RequireAuth>
           }
         />
@@ -75,7 +91,9 @@ export default function App() {
           path="/import"
           element={
             <RequireAuth>
-              <ImportPage />
+              <RequireAdmin>
+                <ImportPage />
+              </RequireAdmin>
             </RequireAuth>
           }
         />
@@ -83,7 +101,9 @@ export default function App() {
           path="/hh"
           element={
             <RequireAuth>
-              <HhPage />
+              <RequireAdmin>
+                <HhPage />
+              </RequireAdmin>
             </RequireAuth>
           }
         />

@@ -16,7 +16,6 @@ from starlette.concurrency import run_in_threadpool
 from backend.api.deps import (
     _extract_token,
     _user_from_token,
-    get_current_user,
     get_db,
     require_admin,
     verify_api_key,
@@ -40,6 +39,7 @@ from backend.db.models import UserRow
 from backend.db.repository import metrics_from_run
 from backend.db.session import session_scope
 from backend.errors import (
+    CODE_FORBIDDEN,
     CODE_IDEMPOTENCY_IN_PROGRESS,
     CODE_NOT_AUTHENTICATED,
     CODE_VALIDATION,
@@ -66,11 +66,11 @@ from tg_jobs_parser.models.parse_result import ParseResult
 
 _LOG = logging.getLogger(__name__)
 
-# Чтение — любой залогиненный пользователь; запуск и отмена — только admin.
+# Прогоны целиком (запуск, отмена, чтение, экспорт, SSE) — только admin.
 router = APIRouter(
     prefix="/runs",
     tags=["runs"],
-    dependencies=[Depends(verify_api_key), Depends(get_current_user)],
+    dependencies=[Depends(verify_api_key), Depends(require_admin)],
 )
 # SSE отдельно: ``?api_key=`` / ``?access_token=`` только здесь, не на всём /runs.
 sse_router = APIRouter(prefix="/runs", tags=["runs"])
@@ -306,14 +306,17 @@ def run_events(
         include_in_schema=False,
     ),
 ) -> StreamingResponse:
-    """SSE прогресса прогона. Auth: Bearer или ``?access_token=``.
+    """SSE прогресса прогона. Auth: Bearer или ``?access_token=``; только admin.
 
     Обработчик синхронный (auth в threadpool, не в event loop); стрим не держит
     ``get_db`` — читает БД короткими сессиями.
     """
     with session_scope() as session:
-        if _user_from_token(session, _extract_token(authorization, access_token)) is None:
+        user = _user_from_token(session, _extract_token(authorization, access_token))
+        if user is None:
             raise http_error(401, CODE_NOT_AUTHENTICATED, "Not authenticated")
+        if not user.is_admin:
+            raise http_error(403, CODE_FORBIDDEN, "Admin only")
         row = repo.get_parse_run(session, run_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Run not found")
