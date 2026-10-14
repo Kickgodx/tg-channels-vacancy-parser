@@ -28,6 +28,7 @@ from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_cancel import ParseCancellationToken, ParseCancelled
 from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 from tg_jobs_parser.parse_runner import run_parse
+from tg_jobs_parser.parsers.base import ChannelCheckpoint
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 
 _LOG = logging.getLogger(__name__)
@@ -221,6 +222,23 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             len(flushed_ids),
         )
 
+    def save_checkpoints(checkpoints: dict[str, ChannelCheckpoint]) -> None:
+        """Чекпоинт канала, чьи вакансии уже записаны, — сразу, а не в финализации.
+
+        Ретрай после падения воркера тогда не перечитывает готовые каналы. Run_parse
+        зовёт это только пока ни один пост не потерян; при completed финализация
+        перезапишет те же значения.
+        """
+        if lease_lost.is_set():
+            cancel_token.request_cancel()
+            return
+        with session_scope() as session:
+            if not repo.touch_parse_run_lease(session, run_id, lease_owner=lease_owner):
+                _mark_lease_lost()
+                return
+            save_channel_checkpoints(session, checkpoints, parse_run_id=run_id)
+        _LOG.info("Прогон %s: чекпоинт сдвинут — %s", run_id, ", ".join(f"@{c}" for c in checkpoints))
+
     def persist_remaining(unique: list[Vacancy]) -> repo.VacancyUpsertStats:
         nonlocal upsert_totals
         remaining = [v for v in unique if v.id not in flushed_ids]
@@ -305,6 +323,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             vacancy_batch_sink=flush_vacancies,
             fx_rates=fx_rates,
             channel_checkpoints=checkpoints,
+            checkpoint_sink=save_checkpoints,
         )
         if lease_lost.is_set():
             status = "failed"

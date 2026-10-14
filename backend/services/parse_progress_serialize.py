@@ -12,6 +12,8 @@ def snapshot_to_progress_dict(snap: ParseProgressSnapshot) -> dict:
         "posts_total": snap.posts_total,
         "vacancies_found": snap.vacancies_found,
         "phase": snap.phase,
+        "channels_total": snap.channels_total,
+        "channels_fetched": snap.channels_fetched,
         "ai_llm_disabled": snap.ai_llm_disabled,
         "ai_llm_disabled_reason": snap.ai_llm_disabled_reason,
         "ai_tokens_in": snap.ai_tokens_in,

@@ -195,7 +195,7 @@ def test_main_serves_the_instrumented_app_object(monkeypatch):
 
 
 def test_post_workers_inherit_parent_span(exporter):
-    from tg_jobs_parser.parse_runner import _process_posts_parallel
+    from tg_jobs_parser.parse_runner import _submit_in_context
 
     seen: list[int] = []
 
@@ -203,17 +203,10 @@ def test_post_workers_inherit_parent_span(exporter):
         seen.append(trace.get_current_span().get_span_context().trace_id)
         return post
 
-    with trace.get_tracer("test").start_as_current_span("parse.process_posts") as parent:
-        results = list(
-            _process_posts_parallel(
-                [1, 2, 3, 4],
-                workers=2,
-                pool_cls=ThreadPoolExecutor,
-                process_one=process_one,
-                cancel=None,
-                batch_step=10,
-                emit_progress=lambda n: None,
-            )
-        )
-    assert len(results) == 4
+    with (
+        trace.get_tracer("test").start_as_current_span("parse.process_posts") as parent,
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        results = [f.result() for f in [_submit_in_context(pool, process_one, p) for p in [1, 2, 3, 4]]]
+    assert results == [1, 2, 3, 4]
     assert seen == [parent.get_span_context().trace_id] * 4

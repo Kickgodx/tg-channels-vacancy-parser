@@ -426,9 +426,12 @@ export interface RunDetail {
 
 export interface ProgressEvent {
   posts_processed: number;
+  /** Пока phase === "fetching", это прочитанное на текущий момент — растёт. */
   posts_total: number;
   vacancies_found: number;
   phase: string;
+  channels_total?: number;
+  channels_fetched?: number;
   ai_llm_disabled?: boolean;
   ai_llm_disabled_reason?: string | null;
   ai_tokens_in?: number;

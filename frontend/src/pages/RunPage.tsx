@@ -227,9 +227,17 @@ export default function RunPage() {
 
   if (!runId) return null;
 
+  // Вычитка и обработка идут потоком: пока не все каналы прочитаны, posts_total растёт,
+  // поэтому долю обработанного масштабируем долей прочитанных каналов.
+  const channelsTotal = progress?.channels_total ?? 0;
+  const channelsFetched = progress?.channels_fetched ?? 0;
+  const fetching = progress?.phase === "fetching" && channelsTotal > 0;
   const pct =
     progress && progress.posts_total > 0
-      ? Math.round((100 * progress.posts_processed) / progress.posts_total)
+      ? Math.round(
+          ((100 * progress.posts_processed) / progress.posts_total) *
+            (fetching ? channelsFetched / channelsTotal : 1),
+        )
       : 0;
 
   const displayVacancies = vacancies.data?.items?.length
@@ -282,6 +290,11 @@ export default function RunPage() {
                 <p>
                   Постов: {progress?.posts_processed ?? 0} / {progress?.posts_total ?? "?"}, вакансий:{" "}
                   {progress?.vacancies_found ?? 0}, фаза: {progress?.phase ?? "…"}
+                  {fetching && (
+                    <>
+                      , каналов прочитано: {channelsFetched} / {channelsTotal}
+                    </>
+                  )}
                 </p>
                 {progress?.ai_llm_disabled && (
                   <p className="warning">LLM отключён: {progress.ai_llm_disabled_reason}</p>

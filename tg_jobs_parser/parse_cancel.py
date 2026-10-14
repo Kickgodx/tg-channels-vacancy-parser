@@ -21,6 +21,20 @@ class ParseCancellationToken:
         self._async_lock = threading.Lock()
         self._async_loop: asyncio.AbstractEventLoop | None = None
         self._async_tasks: list[asyncio.Task] = []
+        self._children: list[ParseCancellationToken] = []
+
+    def child(self) -> ParseCancellationToken:
+        """Дочерний токен: отменяется вместе с этим, но его отмена сюда не поднимается.
+
+        Нужен, чтобы остановить часть прогона (фоновую вычитку), не помечая весь
+        прогон отменённым пользователем.
+        """
+        token = ParseCancellationToken()
+        with self._async_lock:
+            self._children.append(token)
+        if self.is_cancelled():
+            token.request_cancel()
+        return token
 
     def bind_async_tasks(
         self,
@@ -42,6 +56,9 @@ class ParseCancellationToken:
         with self._async_lock:
             loop = self._async_loop
             tasks = list(self._async_tasks)
+            children = list(self._children)
+        for child in children:
+            child.request_cancel()
         if loop is None or not tasks:
             return
 

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import contextvars
 import logging
-import os
+import queue
+import threading
 import time
+from collections import deque
 from collections.abc import Callable
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -41,7 +43,7 @@ from tg_jobs_parser.parse_progress import (
     clear_partial_batches,
     save_partial_batch,
 )
-from tg_jobs_parser.parsers.base import BaseChannelParser, ChannelCheckpoint, RawPost
+from tg_jobs_parser.parsers.base import BaseChannelParser, ChannelCallback, ChannelCheckpoint, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import (
     clamp_range_days,
@@ -104,6 +106,7 @@ def _build_parse_result(
     fx_rates: dict[date, dict[str, float]] | None = None,
     incomplete_reason: str | None = None,
     channel_checkpoints: dict[str, ChannelCheckpoint] | None = None,
+    total_elapsed_sec: float | None = None,
 ) -> ParseResult:
     _LOG.info(
         "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
@@ -140,7 +143,8 @@ def _build_parse_result(
     metrics.warnings.extend(all_warnings)
 
     posts_skipped = max(0, posts_processed - len(candidates))
-    total_elapsed_sec = fetch_elapsed_sec + process_elapsed_sec + dedup_elapsed_sec
+    if total_elapsed_sec is None:
+        total_elapsed_sec = fetch_elapsed_sec + process_elapsed_sec + dedup_elapsed_sec
 
     run_params = config.to_serializable_dict()
     run_params["parse_summary"] = {
@@ -176,36 +180,115 @@ def _build_parse_result(
     )
 
 
-def _process_posts_parallel(
-    all_posts: list[RawPost],
-    *,
-    workers: int,
-    pool_cls: type[ThreadPoolExecutor],
-    process_one,
-    cancel: ParseCancellationToken | None,
-    batch_step: int,
-    emit_progress,
-):
-    """Параллельная пост-обработка с проверкой отмены между завершёнными задачами."""
-    processed = 0
-    with pool_cls(max_workers=workers, thread_name_prefix="post-proc") as ex:
-        # copy_context: воркеры наследуют текущий OTel-span (LLM-вызовы — дети
-        # parse.process_posts, а не отдельные трассы); один Context на задачу.
-        futures = {ex.submit(contextvars.copy_context().run, process_one, post): post for post in all_posts}
-        pending = set(futures.keys())
-        while pending:
-            if cancel and cancel.is_cancelled():
-                for fut in pending:
-                    fut.cancel()
-                ex.shutdown(wait=False, cancel_futures=True)
-                raise ParseCancelled()
-            done, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
-            for fut in done:
-                processed += 1
-                v = fut.result()
-                yield processed, v
-                if processed % batch_step == 0 or processed == len(all_posts):
-                    emit_progress(processed)
+_FETCH_JOIN_TIMEOUT_S = 10.0
+
+
+def _submit_in_context(pool: ThreadPoolExecutor, process_one, post) -> Future:
+    """Задача в пул с копией контекста: воркеры наследуют текущий OTel-span.
+
+    LLM-вызовы — дети ``parse.process_posts``, а не отдельные трассы; один Context на задачу.
+    """
+    return pool.submit(contextvars.copy_context().run, process_one, post)
+
+
+def _stream_channels(fetcher, channels: list[str], on_channel: ChannelCallback) -> None:
+    stream = getattr(fetcher, "stream_posts_many", None)
+    if stream is None:
+        # Парсер без потокового режима (заглушки в тестах): весь пакет разом.
+        for ch, posts, warn in fetcher.fetch_posts_many(channels):
+            on_channel(ch, posts, warn)
+        return
+    stream(channels, on_channel)
+
+
+class _BackgroundFetch:
+    """Вычитка каналов в фоновом потоке → ограниченная очередь → обработка.
+
+    Канал попадает в очередь целиком, как только прочитан. Очередь рассчитана на
+    ``buffer_channels`` каналов: пока обработка не забрала прочитанное, поток вычитки
+    ждёт в ``put`` (Telethon — не отпуская слот семафора), так что в памяти держится
+    несколько каналов, а не всё окно прогона.
+    """
+
+    def __init__(self, fetcher, channels: list[str], *, buffer_channels: int) -> None:
+        self._fetcher = fetcher
+        self._channels = channels
+        self._queue: queue.Queue[tuple[str, list[RawPost], str | None]] = queue.Queue(maxsize=max(1, buffer_channels))
+        self._closed = threading.Event()
+        self._lock = threading.Lock()
+        self._posts_fetched = 0
+        self.done = threading.Event()
+        self.error: BaseException | None = None
+        self.elapsed = 0.0
+        self._thread = threading.Thread(
+            target=contextvars.copy_context().run,
+            args=(self._run,),
+            name="parse-fetch",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def _put(self, channel: str, posts: list[RawPost], warning: str | None) -> None:
+        with self._lock:
+            self._posts_fetched += len(posts)
+        while not self._closed.is_set():
+            try:
+                self._queue.put((channel, posts, warning), timeout=0.25)
+                return
+            except queue.Full:
+                continue
+        raise ParseCancelled()
+
+    def _run(self) -> None:
+        started = time.monotonic()
+        try:
+            with _TRACER.start_as_current_span(
+                "parse.fetch_posts", attributes={"parse.channels": len(self._channels)}
+            ) as span:
+                _stream_channels(self._fetcher, self._channels, self._put)
+                span.set_attribute("parse.posts_fetched", self._posts_fetched)
+        except BaseException as e:  # передаётся в поток обработки, там и поднимается
+            self.error = e
+        finally:
+            self.elapsed = time.monotonic() - started
+            self.done.set()
+
+    def get(self, timeout: float | None = None) -> tuple[str, list[RawPost], str | None] | None:
+        """Следующий прочитанный канал; ``None`` — пока нечего (без ``timeout`` не ждёт)."""
+        try:
+            return self._queue.get(timeout=timeout) if timeout else self._queue.get_nowait()
+        except queue.Empty:
+            return None
+
+    @property
+    def exhausted(self) -> bool:
+        # done ставится после последнего put — пустая очередь при done уже не пополнится.
+        return self.done.is_set() and self._queue.empty()
+
+    def stop(self, fetch_cancel: ParseCancellationToken) -> None:
+        """Остановить вычитку (отмена или ошибка обработки) и дождаться потока."""
+        self._closed.set()
+        if self._thread.ident is None:
+            return
+        if not self.done.is_set():
+            fetch_cancel.request_cancel()
+        self._thread.join(timeout=_FETCH_JOIN_TIMEOUT_S)
+
+
+def _llm_posts_lost(config: AppConfig, ai_service: AIEnrichmentService | None) -> bool:
+    """Отброшен ли из-за LLM хоть один пост — тогда чекпоинты двигать нельзя.
+
+    В ``primary`` теряется пост с ошибкой LLM; вне ``assist`` — и пост, пропущенный
+    из-за отключения LLM (лимит / квота). Те же условия, что у ``incomplete_reason``.
+    """
+    if ai_service is None:
+        return False
+    stats = ai_service.stats
+    if config.ai.mode == "primary" and stats.errors:
+        return True
+    return config.ai.mode != "assist" and bool(stats.rate_limit_skipped)
 
 
 def _end_span(span: trace.Span, ctx_token) -> None:
@@ -274,9 +357,14 @@ def run_parse(
     vacancy_batch_sink: Callable[[list[Vacancy]], None] | None = None,
     fx_rates: dict[date, dict[str, float]] | None = None,
     channel_checkpoints: dict[str, ChannelCheckpoint] | None = None,
+    checkpoint_sink: Callable[[dict[str, ChannelCheckpoint]], None] | None = None,
 ) -> ParseResult:
     """
     Основной сценарий MVP.
+
+    Вычитка и обработка идут потоком: каналы читаются в фоновом потоке и уходят в
+    обработку по мере готовности (ограниченная очередь, см. ``_BackgroundFetch``) —
+    в памяти не копится всё окно, а прочитанное до сбоя успевает попасть в БД.
 
     ``cli_overrides`` — простой dict для сериализации в ``run_params`` (опционально).
     ``vacancy_batch_sink`` — опциональный колбэк: вызывается с очередной порцией
@@ -288,13 +376,19 @@ def run_parse(
     ``channel_checkpoints`` — чекпоинты каналов прошлых прогонов (из БД) для
     инкрементальной вычитки; новые возвращаются в ``ParseResult.channel_checkpoints``
     только если все прочитанные посты разобраны (см. ``parser.incremental_fetch``).
+    ``checkpoint_sink`` — опционально: чекпоинт канала отдаётся сразу, как только
+    его посты разобраны и записаны через ``vacancy_batch_sink``, пока ни один пост
+    прогона не потерян из-за LLM. Повторный прогон после падения не перечитывает
+    такие каналы.
     """
     try_load_dotenv()
 
     if cancel is not None:
         install_sigint_cancel_handler(cancel, log=_LOG.warning)
 
-    channel_fetcher = _channel_parser(config, cancellation=cancel)
+    # Свой токен у вычитки: сбой обработки останавливает её, не помечая прогон отменённым.
+    fetch_cancel = cancel.child() if cancel is not None else ParseCancellationToken()
+    channel_fetcher = _channel_parser(config, cancellation=fetch_cancel)
     if channel_checkpoints and isinstance(channel_fetcher, BaseChannelParser):
         channel_fetcher.checkpoints = dict(channel_checkpoints)
 
@@ -336,7 +430,10 @@ def run_parse(
     exclude_kw = config.merged_exclude_keywords()
     threshold = config.parser.vacancy_score_threshold
 
+    run_started = time.monotonic()
     posts_fetched = 0
+    posts_processed = 0
+    channels_fetched = 0
     candidates: list[Vacancy] = []
     batch_step = progress_every_n_posts or config.parser.progress_batch_posts
     partial_dir: Path | None = None
@@ -353,62 +450,14 @@ def run_parse(
         if u and u not in channels_unique:
             channels_unique.append(u)
 
-    # Каналы опрашиваются параллельно в рамках одной Telethon-сессии (см. parser.channel_concurrency).
-    # Результат — список (username, posts, warning) в произвольном порядке: пост-обработка и так
-    # сортирует выдачу по дате, поэтому порядок каналов значения не имеет.
-    fetch_started = time.monotonic()
-    try:
-        if cancel:
-            cancel.check()
-        with _TRACER.start_as_current_span(
-            "parse.fetch_posts", attributes={"parse.channels": len(channels_unique)}
-        ) as fetch_span:
-            fetch_results = channel_fetcher.fetch_posts_many(channels_unique)
-            fetch_span.set_attribute("parse.posts_fetched", sum(len(posts) for _, posts, _ in fetch_results))
-        if cancel:
-            cancel.check()
-    except ParseCancelled:
-        _LOG.warning("Выборка прервана до завершения обхода каналов.")
-        all_warnings.append("Прогон прерван пользователем во время выборки постов.")
-        fetch_elapsed = time.monotonic() - fetch_started
-        return _build_parse_result(
-            config=config,
-            cli_overrides=cli_overrides,
-            all_warnings=all_warnings,
-            posts_fetched=0,
-            candidates=[],
-            unique=[],
-            dups=[],
-            dedup_elapsed_sec=0.0,
-            ai_service=None,
-            fetch_elapsed_sec=fetch_elapsed,
-            fx_rates=fx_rates,
-        )
-    fetch_elapsed = time.monotonic() - fetch_started
-    record_phase_duration("fetch", fetch_elapsed)
-
-    all_posts: list[RawPost] = []
-    for ch, posts, warn in fetch_results:
-        if warn:
-            all_warnings.append(warn)
-            _LOG.warning("Канал @%s: %s", ch, warn)
-        posts_fetched += len(posts)
-        all_posts.extend(posts)
-
-    _LOG.info(
-        "Выборка завершена: %s постов с %s каналов за %.1f с.",
-        posts_fetched,
-        len(channels_unique),
-        fetch_elapsed,
-    )
-
     ai_service: AIEnrichmentService | None = None
     if config.ai.enabled:
         from tg_jobs_parser.ai.enricher import AIEnrichmentService
 
         try:
             ai_service = AIEnrichmentService(config)
-            ai_service.begin_batch(len(all_posts))
+            # Размер батча для логов растёт по мере вычитки (add_to_batch в _take_channel).
+            ai_service.begin_batch(0)
             if not _api_run(cli_overrides):
                 all_warnings.append(
                     f"AI: OpenRouter, модель {config.ai.model}"
@@ -439,8 +488,14 @@ def run_parse(
     db_flush_pending = max(1, config.parser.db_flush_pending_vacancies)
     pending_uniques: list[Vacancy] = []  # уникальные вакансии, ещё не ушедшие в sink
     incomplete_reason: str | None = None
+    fetch = _BackgroundFetch(
+        channel_fetcher,
+        channels_unique,
+        buffer_channels=config.parser.channel_concurrency,
+    )
     process_span: trace.Span | None = None
     process_ctx_token = None
+    pool: ThreadPoolExecutor | None = None
     try:
 
         def _register_candidate(v: Vacancy) -> None:
@@ -496,7 +551,7 @@ def run_parse(
                 cancel=cancel,
             )
 
-        def _emit_progress(posts_processed: int, *, phase: str = "processing") -> None:
+        def _emit_progress(*, phase: str | None = None) -> None:
             if not progress_callback and not partial_dir:
                 return
             rl = ai_service._client.rate_limiter if ai_service is not None else None
@@ -507,10 +562,12 @@ def run_parse(
             unique_so_far = deduplicator.unique
             snap = ParseProgressSnapshot(
                 posts_processed=posts_processed,
-                posts_total=len(all_posts),
+                posts_total=posts_fetched,
                 vacancies_found=len(unique_so_far),
                 vacancies=list(unique_so_far) if partial_dir else unique_so_far[-PROGRESS_PREVIEW_LIMIT:],
-                phase=phase,
+                phase=phase or ("processing" if fetch.done.is_set() else "fetching"),
+                channels_total=len(channels_unique),
+                channels_fetched=channels_fetched,
                 ai_llm_disabled=bool(rl and rl.llm_disabled),
                 ai_llm_disabled_reason=rl.llm_disabled_reason if rl else None,
                 ai_tokens_in=ai_service.stats.tokens_in if ai_service else 0,
@@ -523,80 +580,148 @@ def run_parse(
             if progress_callback:
                 progress_callback(snap)
 
-        # Пост-обработка: regex (+ опционально LLM в пуле потоков).
-        if ai_service is not None:
-            workers = max(1, min(config.ai.concurrency, 16))
-        else:
-            workers = max(2, min(8, (os.cpu_count() or 4)))
+        # Пост-обработка: regex, с LLM — в пуле потоков. Только regex под GIL пул
+        # не ускоряет: разбираем в этом потоке, пока фоновый читает каналы.
+        inline = ai_service is None
+        workers = 1 if inline else max(1, min(config.ai.concurrency, 16))
+        max_inflight = workers * 2
+        backlog: deque[tuple[str, RawPost]] = deque()
+        remaining: dict[str, int] = {}  # канал → постов, ещё не разобранных
+        checkpoints_frozen = False
 
-        pool_cls = DaemonThreadPoolExecutor if ai_service is not None else ThreadPoolExecutor
+        def _channel_done(ch: str) -> None:
+            """Канал разобран целиком: записать его вакансии и сразу сдвинуть чекпоинт.
+
+            Консервативно: после первого поста, потерянного из-за LLM, чекпоинты по ходу
+            прогона больше не двигаются — счётчики ошибок общие на прогон.
+            """
+            nonlocal checkpoints_frozen
+            if checkpoint_sink is None or checkpoints_frozen:
+                return
+            cp = (getattr(channel_fetcher, "new_checkpoints", None) or {}).get(ch)
+            if cp is None:
+                return
+            if _llm_posts_lost(config, ai_service):
+                checkpoints_frozen = True
+                return
+            _flush_pending()
+            if pending_uniques:
+                return  # запись не удалась — канал перечитает следующий прогон
+            try:
+                checkpoint_sink({ch: cp})
+            except ParseCancelled:
+                raise
+            except Exception as e:
+                _LOG.warning("Чекпоинт канала @%s не записан: %s", ch, e)
+
+        def _take_channel(item: tuple[str, list[RawPost], str | None]) -> None:
+            nonlocal posts_fetched, channels_fetched
+            ch, posts, warn = item
+            channels_fetched += 1
+            posts_fetched += len(posts)
+            if warn:
+                all_warnings.append(warn)
+                _LOG.warning("Канал @%s: %s", ch, warn)
+            if ai_service is not None:
+                ai_service.add_to_batch(len(posts))
+            if not posts:
+                _channel_done(ch)
+                return
+            remaining[ch] = remaining.get(ch, 0) + len(posts)
+            backlog.extend((ch, p) for p in posts)
+
+        def _on_processed(ch: str, v: Vacancy | None) -> None:
+            nonlocal posts_processed
+            posts_processed += 1
+            record_post_processed(candidate=v is not None)
+            if v is not None:
+                _register_candidate(v)
+            if posts_processed % batch_step == 0:
+                _emit_progress()
+            if len(pending_uniques) >= db_flush_pending or posts_processed % db_flush_step == 0:
+                _flush_pending()
+            if posts_processed % 500 == 0:
+                _LOG.info(
+                    "Обработано постов: %s из %s прочитанных; прошло вакансий: %s",
+                    posts_processed,
+                    posts_fetched,
+                    len(candidates),
+                )
+            remaining[ch] -= 1
+            if remaining[ch] == 0:
+                del remaining[ch]
+                _channel_done(ch)
+
         process_span = _TRACER.start_span(
             "parse.process_posts",
             attributes={
-                "parse.posts_total": len(all_posts),
                 "parse.workers": workers,
                 "parse.ai_enabled": ai_service is not None,
             },
         )
         process_ctx_token = otel_context.attach(trace.set_span_in_context(process_span))
         process_started = time.monotonic()
-        if len(all_posts) < 200 and ai_service is None:
-            for i, post in enumerate(all_posts, 1):
-                if cancel:
-                    cancel.check()
-                v = _process_one(post)
-                record_post_processed(candidate=v is not None)
-                if v is not None:
-                    _register_candidate(v)
-                if i % batch_step == 0 or i == len(all_posts):
-                    _emit_progress(i)
-                if len(pending_uniques) >= db_flush_pending or i % db_flush_step == 0:
-                    _flush_pending()
-                if i % 500 == 0:
-                    _LOG.info(
-                        "Обработано постов: %s/%s; прошло вакансий: %s",
-                        i,
-                        len(all_posts),
-                        len(candidates),
-                    )
-        else:
-            label = "regex+AI" if ai_service else "regex"
-            _LOG.info(
-                "Пост-обработка %s постов в %s потоков (%s).",
-                len(all_posts),
-                workers,
-                label,
-            )
-            for i, v in _process_posts_parallel(
-                all_posts,
-                workers=workers,
-                pool_cls=pool_cls,
-                process_one=_process_one,
-                cancel=cancel,
-                batch_step=batch_step,
-                emit_progress=_emit_progress,
-            ):
-                record_post_processed(candidate=v is not None)
-                if v is not None:
-                    _register_candidate(v)
-                if len(pending_uniques) >= db_flush_pending or i % db_flush_step == 0:
-                    _flush_pending()
-                if i % 500 == 0:
-                    _LOG.info(
-                        "Обработано постов: %s/%s; прошло вакансий: %s",
-                        i,
-                        len(all_posts),
-                        len(candidates),
-                    )
+        _LOG.info(
+            "Потоковая обработка %s каналов: %s, потоков: %s.",
+            len(channels_unique),
+            "regex+AI" if ai_service else "regex",
+            workers,
+        )
+        if cancel:
+            cancel.check()
+        fetch.start()
+        if not inline:
+            pool = DaemonThreadPoolExecutor(max_workers=workers, thread_name_prefix="post-proc")
+        futures: dict[Future, str] = {}
+        while True:
+            if cancel:
+                cancel.check()
+            # Новые каналы забираем, только пока своя очередь мала: иначе прочитанное
+            # копилось бы здесь, а не тормозило вычитку.
+            while len(backlog) < max_inflight and (item := fetch.get()) is not None:
+                _take_channel(item)
+            if inline and backlog:
+                ch, post = backlog.popleft()
+                _on_processed(ch, _process_one(post))
+                continue
+            while pool is not None and backlog and len(futures) < max_inflight:
+                ch, post = backlog.popleft()
+                futures[_submit_in_context(pool, _process_one, post)] = ch
+            if futures:
+                done, _ = wait(futures, timeout=0.25, return_when=FIRST_COMPLETED)
+                for fut in done:
+                    _on_processed(futures.pop(fut), fut.result())
+                continue
+            if fetch.exhausted:
+                break
+            if (item := fetch.get(timeout=0.25)) is not None:
+                _take_channel(item)
+        if cancel:
+            cancel.check()
+        if fetch.error is not None:
+            if isinstance(fetch.error, ParseCancelled):
+                raise ParseCancelled()
+            # Прочитанное до сбоя уже разобрано — записываем, затем прогон падает как раньше.
+            _flush_pending()
+            raise fetch.error
 
+        fetch_elapsed = fetch.elapsed
+        record_phase_duration("fetch", fetch_elapsed)
+        _LOG.info(
+            "Выборка завершена: %s постов с %s каналов за %.1f с.",
+            posts_fetched,
+            len(channels_unique),
+            fetch_elapsed,
+        )
         process_elapsed = time.monotonic() - process_started
         record_phase_duration("process", process_elapsed)
         record_phase_duration("dedup", dedup_elapsed)
+        process_span.set_attribute("parse.posts_total", posts_fetched)
         process_span.set_attribute("parse.vacancies_found", len(candidates))
         process_span.set_attribute("parse.vacancies_unique", len(deduplicator.unique))
         _end_span(process_span, process_ctx_token)
         process_span = process_ctx_token = None
-        _emit_progress(len(all_posts), phase="post_processing_done")
+        _emit_progress(phase="post_processing_done")
         if ai_service is not None:
             ai_service.log_batch_finished()
             if not _api_run(cli_overrides):
@@ -653,12 +778,13 @@ def run_parse(
             dups=deduplicator.duplicates,
             dedup_elapsed_sec=dedup_elapsed,
             ai_service=ai_service,
-            posts_processed=len(all_posts),
+            posts_processed=posts_processed,
             fetch_elapsed_sec=fetch_elapsed,
             process_elapsed_sec=process_elapsed,
             fx_rates=fx_rates,
             incomplete_reason=incomplete_reason,
             channel_checkpoints=new_checkpoints,
+            total_elapsed_sec=time.monotonic() - run_started,
         )
     except ParseCancelled:
         _LOG.warning("Прогон прерван (отмена).")
@@ -677,10 +803,11 @@ def run_parse(
             dups=deduplicator.duplicates,
             dedup_elapsed_sec=dedup_elapsed,
             ai_service=ai_service,
-            posts_processed=len(all_posts),
-            fetch_elapsed_sec=fetch_elapsed,
+            posts_processed=posts_processed,
+            fetch_elapsed_sec=fetch.elapsed,
             process_elapsed_sec=process_elapsed,
             fx_rates=fx_rates,
+            total_elapsed_sec=time.monotonic() - run_started,
         )
     except KeyboardInterrupt:
         if cancel is not None:
@@ -688,6 +815,9 @@ def run_parse(
         _LOG.warning("Прогон прерван (Ctrl+C).")
         raise
     finally:
+        if pool is not None:
+            pool.shutdown(wait=False, cancel_futures=True)
+        fetch.stop(fetch_cancel)
         if process_span is not None:
             process_span.set_attribute("parse.interrupted", True)
             _end_span(process_span, process_ctx_token)

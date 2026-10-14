@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import UTC, date, datetime, time, timedelta
 from types import SimpleNamespace
 
 import pytest
+import telethon
 from telethon.errors import FloodWaitError
 
 from tg_jobs_parser.config.schema import AppConfig, ParserConfig, SearchConfig
+from tg_jobs_parser.parsers import telegram_telethon as tt
 from tg_jobs_parser.parsers.base import ChannelCheckpoint
 from tg_jobs_parser.parsers.telegram_telethon import TelegramTelethonParser
 
@@ -173,3 +176,45 @@ def test_error_before_any_post_propagates():
     client = FakeClient(MESSAGES, fail_after=0, error=ConnectionError("reset"))
     with pytest.raises(ConnectionError):
         _run(parser, client)
+
+
+def test_stream_posts_many_holds_fetch_slot_until_channel_is_taken(monkeypatch):
+    """Потоковая вычитка: пока колбэк не принял канал, слот семафора занят — следующий не читается."""
+    client = SimpleNamespace(is_connected=lambda: False)
+    monkeypatch.setattr(telethon, "TelegramClient", lambda *a, **kw: client)
+    monkeypatch.setattr(tt, "telegram_api_credentials", lambda: (1, "hash"))
+
+    async def no_start(self, _client):
+        return None
+
+    scanned: list[str] = []
+
+    async def fake_iter(self, _client, username):
+        scanned.append(username)
+        return [SimpleNamespace(channel_username=username)], None
+
+    monkeypatch.setattr(TelegramTelethonParser, "_start_client", no_start)
+    monkeypatch.setattr(TelegramTelethonParser, "_iter_channel", fake_iter)
+
+    release = threading.Event()
+    taken: list[tuple[str, int]] = []
+
+    def on_channel(ch, posts, warn):
+        taken.append((ch, len(scanned)))
+        if ch == "a":
+            assert release.wait(timeout=5)
+
+    parser = _parser(channel_concurrency=1)
+    worker = threading.Thread(target=parser.stream_posts_many, args=(["a", "", "b", "c"], on_channel))
+    worker.start()
+    for _ in range(200):
+        if any(ch == "a" for ch, _ in taken):
+            break
+        threading.Event().wait(0.01)
+    threading.Event().wait(0.2)
+    assert scanned == ["a"]  # «b» ждёт, пока «a» не принят
+    release.set()
+    worker.join(timeout=5)
+
+    assert [ch for ch, _ in taken] == ["", "a", "b", "c"]  # пустое имя — сразу, с предупреждением
+    assert scanned == ["a", "b", "c"]
