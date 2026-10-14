@@ -357,6 +357,16 @@ class AiConfig(BaseModel):
                 out.append(m)
         return out
 
+    def resolved_models(self) -> list[str]:
+        """Все модели конфига без дубликатов: основная, fallback, матчинг, письма."""
+        candidates = [
+            self.model.strip(),
+            *self.resolved_fallback_models(),
+            self.resolved_match_model(),
+            self.resolved_cover_letter_model(),
+        ]
+        return list(dict.fromkeys(m for m in candidates if m))
+
 
 class SearchConfig(BaseModel):
     date_from: str | None = Field(

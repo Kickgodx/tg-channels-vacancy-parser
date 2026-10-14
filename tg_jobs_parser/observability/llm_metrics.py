@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from prometheus_client import Counter, Histogram
 
 LLM_REQUESTS = Counter(
@@ -47,10 +49,48 @@ LLM_ENRICH_EVENTS = Counter(
     labelnames=("event",),
 )
 
+# Нули для известных лейблов: иначе первый прирост серии не виден increase()/rate()
+# (подробнее — в parse_metrics). Лейбл model заранее неизвестен — см. init_model_series.
+_OUTCOMES = ("success", "error", "parse_error", "rate_limited")
+_RETRY_REASONS = ("rate_limit", "transient")
+_ENRICH_EVENTS = (
+    "cache_hit",
+    "merged",
+    "skipped_score",
+    "skipped_limit",
+    "rate_limit_skipped",
+    "dropped_not_job",
+    "error",
+    "circuit_open",
+)
+for _event in _ENRICH_EVENTS:
+    LLM_ENRICH_EVENTS.labels(event=_event)
+
 
 def _norm_model(model: str) -> str:
     m = (model or "").strip()
     return m if m else "unknown"
+
+
+def init_model_series(models: Iterable[str]) -> None:
+    """Завести нулевые серии для моделей — до первого вызова, а не в момент него.
+
+    Вызывается на старте процесса (модели из ``config.yaml``) и при создании клиента
+    (модели снимка прогона). Весь каталог не заводим: панели «по модели» заполнились бы
+    нулевыми линиями неиспользуемых моделей.
+    """
+    for model in models:
+        if not (model or "").strip():
+            continue
+        mid = _norm_model(model)
+        for outcome in _OUTCOMES:
+            LLM_REQUESTS.labels(model=mid, outcome=outcome)
+        LLM_REQUEST_DURATION.labels(model=mid)
+        for direction in ("input", "output"):
+            LLM_TOKENS.labels(model=mid, direction=direction)
+        for reason in _RETRY_REASONS:
+            LLM_RETRIES.labels(model=mid, reason=reason)
+        LLM_COST_USD.labels(model=mid)
 
 
 def record_request(*, model: str, outcome: str, duration_seconds: float) -> None:

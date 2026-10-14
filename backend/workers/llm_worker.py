@@ -7,10 +7,12 @@ from backend.workers.runner import run_rq_worker
 
 
 def _setup() -> None:
+    from backend.observability import init_llm_model_series
     from backend.services.llm_rate_gate import register_redis_rate_gate
 
     # Реплики llm-worker делят один ai.requests_per_minute, а не умножают его.
     register_redis_rate_gate()
+    init_llm_model_series()
 
 
 def main() -> None:

@@ -193,3 +193,55 @@ def test_run_parse_counts_processed_posts_and_flush_spans(exporter, monkeypatch)
     assert candidate >= 1 and dropped >= 1
     flushes = [s for s in exporter.get_finished_spans() if s.name == "parse.flush_vacancies"]
     assert flushes and all(s.attributes["parse.vacancies"] >= 1 for s in flushes)
+
+
+def _has_series(name: str, labels: dict[str, str]) -> bool:
+    return any(
+        sample.name == name and sample.labels == labels for family in REGISTRY.collect() for sample in family.samples
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "labels"),
+    [
+        ("telegram_channels_fetched_total", {"result": "partial"}),
+        ("telegram_flood_waits_total", {"handled_by": "gave_up"}),
+        ("telegram_flood_wait_seconds_total", {"handled_by": "resumed"}),
+        ("parse_posts_processed_total", {"result": "candidate"}),
+        ("parse_phase_duration_seconds_count", {"phase": "dedup"}),
+        ("llm_enrich_events_total", {"event": "circuit_open"}),
+        ("parse_runs_total", {"status": "partial"}),
+        ("vacancies_upserted_total", {"result": "updated"}),
+    ],
+)
+def test_labeled_series_exported_before_first_event(name, labels):
+    """Серия, рождённая сразу ненулевой, теряет первый прирост в increase()/rate() —
+    короткий прогон на свежем воркере не виден на дашборде совсем."""
+    import backend.observability  # noqa: F401 — регистрирует parse_runs/vacancies_upserted
+
+    assert _has_series(name, labels)
+
+
+def test_model_series_exported_when_client_created(monkeypatch):
+    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    OpenRouterClient(AiConfig(model="obs/fresh-model", match_model="obs/fresh-match"))
+
+    for model in ("obs/fresh-model", "obs/fresh-match"):
+        assert _sample("llm_requests_total", {"model": model, "outcome": "success"}) == 0.0
+        assert _has_series("llm_requests_total", {"model": model, "outcome": "success"})
+        assert _has_series("llm_tokens_total", {"model": model, "direction": "input"})
+        assert _has_series("llm_cost_usd_total", {"model": model})
+        assert _has_series("llm_retries_total", {"model": model, "reason": "rate_limit"})
+        assert _has_series("llm_request_duration_seconds_count", {"model": model})
+
+
+def test_ai_config_resolved_models_dedupes():
+    ai = AiConfig(
+        model="a",
+        fallback_models=["b", "a", " "],
+        match_model="b",
+        cover_letter_model="c",
+    )
+    assert ai.resolved_models() == ["a", "b", "c"]

@@ -168,6 +168,9 @@ async def lifespan(_app: FastAPI):
 
     # Интерактивный LLM (inprocess) и парсинг в API делят RPM с воркерами.
     register_redis_rate_gate()
+    from backend.observability import init_llm_model_series
+
+    init_llm_model_series()
     env = get_settings()
     log.info(
         "APP_ENV=%s: регистрация новых пользователей %s, тела HTTP в логах %s",
