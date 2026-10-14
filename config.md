@@ -144,6 +144,4 @@ Liveness RQ-воркеров (не yaml): `WORKER_HEARTBEAT_MAX_AGE_SECONDS` (п
 
 | Поле | Назначение |
 |------|------------|
-| **`directory`** | Каталог вывода (Excel, JSON и т.д.). |
-| **`excel_filename`** / **`json_filename`** | Имена файлов результатов парсинга. |
-| **`charts_directory`** | Подкаталог для сохранённых графиков (если строишь через CLI без пропуска чартов). |
+| **`directory`** | Каталог вывода (`partial_*.json` при `save_progress_batches`). |

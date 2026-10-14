@@ -588,9 +588,6 @@ class HhConfig(BaseModel):
 
 class OutputConfig(BaseModel):
     directory: str = "output"
-    excel_filename: str = "vacancies.xlsx"
-    json_filename: str = "vacancies.json"
-    charts_directory: str = "charts"
     save_progress_batches: bool = Field(
         default=True,
         description="Сохранять partial_*.json по мере обработки (для UI и восстановления).",
