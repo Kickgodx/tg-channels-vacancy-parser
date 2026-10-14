@@ -720,6 +720,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 
 - **PostgreSQL** — постоянное хранение уникальных вакансий и журнал прогонов (`parse_runs`).
 - **Экспорт из UI** — `GET /runs/{id}/export.xlsx` и `.json` (листы и метрики как в `exporters/`).
+- **Потолок экспорта.** xlsx списка и прогона и JSON прогона выгружают не больше `EXPORT_MAX_ROWS` вакансий (по умолчанию 50 000) в текущей сортировке. Если под фильтр попало больше, в листе `metrics_summary` появляется строка `truncated` («обрезано до N из M»), в ответе — заголовок `X-Export-Truncated: N/M`, а UI показывает предупреждение. xlsx пишется потоком (openpyxl `write_only`, строки читаются из БД одним запросом порциями) — в памяти не держится весь корпус.
 - **CLI** — при локальном `parse` пишет в `output/` (`vacancies.xlsx`, `vacancies.json`, `output/charts/`).
 
 ---

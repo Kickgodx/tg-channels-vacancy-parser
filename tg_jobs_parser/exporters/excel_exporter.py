@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -238,32 +239,95 @@ def export_excel(
     return path
 
 
+# Ширина колонок потокового листа: содержимое заранее не просмотреть (write_only).
+_STREAM_WIDTHS: dict[str, float] = {
+    "post_id": 14,
+    "source_channel": 20,
+    "post_url": 32,
+    "post_date": 22,
+    "specializations": 28,
+    "company": 24,
+    "contact": 24,
+    "application_urls": 32,
+    "ai_notes": 40,
+    "technologies": 32,
+    "duplicate_group_id": 20,
+    "raw_text": 52,
+    "cleaned_text": 52,
+}
+_STREAM_DEFAULT_WIDTH = 14.0
+# Лимит длины ячейки Excel.
+_EXCEL_CELL_MAX = 32_767
+
+
+def _stream_cell(ws, value):
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
+    if isinstance(value, str):
+        value = ILLEGAL_CHARACTERS_RE.sub("", value)[:_EXCEL_CELL_MAX]
+    cell = WriteOnlyCell(ws, value=value)
+    if isinstance(value, datetime):
+        cell.number_format = _DATETIME_FMT
+    return cell
+
+
+def write_vacancies_xlsx(
+    fileobj,
+    vacancies: Iterable[Vacancy],
+    *,
+    metrics: MetricsSummary | None = None,
+    summary_extra: list[tuple[str, Any]] | None = None,
+) -> int:
+    """Excel для API потоком: лист вакансий + опционально сводка метрик. Возвращает число строк.
+
+    openpyxl ``write_only``: строки уходят во временный файл по мере итерации, в памяти —
+    одна строка, а не весь лист (как у pandas). ``summary_extra`` — дополнительные строки
+    сводки (например, пометка об обрезке экспорта).
+    """
+    from openpyxl import Workbook
+
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet("vacancies")
+    written = 0
+    for v in vacancies:
+        row = _vacancy_row_for_excel(v, include_parse_dedup_columns=False)
+        if written == 0:
+            for idx, header in enumerate(row, start=1):
+                ws.column_dimensions[get_column_letter(idx)].width = _STREAM_WIDTHS.get(header, _STREAM_DEFAULT_WIDTH)
+            ws.append(list(row))
+        ws.append([_stream_cell(ws, value) for value in row.values()])
+        written += 1
+
+    summary_rows: list[tuple[str, Any]] = []
+    if metrics is not None:
+        summary_rows += [
+            ("total_posts_fetched", metrics.total_posts_fetched),
+            ("unique_vacancies", metrics.unique_vacancies),
+            ("duplicate_count", metrics.duplicate_count),
+            ("vacancies_with_salary", metrics.vacancies_with_salary),
+            ("vacancies_without_salary", metrics.vacancies_without_salary),
+        ]
+    summary_rows += summary_extra or []
+    if summary_rows:
+        summary = wb.create_sheet("metrics_summary")
+        summary.column_dimensions["A"].width = 28
+        summary.column_dimensions["B"].width = 60
+        summary.append(["metric", "value"])
+        for name, value in summary_rows:
+            summary.append([name, value])
+    wb.save(fileobj)
+    return written
+
+
 def export_excel_bytes(
     vacancies_unique: list[Vacancy],
     *,
     metrics: MetricsSummary | None = None,
 ) -> bytes:
-    """Excel для API: лист вакансий и опционально сводка метрик."""
+    """Excel для API целиком в памяти (обёртка над ``write_vacancies_xlsx``)."""
     from io import BytesIO
 
     buf = BytesIO()
-    sheet_names = ["vacancies"]
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        _vacancies_df(vacancies_unique, include_parse_dedup_columns=False).to_excel(
-            writer, sheet_name="vacancies", index=False
-        )
-        if metrics is not None:
-            summary_rows = [
-                ("total_posts_fetched", metrics.total_posts_fetched),
-                ("unique_vacancies", metrics.unique_vacancies),
-                ("duplicate_count", metrics.duplicate_count),
-                ("vacancies_with_salary", metrics.vacancies_with_salary),
-                ("vacancies_without_salary", metrics.vacancies_without_salary),
-            ]
-            pd.DataFrame(summary_rows, columns=["metric", "value"]).to_excel(
-                writer, sheet_name="metrics_summary", index=False
-            )
-            sheet_names.append("metrics_summary")
-        wb = writer.book
-        _apply_openpyxl_formatting(wb, sheet_names)
+    write_vacancies_xlsx(buf, vacancies_unique, metrics=metrics)
     return buf.getvalue()

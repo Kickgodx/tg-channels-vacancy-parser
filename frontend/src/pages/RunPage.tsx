@@ -189,6 +189,7 @@ export default function RunPage() {
     message: string;
   } | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportNote, setExportNote] = useState<string | null>(null);
 
   useEffect(() => {
     const status = run.data?.status;
@@ -339,8 +340,10 @@ export default function RunPage() {
                     className="btn-link"
                     onClick={() => {
                       setExportError(null);
+                      setExportNote(null);
                       void api
                         .downloadExport(api.exportRunUrl(runId, "xlsx"), `run-${runId.slice(0, 8)}.xlsx`)
+                        .then(setExportNote)
                         .catch((e: Error) => setExportError(e.message));
                     }}
                   >
@@ -351,8 +354,10 @@ export default function RunPage() {
                     className="btn-link"
                     onClick={() => {
                       setExportError(null);
+                      setExportNote(null);
                       void api
                         .downloadExport(api.exportRunUrl(runId, "json"), `run-${runId.slice(0, 8)}.json`)
+                        .then(setExportNote)
                         .catch((e: Error) => setExportError(e.message));
                     }}
                   >
@@ -360,6 +365,7 @@ export default function RunPage() {
                   </button>
                 </div>
                 {exportError && <p className="error">{exportError}</p>}
+                {exportNote && <p className="warning">{exportNote}</p>}
               </>
             )}
           </>

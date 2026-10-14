@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
@@ -317,23 +318,30 @@ def get_vacancy(session: Session, vacancy_id: str) -> Vacancy | None:
     return row_to_vacancy(row)
 
 
+def _run_conditions(run_id: uuid.UUID) -> list:
+    return [
+        VacancyRow.last_parse_run_id == run_id,
+        VacancyRow.is_duplicate.is_(False),
+        VacancyRow.archived_at.is_(None),
+    ]
+
+
+def count_run_vacancies(session: Session, run_id: uuid.UUID) -> int:
+    return int(session.scalar(select(func.count(VacancyRow.id)).where(*_run_conditions(run_id))) or 0)
+
+
 def list_run_vacancies(
     session: Session,
     run_id: uuid.UUID,
     query: VacancyQuery,
 ) -> tuple[list[VacancyListItem], int]:
-    conditions = [
-        VacancyRow.last_parse_run_id == run_id,
-        VacancyRow.is_duplicate.is_(False),
-        VacancyRow.archived_at.is_(None),
-    ]
-    total = int(session.scalar(select(func.count(VacancyRow.id)).where(*conditions)) or 0)
+    total = count_run_vacancies(session, run_id)
     dialect = session.get_bind().dialect.name
     offset = (query.page - 1) * query.page_size
     preview = vacancy_preview_expr()
     stmt = (
         select(VacancyRow, preview)
-        .where(*conditions)
+        .where(*_run_conditions(run_id))
         .options(*_list_text_defer())
         .order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
         .offset(offset)
@@ -343,57 +351,44 @@ def list_run_vacancies(
     return [row_to_list_item(vrow, prev or "") for vrow, prev in rows], total
 
 
-def _iter_full_vacancies(session: Session, query: VacancyQuery) -> list[Vacancy]:
-    """Полные Vacancy по фильтрам (для export) — с raw/cleaned_text."""
+# Строк за одно чтение курсора экспорта.
+_EXPORT_YIELD_PER = 500
+
+
+def _iter_rows(session: Session, stmt) -> Iterator[Vacancy]:
+    """Один запрос, чтение порциями (на Postgres — server-side cursor), без OFFSET-цикла.
+
+    Строку сразу выкидываем из identity map сессии — иначе ORM держал бы в памяти весь экспорт.
+    """
+    for row in session.scalars(stmt.execution_options(yield_per=_EXPORT_YIELD_PER)):
+        vacancy = row_to_vacancy(row)
+        session.expunge(row)
+        yield vacancy
+
+
+def iter_export_vacancies(session: Session, query: VacancyQuery, *, limit: int) -> Iterator[Vacancy]:
+    """Полные Vacancy (с raw/cleaned_text) по фильтрам списка, не больше ``limit`` — для экспорта."""
     dialect = session.get_bind().dialect.name
-    page_size = min(query.page_size, 500)
-    page = 1
-    out: list[Vacancy] = []
-    while True:
-        offset = (page - 1) * page_size
-        order = [*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc()]
-        stmt = apply_vacancy_filters(select(VacancyRow), query, dialect=dialect)
-        rows = session.scalars(stmt.order_by(*order).offset(offset).limit(page_size)).all()
-        if not rows:
-            break
-        out.extend(row_to_vacancy(r) for r in rows)
-        if len(rows) < page_size:
-            break
-        page += 1
-    return out
+    order = [*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc()]
+    stmt = apply_vacancy_filters(select(VacancyRow), query, dialect=dialect).order_by(*order).limit(limit)
+    return _iter_rows(session, stmt)
 
 
-def list_all_vacancies(session: Session, query: VacancyQuery) -> list[Vacancy]:
-    """Все вакансии по фильтрам (полные тексты — для Excel/JSON export)."""
-    return _iter_full_vacancies(session, query)
-
-
-def list_all_run_vacancies(session: Session, run_id: uuid.UUID, query: VacancyQuery) -> list[Vacancy]:
-    page_size = min(query.page_size, 500)
-    page = 1
-    out: list[Vacancy] = []
+def iter_export_run_vacancies(
+    session: Session,
+    run_id: uuid.UUID,
+    query: VacancyQuery,
+    *,
+    limit: int,
+) -> Iterator[Vacancy]:
     dialect = session.get_bind().dialect.name
-    conditions = [
-        VacancyRow.last_parse_run_id == run_id,
-        VacancyRow.is_duplicate.is_(False),
-        VacancyRow.archived_at.is_(None),
-    ]
-    while True:
-        offset = (page - 1) * page_size
-        rows = session.scalars(
-            select(VacancyRow)
-            .where(*conditions)
-            .order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
-            .offset(offset)
-            .limit(page_size)
-        ).all()
-        if not rows:
-            break
-        out.extend(row_to_vacancy(r) for r in rows)
-        if len(rows) < page_size:
-            break
-        page += 1
-    return out
+    stmt = (
+        select(VacancyRow)
+        .where(*_run_conditions(run_id))
+        .order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
+        .limit(limit)
+    )
+    return _iter_rows(session, stmt)
 
 
 def get_vacancy_row(session: Session, vacancy_id: str) -> VacancyRow | None:

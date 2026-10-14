@@ -92,6 +92,7 @@ export default function VacanciesPage() {
   const [presetName, setPresetName] = useState("");
   const [qInput, setQInput] = useState(q);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportNote, setExportNote] = useState<string | null>(null);
 
   const updateParams = (patch: Record<string, string | number | string[] | null>) => {
     const next = new URLSearchParams(searchParams);
@@ -363,14 +364,17 @@ export default function VacanciesPage() {
           className="btn-link"
           onClick={() => {
             setExportError(null);
+            setExportNote(null);
             void api
               .downloadExport(api.exportVacanciesUrl(filterParams), "vacancies.xlsx")
+              .then(setExportNote)
               .catch((e: Error) => setExportError(e.message));
           }}
         >
           Скачать Excel (все по фильтрам)
         </button>
         {exportError && <p className="error">{exportError}</p>}
+        {exportNote && <p className="warning">{exportNote}</p>}
         {isAdmin && (
           <>
             <button

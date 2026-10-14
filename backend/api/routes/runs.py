@@ -56,12 +56,11 @@ from backend.schemas import (
     VacancySortField,
     VacancySortOrder,
 )
-from backend.services import idempotency, run_service
+from backend.services import export_service, idempotency, run_service
 from backend.services.parse_run_events import channel_for
 from backend.services.pubsub_hub import PubSubUnavailable, get_pubsub_hub
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import ConfigLoadError
-from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
 from tg_jobs_parser.exporters.json_exporter import export_json_bytes
 from tg_jobs_parser.models.parse_result import ParseResult
 
@@ -339,23 +338,26 @@ def _parse_result_from_run(row, vacancies) -> ParseResult:
     )
 
 
+_RUN_EXPORT_QUERY = VacancyQuery(page=1, page_size=500, sort_by="post_date", sort_order="desc")
+
+
 @router.get("/{run_id}/export.json")
 def export_run_json(run_id: uuid.UUID, db: Session = Depends(get_db)):
+    """JSON прогона, не больше ``EXPORT_MAX_ROWS`` вакансий (при обрезке — ``export_truncated``)."""
     row = repo.get_parse_run(db, run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    items = repo.list_all_run_vacancies(
-        db,
-        run_id,
-        VacancyQuery(page=1, page_size=500, sort_by="post_date", sort_order="desc"),
-    )
+    limit = export_service.export_row_limit()
+    total = repo.count_run_vacancies(db, run_id)
+    items = list(repo.iter_export_run_vacancies(db, run_id, _RUN_EXPORT_QUERY, limit=limit))
     result = _parse_result_from_run(row, items)
-    data = export_json_bytes(result)
-    return StreamingResponse(
-        iter([data]),
-        media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="run_{run_id}.json"'},
-    )
+    note = export_service.truncation_note(total, limit)
+    extra = {"export_truncated": {"exported": len(items), "total": total, "note": note}} if note else None
+    data = export_json_bytes(result, extra=extra)
+    headers = {"Content-Disposition": f'attachment; filename="run_{run_id}.json"'}
+    if note:
+        headers["X-Export-Truncated"] = f"{len(items)}/{total}"
+    return StreamingResponse(iter([data]), media_type="application/json", headers=headers)
 
 
 @router.get("/{run_id}/export.xlsx")
@@ -363,15 +365,11 @@ def export_run_xlsx(run_id: uuid.UUID, db: Session = Depends(get_db)):
     row = repo.get_parse_run(db, run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    items = repo.list_all_run_vacancies(
-        db,
-        run_id,
-        VacancyQuery(page=1, page_size=500, sort_by="post_date", sort_order="desc"),
-    )
-    metrics = metrics_from_run(row)
-    data = export_excel_bytes(items, metrics=metrics)
-    return StreamingResponse(
-        iter([data]),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="run_{run_id}.xlsx"'},
+    limit = export_service.export_row_limit()
+    return export_service.xlsx_response(
+        repo.iter_export_run_vacancies(db, run_id, _RUN_EXPORT_QUERY, limit=limit),
+        total=repo.count_run_vacancies(db, run_id),
+        limit=limit,
+        metrics=metrics_from_run(row),
+        filename=f"run_{run_id}.xlsx",
     )
