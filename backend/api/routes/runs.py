@@ -22,6 +22,7 @@ from backend.api.deps import (
     verify_api_key,
     verify_api_key_sse,
 )
+from backend.api.params import Page, PageSize
 from backend.api.sse import (
     DB_POLL_INTERVAL_S,
     HEARTBEAT_INTERVAL_S,
@@ -144,8 +145,8 @@ def create_run(
 
 @router.get("", response_model=list[RunSummary])
 def list_runs(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[RunSummary]:
     rows = repo.list_parse_runs(db, limit=limit, offset=offset)
@@ -181,8 +182,8 @@ def cancel_run(run_id: uuid.UUID, admin: UserRow = Depends(require_admin)) -> di
 @router.get("/{run_id}/vacancies", response_model=VacancyListResponse)
 def run_vacancies(
     run_id: uuid.UUID,
-    page: int = 1,
-    page_size: int = 50,
+    page: Page = 1,
+    page_size: PageSize = 50,
     sort_by: VacancySortField = "post_date",
     sort_order: VacancySortOrder = "desc",
     db: Session = Depends(get_db),

@@ -364,6 +364,11 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`): один подписчик 
 `POST /fx/*`, `POST /ai-cache/clear` и HH — только админ (`require_admin`, иначе 403).
 `API_KEY`, если задан, — дополнительный заголовок `X-API-Key` поверх JWT, а не замена ему.
 
+Query-параметры списка, метрик, аналитики и экспорта типизированы на уровне FastAPI:
+`page` 1…10 000, `page_size` 1…500, даты — `YYYY-MM-DD` (пустое значение = не задано), `q` до 500
+символов; нарушение — 422 `VALIDATION` с описанием поля, а не 500. Тексты в телах ограничены:
+резюме — 50 000 символов, вакансия в импорте — 30 000.
+
 Тело `POST /runs` — whitelist overrides поверх `config.yaml`: `channels`,
 `search.date_from|date_to`, `filters.*`,
 `parser.vacancy_score_threshold|vacancy_min_substantive_score|incremental_fetch`,

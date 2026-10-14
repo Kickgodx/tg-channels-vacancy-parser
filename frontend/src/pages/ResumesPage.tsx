@@ -161,6 +161,7 @@ export default function ResumesPage() {
             <textarea
               rows={12}
               value={text}
+              maxLength={50000}
               onChange={(e) => setText(e.target.value)}
               placeholder="Опыт, стек, проекты…"
             />

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -292,14 +292,21 @@ class SavedFilterListResponse(BaseModel):
     items: list[SavedFilterOut] = Field(default_factory=list)
 
 
+# Резюме целиком уходит в промпт матчинга и письма: без потолка один запрос
+# раздувает токены (и стоимость) каждого вызова.
+RESUME_TEXT_MAX_LENGTH = 50_000
+# Текст одной вакансии в ручном импорте (пост Telegram — до 4096 символов, HH — длиннее).
+IMPORT_TEXT_MAX_LENGTH = 30_000
+
+
 class ResumeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-    text: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=RESUME_TEXT_MAX_LENGTH)
 
 
 class ResumeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    text: str | None = Field(default=None, min_length=1)
+    text: str | None = Field(default=None, min_length=1, max_length=RESUME_TEXT_MAX_LENGTH)
 
 
 class ResumeOut(BaseModel):
@@ -389,7 +396,7 @@ class LlmJobOut(BaseModel):
 class VacancyImportRequest(BaseModel):
     """Ручной импорт: тексты вакансий (например, скопированные с HH) + опциональная ссылка."""
 
-    texts: list[str] = Field(min_length=1, max_length=50)
+    texts: list[Annotated[str, Field(max_length=IMPORT_TEXT_MAX_LENGTH)]] = Field(min_length=1, max_length=50)
     source_url: str | None = Field(
         default=None,
         max_length=2048,
