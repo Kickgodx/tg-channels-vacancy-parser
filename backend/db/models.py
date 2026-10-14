@@ -186,7 +186,6 @@ class ResumeRow(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    skills_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 

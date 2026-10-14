@@ -210,9 +210,10 @@ LLM_JOB_ENQUEUE = Counter(
     labelnames=("backend", "kind", "outcome"),  # queued|reused|rejected_limit|error
 )
 
+# Имя метрики историческое (была только очередь llm); лейбл queue — llm | parse.
 LLM_RQ_QUEUE_JOBS = Gauge(
     "llm_rq_queue_jobs",
-    "Глубина очереди RQ llm",
+    "Глубина очередей RQ (llm, parse)",
     labelnames=("queue",),
 )
 
@@ -525,9 +526,12 @@ class _DBStatsCollector:
             _LOG.debug("DBStatsCollector: БД недоступна: %s", e)
             return
         try:
-            from backend.queue.rq_conn import llm_queue_length
+            from backend.queue.rq_conn import llm_queue_length, parse_queue_depth
 
             set_llm_rq_queue_depth(llm_queue_length())
+            # Прогон висит в Redis, а parse-worker его не берёт: recover в rq-режиме живёт в
+            # самом воркере, и без этой серии упавший worker виден только по queued в БД.
+            set_llm_rq_queue_depth(parse_queue_depth(), queue="parse")
         except Exception:
             pass
 

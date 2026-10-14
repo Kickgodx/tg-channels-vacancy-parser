@@ -482,8 +482,16 @@ class ParserConfig(BaseModel):
             "дольше — канал возвращается частично (с предупреждением). Короткие (до 60 с) Telethon ждёт сам."
         ),
     )
-    request_timeout_seconds: float = 20.0
-    sleep_between_requests_seconds: float = 1.0
+    sleep_between_requests_seconds: float = Field(
+        default=1.0,
+        ge=0,
+        le=60,
+        description=(
+            "Telethon: страницы истории канала (100 сообщений) запрашиваются не чаще раза в N секунд "
+            "(1 — как встроенный wait_time Telethon). 0 — без пауз. Интервал — внутри канала; "
+            "каналы читаются параллельно (channel_concurrency)."
+        ),
+    )
     vacancy_fuzzy_duplicate_threshold: int = 88
     fuzzy_compare_prefix_len: int = 500
     fuzzy_dedup_block_by_specializations: bool = Field(

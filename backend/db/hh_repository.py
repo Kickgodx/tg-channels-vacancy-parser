@@ -76,10 +76,6 @@ def _is_later(new: datetime | None, old: datetime | None) -> bool:
     return new_utc > old_utc
 
 
-def get_listing(session: Session, hh_id: str) -> HhListingRow | None:
-    return session.get(HhListingRow, hh_id)
-
-
 def listing_detail_fetched(session: Session, hh_id: str) -> bool:
     row = session.get(HhListingRow, hh_id)
     return row is not None and row.detail_fetched_at is not None

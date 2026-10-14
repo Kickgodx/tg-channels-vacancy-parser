@@ -15,7 +15,7 @@ from telethon.client.users import _fmt_flood
 from telethon.errors import FloodWaitError
 from tests.test_incremental_db_flush import _post
 from tests.test_incremental_db_flush import _run as run_parse_with_posts
-from tests.test_telethon_incremental import MESSAGES, FakeClient, _parser
+from tests.test_telethon_incremental import MESSAGES, PAGED_MESSAGES, FakeClient, _parser
 
 from backend.tracing import DEFAULT_SERVICE_NAME, service_name
 from tg_jobs_parser.ai.models_catalog import LlmModelEntry
@@ -138,6 +138,18 @@ def test_telegram_channel_span_and_metrics(exporter):
     assert channel.attributes["telegram.messages_scanned"] >= len(posts)
     assert _sample("telegram_channels_fetched_total", {"result": "ok"}) == ok_before + 1
     assert _sample("telegram_posts_fetched_total") == posts_before + len(posts)
+
+
+def test_telegram_page_pauses_are_measured(exporter):
+    paused_before = _sample("telegram_request_pause_seconds_total")
+
+    parser = _parser(sleep_between_requests_seconds=0.2)
+    asyncio.run(parser._iter_channel(FakeClient(PAGED_MESSAGES), "chan"))
+
+    channel = next(s for s in exporter.get_finished_spans() if s.name == "telegram.channel")
+    paused = _sample("telegram_request_pause_seconds_total") - paused_before
+    assert paused > 0.2  # две паузы почти по 200 мс (минус разбор страницы)
+    assert channel.attributes["telegram.pause_seconds"] == pytest.approx(paused, abs=0.001)
 
 
 def test_flood_wait_gave_up_marks_channel_partial(exporter):

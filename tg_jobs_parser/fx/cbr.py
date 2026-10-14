@@ -13,7 +13,7 @@ CBR_DAILY_URL = "https://www.cbr-xml-daily.ru/daily_json.js"
 CBR_ARCHIVE_URL = "https://www.cbr-xml-daily.ru/archive/{y}/{m:02d}/{d:02d}/daily_json.js"
 
 
-def _parse_cbr_payload(data: dict, *, rate_date: date) -> dict[str, float]:
+def _parse_cbr_payload(data: dict) -> dict[str, float]:
     """Возвращает курс RUB за 1 единицу валюты (USD, EUR, …)."""
     out: dict[str, float] = {"RUB": 1.0}
     valutes = data.get("Valute") or {}
@@ -63,5 +63,5 @@ def fetch_cbr_rates(
         except ValueError:
             pass
 
-    rates = _parse_cbr_payload(data, rate_date=target)
+    rates = _parse_cbr_payload(data)
     return target, rates

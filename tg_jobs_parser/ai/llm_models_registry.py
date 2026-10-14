@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field, ValidationError
 from tg_jobs_parser.ai.models_catalog import (
     LlmModelEntry,
     catalog_model_ids,
-    dedupe_model_ids,
 )
 
 
@@ -102,25 +101,6 @@ def load_llm_models_registry(
     path = resolve_llm_models_path(config_path, explicit=models_path)
     mtime_ns = path.stat().st_mtime_ns if path.is_file() else 0
     return _load_registry_cached(str(path.resolve()), mtime_ns)
-
-
-def load_llm_model_catalog(
-    config_path: str | Path | None = None,
-    *,
-    models_path: str | Path | None = None,
-) -> list[LlmModelEntry]:
-    return load_llm_models_registry(config_path, models_path=models_path).catalog()
-
-
-def registry_signature(registry_path: Path, registry: LlmModelsRegistry) -> str:
-    """Подпись каталога моделей (для инвалидации кэша UI при смене файла)."""
-    try:
-        mtime_ns = registry_path.stat().st_mtime_ns
-    except OSError:
-        mtime_ns = 0
-    models_part = "|".join(f"{e.id}:{e.name}:{e.cost}" for e in registry.models)
-    fb = "|".join(dedupe_model_ids(registry.default_fallbacks))
-    return f"{registry_path.resolve()}|{mtime_ns}|{registry.default_model}|{fb}|{models_part}"
 
 
 def apply_ai_defaults_from_registry(

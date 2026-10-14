@@ -8,10 +8,6 @@ _PKG_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _PKG_DIR.parents[1]
 
 
-def repo_root() -> Path:
-    return _REPO_ROOT
-
-
 def golden_extraction_path() -> Path:
     return _REPO_ROOT / "evals" / "golden" / "extraction.jsonl"
 

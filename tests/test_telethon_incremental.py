@@ -26,6 +26,8 @@ def _msg(mid: int, day: date, text: str | None = None) -> SimpleNamespace:
 
 # id 1..10: по одному сообщению в день, id 10 — сегодня, id 1 — 9 дней назад.
 MESSAGES = [_msg(i, TODAY - timedelta(days=10 - i)) for i in range(1, 11)]
+# Две с половиной страницы истории (страница — 100 сообщений), все сегодня.
+PAGED_MESSAGES = [_msg(i, TODAY) for i in range(1, 251)]
 
 
 class FakeClient:
@@ -37,8 +39,16 @@ class FakeClient:
         self.error = error
         self.calls: list[dict] = []
 
-    async def iter_messages(self, username, *, limit=None, offset_date=None, offset_id=0, min_id=0):
-        self.calls.append({"limit": limit, "offset_date": offset_date, "offset_id": offset_id, "min_id": min_id})
+    async def iter_messages(self, username, *, limit=None, offset_date=None, offset_id=0, min_id=0, wait_time=None):
+        self.calls.append(
+            {
+                "limit": limit,
+                "offset_date": offset_date,
+                "offset_id": offset_id,
+                "min_id": min_id,
+                "wait_time": wait_time,
+            }
+        )
         yielded = 0
         for m in self.messages:
             if min_id and m.id <= min_id:
@@ -151,6 +161,46 @@ def test_short_flood_wait_is_waited_and_resumed(monkeypatch):
     assert client.calls[1]["offset_id"] == 9  # продолжили со сообщений старше последнего прочитанного
     assert _ids(posts) == [3, 4, 5, 6, 7, 8, 9, 10]
     assert parser.new_checkpoints["chan"].last_message_id == 10
+
+
+def _record_sleeps(monkeypatch, *, cancel_on: int | None = None) -> list[float]:
+    slept: list[float] = []
+
+    async def fake_sleep(self, seconds):
+        slept.append(seconds)
+        return len(slept) != cancel_on
+
+    monkeypatch.setattr(TelegramTelethonParser, "_sleep_cancellable", fake_sleep)
+    return slept
+
+
+def test_zero_interval_disables_page_pauses(monkeypatch):
+    slept = _record_sleeps(monkeypatch)
+    client = FakeClient(PAGED_MESSAGES)
+    posts, _ = _run(_parser(sleep_between_requests_seconds=0), client)
+    assert len(posts) == 250
+    assert slept == []
+    # Встроенная пауза Telethon (1 с на страницу при limit=None) выключена — темп только наш.
+    assert client.calls[0]["wait_time"] == 0
+
+
+def test_page_interval_before_each_next_history_page(monkeypatch):
+    assert ParserConfig().sleep_between_requests_seconds == 1.0  # как wait_time Telethon
+    slept = _record_sleeps(monkeypatch)
+    posts, warn = _run(_parser(sleep_between_requests_seconds=2.5), FakeClient(PAGED_MESSAGES))
+    # После 100-го и 200-го сообщения; время разбора страницы вычитается из интервала.
+    assert slept == [pytest.approx(2.5, abs=0.5)] * 2
+    assert all(s <= 2.5 for s in slept)
+    assert warn is None
+    assert len(posts) == 250
+
+
+def test_cancel_during_page_pause_stops_without_checkpoint(monkeypatch):
+    _record_sleeps(monkeypatch, cancel_on=1)
+    parser = _parser(sleep_between_requests_seconds=1)
+    posts, _ = _run(parser, FakeClient(PAGED_MESSAGES))
+    assert len(posts) == 99  # 100-е сообщение — граница страницы, обход встал на паузе
+    assert parser.new_checkpoints == {}
 
 
 def test_long_flood_wait_returns_partial_posts_with_warning():
