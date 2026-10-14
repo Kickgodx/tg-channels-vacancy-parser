@@ -234,6 +234,16 @@ class AiConfig(BaseModel):
         le=500,
         description="Целевой темп запросов (пауза между вызовами к API).",
     )
+    interactive_daily_request_budget: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Суточный (UTC) бюджет запросов к провайдеру для пользовательского LLM — мэтчинг и письма "
+            "всех пользователей вместе; общий счётчик в Redis, без Redis — на процесс. Исчерпан — "
+            "мэтчинг и письма без LLM до полуночи UTC. Парсинг (только админ) бюджетом не ограничен. "
+            "0 — без бюджета."
+        ),
+    )
     max_retries_on_429: int = Field(default=0, ge=0, le=10)
     retry_base_delay_seconds: float = Field(default=5.0, ge=1, le=120)
     max_retries_on_error: int = Field(

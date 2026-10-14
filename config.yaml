@@ -100,6 +100,8 @@ ai:
   interactive_concurrency: 4
   interactive_per_user_limit: 2
   requests_per_minute: 480
+  # Суточный (UTC) бюджет запросов мэтчинга и писем всех пользователей; парсинг не ограничен. 0 — без бюджета.
+  interactive_daily_request_budget: 0
   max_retries_on_429: 0
   retry_base_delay_seconds: 5
   # Повторы при 5xx / таймауте / обрыве соединения (backoff 2/4/8… с); 0 — без повторов.

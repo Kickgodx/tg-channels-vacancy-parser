@@ -4,6 +4,9 @@
 реплики llm-worker делят один ``ai.requests_per_minute``, а не умножают его.
 Фиксированное окно допускает пачку до 2×RPM на стыке минут; ровный темп внутри
 процесса по-прежнему держит локальный ``OpenRouterRateLimiter``.
+
+Там же суточный бюджет пользовательского LLM (``ai.interactive_daily_request_budget``):
+счётчик на UTC-сутки.
 """
 
 from __future__ import annotations
@@ -18,7 +21,9 @@ from tg_jobs_parser.ai.rate_limit import register_global_rate_gate
 _LOG = logging.getLogger(__name__)
 
 _KEY_PREFIX = "llm:rate"
+_DAILY_PREFIX = "llm:daily"
 _WINDOW_S = 60
+_DAY_S = 86_400
 
 
 class RedisWindowRateGate:
@@ -40,6 +45,15 @@ class RedisWindowRateGate:
         if int(used) <= max(1, math.floor(per_minute)):
             return 0.0
         return max(0.05, (window + 1) * _WINDOW_S - now)
+
+    def take_daily(self, key: str, budget: int) -> bool:
+        day = int(time.time() // _DAY_S)  # номер UTC-суток
+        redis_key = f"{_DAILY_PREFIX}:{key}:{day}"
+        pipe = self._connection_factory().pipeline()
+        pipe.incr(redis_key)
+        pipe.expire(redis_key, _DAY_S * 2)
+        used, _ = pipe.execute()
+        return int(used) <= budget
 
 
 def register_redis_rate_gate() -> bool:
