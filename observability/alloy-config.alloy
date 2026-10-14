@@ -3,7 +3,8 @@
 //    discovery.docker → relabel (labels service/container/stream)
 //    → loki.source.docker → loki.process (level/logger, request_id/trace_id)
 //    → loki.write.
-// 2) трассы: OTLP от backend (http :4318 / grpc :4317) → batch → Tempo.
+// 2) трассы: OTLP от backend и воркеров (http :4318 / grpc :4317) → filter
+//    (шумные span'ы) → batch → Tempo.
 
 // Docker API — через docker-socket-proxy (только чтение контейнеров/сетей/логов),
 // сам docker.sock в Alloy не монтируется.
@@ -86,6 +87,23 @@ otelcol.receiver.otlp "default" {
 
 	grpc {
 		endpoint = "0.0.0.0:4317"
+	}
+
+	output {
+		traces = [otelcol.processor.filter.noise.input]
+	}
+}
+
+// SQLAlchemy-инструментация пишет span "connect" на каждую выдачу соединения из
+// пула: ~2 мс, без детей, ~1700 штук на прогон с AI (четверть трассы). Сам SQL
+// (SELECT/INSERT/UPDATE) остаётся.
+otelcol.processor.filter "noise" {
+	error_mode = "ignore"
+
+	traces {
+		span = [
+			`name == "connect" and attributes["db.system"] != nil`,
+		]
 	}
 
 	output {

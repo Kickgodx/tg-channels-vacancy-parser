@@ -28,6 +28,7 @@ from tg_jobs_parser.ingestion.rules import (
 )
 from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.observability.parse_metrics import record_phase_duration, record_post_processed
 from tg_jobs_parser.parse_cancel import (
     ParseCancellationToken,
     ParseCancelled,
@@ -384,6 +385,7 @@ def run_parse(
             fx_rates=fx_rates,
         )
     fetch_elapsed = time.monotonic() - fetch_started
+    record_phase_duration("fetch", fetch_elapsed)
 
     all_posts: list[RawPost] = []
     for ch, posts, warn in fetch_results:
@@ -461,7 +463,10 @@ def run_parse(
             if vacancy_batch_sink is None or not pending_uniques:
                 return
             try:
-                vacancy_batch_sink(list(pending_uniques))
+                with _TRACER.start_as_current_span(
+                    "parse.flush_vacancies", attributes={"parse.vacancies": len(pending_uniques)}
+                ):
+                    vacancy_batch_sink(list(pending_uniques))
             except ParseCancelled:
                 raise
             except Exception as e:
@@ -540,6 +545,7 @@ def run_parse(
                 if cancel:
                     cancel.check()
                 v = _process_one(post)
+                record_post_processed(candidate=v is not None)
                 if v is not None:
                     _register_candidate(v)
                 if i % batch_step == 0 or i == len(all_posts):
@@ -570,6 +576,7 @@ def run_parse(
                 batch_step=batch_step,
                 emit_progress=_emit_progress,
             ):
+                record_post_processed(candidate=v is not None)
                 if v is not None:
                     _register_candidate(v)
                 if len(pending_uniques) >= db_flush_pending or i % db_flush_step == 0:
@@ -583,7 +590,10 @@ def run_parse(
                     )
 
         process_elapsed = time.monotonic() - process_started
+        record_phase_duration("process", process_elapsed)
+        record_phase_duration("dedup", dedup_elapsed)
         process_span.set_attribute("parse.vacancies_found", len(candidates))
+        process_span.set_attribute("parse.vacancies_unique", len(deduplicator.unique))
         _end_span(process_span, process_ctx_token)
         process_span = process_ctx_token = None
         _emit_progress(len(all_posts), phase="post_processing_done")

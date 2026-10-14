@@ -1,0 +1,934 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Прогон парсинга Telegram: fetch, пост-обработка, LLM (лимит, повторы, стоимость), воркеры, трассы и логи.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    { "title": "Pipeline", "type": "link", "url": "/d/tg-jobs-app" },
+    { "title": "LLM", "type": "link", "url": "/d/tg-jobs-llm" }
+  ],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Прогон: итоги за выбранный период",
+      "id": 1,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 2,
+      "title": "Возраст активного прогона",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "max((parse_runs_active{job=\"tg-jobs-parse-worker\"} > 0) * (time() - parse_run_started_timestamp_seconds{job=\"tg-jobs-parse-worker\"})) or vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "description": "0 — сейчас ничего не выполняется. Gauge выставляет parse-worker на claim прогона."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 3,
+      "title": "Постов обработано",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(parse_posts_processed_total[$__range])) or vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "description": "rules + AI + фильтры, за период дашборда. Счётчик растёт во время прогона, а не в конце."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 4,
+      "title": "Кандидатов-вакансий",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(parse_posts_processed_total{result=\"candidate\"}[$__range])) or vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "description": "Посты, прошедшие фильтры, до дедупа."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 5,
+      "title": "LLM-вызовов (парсинг)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(llm_requests_total{job=\"tg-jobs-parse-worker\"}[$__range])) or vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 6,
+      "title": "Стоимость LLM (парсинг)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "currencyUSD",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] },
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(llm_cost_usd_total{job=\"tg-jobs-parse-worker\"}[$__range])) or vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "description": "Оценка по ценам llm_models.yaml (USD за 1M токенов input/output). Модели без цены в каталоге не учитываются."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 7,
+      "title": "FloodWait Telegram",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "text", "value": null }, { "color": "orange", "value": 1 }]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(telegram_flood_waits_total[$__range])) or vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "description": "Включая короткие ожидания, которые Telethon выдерживает сам (handled_by=telethon)."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 8,
+      "type": "bargauge",
+      "title": "Время по фазам прогона за период",
+      "description": "Сумма длительностей фаз всех прогонов за период: fetch — Telegram, process — rules+AI (включает dedup), dedup — отдельно инкрементальный дедуп.",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true,
+        "valueMode": "text",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "sum by (phase) (increase(parse_phase_duration_seconds_sum[$__range]))",
+          "legendFormat": "{{phase}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 9,
+      "type": "bargauge",
+      "title": "Воронка AI-обогащения за период",
+      "description": "skipped_score — rules-score ниже ai.skip_if_vacancy_score_below, LLM не вызывался; cache_hit — ответ из Postgres-кэша; merged — вакансия; dropped_not_job — LLM сказал «не вакансия».",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "purple" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "showUnfilled": true,
+        "valueMode": "text",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "sum by (event) (increase(llm_enrich_events_total{job=\"tg-jobs-parse-worker\"}[$__range]))",
+          "legendFormat": "{{event}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Пост-обработка (живой поток)",
+      "id": 10,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 11,
+      "title": "Посты / мин по результату",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 60,
+            "stacking": { "mode": "normal", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(parse_posts_processed_total[1m])) * 60",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "description": "candidate — прошёл фильтры; dropped — не вакансия / ниже порога / исключён."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 12,
+      "title": "AI-обогащение / мин по событию",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (event) (rate(llm_enrich_events_total{job=\"tg-jobs-parse-worker\"}[1m])) * 60",
+          "legendFormat": "{{event}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Telegram fetch",
+      "id": 13,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 14,
+      "title": "Посты и сообщения API / мин",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 21 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(telegram_posts_fetched_total[1m])) * 60",
+          "legendFormat": "текстовые посты",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(telegram_messages_scanned_total[1m])) * 60",
+          "legendFormat": "просмотрено сообщений",
+          "refId": "B"
+        }
+      ],
+      "description": "Растёт по мере завершения каналов. Разрыв между линиями — пустые сообщения и сообщения вне окна дат."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 15,
+      "title": "Каналы / мин по результату",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 21 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 60,
+            "stacking": { "mode": "normal", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(telegram_channels_fetched_total[1m])) * 60",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "description": "partial — FloodWait дольше parser.flood_wait_max_seconds или ошибка посреди обхода: канал вернулся с частью постов."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 16,
+      "title": "Обход канала p50 / p95",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 21 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(telegram_channel_fetch_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(telegram_channel_fetch_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ],
+      "description": "Включает ожидание FloodWait. Отдельные медленные каналы — в трассе прогона (span telegram.channel)."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 17,
+      "title": "FloodWait: запрошено секунд",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 29 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (handled_by) (increase(telegram_flood_wait_seconds_total[1m]))",
+          "legendFormat": "{{handled_by}}",
+          "refId": "A"
+        }
+      ],
+      "description": "telethon — Telethon проспал сам (короче flood_sleep_threshold, 60 с), наш код этого не видит; resumed — выждали и продолжили; gave_up — не ждали, канал частичный. Параллельные ожидания складываются, поэтому сумма может превышать wall time."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 18,
+      "title": "FloodWait: события",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 29 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (handled_by) (increase(telegram_flood_waits_total[1m]))",
+          "legendFormat": "{{handled_by}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "LLM в прогоне",
+      "id": 19,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 20,
+      "title": "Полный вызов vs ожидание RPM-лимита",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 38 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(llm_request_duration_seconds_bucket{job=\"tg-jobs-parse-worker\"}[2m])))",
+          "legendFormat": "вызов p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(llm_request_duration_seconds_bucket{job=\"tg-jobs-parse-worker\"}[2m])))",
+          "legendFormat": "вызов p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(llm_rate_gate_wait_seconds_bucket{job=\"tg-jobs-parse-worker\"}[2m])))",
+          "legendFormat": "ожидание лимита p50",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(llm_rate_gate_wait_seconds_bucket{job=\"tg-jobs-parse-worker\"}[2m])))",
+          "legendFormat": "ожидание лимита p95",
+          "refId": "D"
+        }
+      ],
+      "description": "Полный вызов включает ожидание слота ai.requests_per_minute (локальный темп + общий Redis-лимит). Ожидание сопоставимо с вызовом — упираемся в RPM, а не в ai.concurrency."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 21,
+      "title": "Вызовы / мин по исходу",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 38 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 60,
+            "stacking": { "mode": "normal", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(llm_requests_total{job=\"tg-jobs-parse-worker\"}[1m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "description": "parse_error — невалидный JSON, дальше пробуется fallback-модель."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 22,
+      "title": "Повторы / мин",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 38 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(llm_retries_total{job=\"tg-jobs-parse-worker\"}[1m])) * 60",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "description": "rate_limit — 429 от OpenRouter; transient — 5xx / таймаут / обрыв."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 23,
+      "title": "Стоимость, $ / мин по модели",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 46 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "currencyUSD",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(llm_cost_usd_total{job=\"tg-jobs-parse-worker\"}[1m])) * 60",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 24,
+      "title": "Токены / мин",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 46 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (direction) (rate(llm_tokens_total{job=\"tg-jobs-parse-worker\"}[1m])) * 60",
+          "legendFormat": "{{direction}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Воркеры",
+      "id": 25,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 54 }
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 26,
+      "title": "Возраст heartbeat воркера",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 55 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "time() - max by (job, instance) (worker_heartbeat_timestamp_seconds{job=~\"tg-jobs-.*-worker\"} > 0)",
+          "legendFormat": "{{job}} {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Heartbeat обновляют RQ-цикл и lease прогона. Рост дольше WORKER_STALL_EXIT_SECONDS — watchdog перезапустит воркер."
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 27,
+      "title": "RAM (RSS)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 55 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "bytes",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=~\"tg-jobs-.*\"}",
+          "legendFormat": "{{job}} {{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 28,
+      "title": "CPU, ядра",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 55 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "stacking": { "mode": "none", "group": "A" },
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "expr": "rate(process_cpu_seconds_total{job=~\"tg-jobs-.*\"}[1m])",
+          "legendFormat": "{{job}} {{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 29,
+      "type": "state-timeline",
+      "title": "Scrape targets (up)",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 63 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "fillOpacity": 80, "lineWidth": 0 },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "down", "color": "red" },
+                "1": { "text": "up", "color": "green" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "legend": { "showLegend": false }
+      },
+      "targets": [
+        { "expr": "up{job=~\"tg-jobs-.*\"}", "legendFormat": "{{job}} {{instance}}", "refId": "A" }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Трассы и логи",
+      "id": 30,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 68 }
+    },
+    {
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "id": 31,
+      "type": "table",
+      "title": "Прогоны парсинга (трассы)",
+      "description": "Клик по trace id — waterfall: parse_run → parse.fetch_posts → telegram.channel; parse.process_posts → chat <model> → POST. На chat-span'ах: llm.rate_gate.wait_seconds, llm.cost_usd, llm.retries.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 69 },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "refId": "A",
+          "limit": 20,
+          "tableType": "traces",
+          "query": "{resource.service.name=\"tg-jobs-parser-parse-worker\" && name=\"parse_run\"}"
+        }
+      ],
+      "options": { "showHeader": true },
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "id": 32,
+      "type": "logs",
+      "title": "parse-worker: вехи прогона, предупреждения и FloodWait",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 77 },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "refId": "A",
+          "expr": "{service=\"parse-worker\"} |~ \"Прогон |Выборка завершена|Пост-обработка|AI LLM: завершено|flood wait|FloodWait| WARNING | ERROR \""
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["tg-jobs-parser", "parse", "telegram", "llm"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "tg-jobs-parser Parse run",
+  "uid": "tg-jobs-parse-run",
+  "version": 1
+}

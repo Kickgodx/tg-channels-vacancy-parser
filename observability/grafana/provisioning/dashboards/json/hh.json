@@ -246,17 +246,17 @@
       },
       "targets": [
         {
-          "expr": "db_hh_listings{state=\"total\"}",
+          "expr": "db_hh_listings{job=\"tg-jobs-backend\", state=\"total\"}",
           "legendFormat": "total",
           "refId": "A"
         },
         {
-          "expr": "db_hh_listings{state=\"with_detail\"}",
+          "expr": "db_hh_listings{job=\"tg-jobs-backend\", state=\"with_detail\"}",
           "legendFormat": "with_detail",
           "refId": "B"
         },
         {
-          "expr": "db_hh_listings{state=\"without_detail\"}",
+          "expr": "db_hh_listings{job=\"tg-jobs-backend\", state=\"without_detail\"}",
           "legendFormat": "without_detail",
           "refId": "C"
         }

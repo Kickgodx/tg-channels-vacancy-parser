@@ -15,7 +15,6 @@ overflow / лимит). Регистрируется и на backend, и на ll
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from datetime import UTC, datetime
@@ -667,10 +666,23 @@ class _DBStatsCollector:
         )
 
 
-# Пул — на каждом процессе (backend и llm-worker): у каждого свой QueuePool.
+# Пул — на каждом процессе (backend и воркеры): у каждого свой QueuePool.
 REGISTRY.register(_DBPoolCollector())
 
-# На llm-worker COUNT по всем таблицам не нужен: лишний RAM/нагрузка на Postgres
-# при scale и дубли рядов в Prometheus. Счётчики LLM-джоб регистрируются выше всегда.
-if os.environ.get("TG_JOBS_METRICS_ROLE", "backend").strip().lower() != "worker":
-    REGISTRY.register(_DBStatsCollector())
+_db_stats_lock = threading.Lock()
+_db_stats_registered = False
+
+
+def register_db_stats_collector() -> None:
+    """COUNT-агрегаты таблиц в ``/metrics`` — только процесс API (``backend.main``).
+
+    Явный вызов, а не проверка env при импорте: воркеры импортируют этот модуль
+    транзитивно (recover, tasks) раньше, чем успевают выставить свою роль, и
+    отдавали те же ``db_*`` — ``sum(db_users)`` на дашборде показывал ×3. Плюс
+    лишние COUNT'ы по всем таблицам на каждой реплике.
+    """
+    global _db_stats_registered
+    with _db_stats_lock:
+        if not _db_stats_registered:
+            REGISTRY.register(_DBStatsCollector())
+            _db_stats_registered = True

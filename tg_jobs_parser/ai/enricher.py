@@ -116,7 +116,7 @@ class AIEnrichmentService:
         self._config = config
         self._ai = config.ai
         self._context = build_search_context(config)
-        self._client = OpenRouterClient(self._ai)
+        self._client = OpenRouterClient(self._ai, catalog=config.llm_model_catalog)
         self._cache = AIExtractionCache(self._ai, backend=cache)
         self.stats = RunAIStats()
         self._progress_total: int = 0

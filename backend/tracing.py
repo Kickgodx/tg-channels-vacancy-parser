@@ -17,6 +17,7 @@ no-op, поэтому CLI и тесты работают без коллекто
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 from fastapi import FastAPI
@@ -46,6 +47,15 @@ _LOG = logging.getLogger(__name__)
 DEFAULT_SERVICE_NAME = "tg-jobs-parser-backend"
 
 _provider: TracerProvider | None = None
+
+
+def service_name() -> str:
+    """``OTEL_SERVICE_NAME`` процесса (воркеры задают свой), иначе имя backend.
+
+    Явный атрибут в ``Resource.create`` перекрывает env-детектор SDK — без этой
+    функции все воркеры попадали в Tempo как ``tg-jobs-parser-backend``.
+    """
+    return os.environ.get("OTEL_SERVICE_NAME", "").strip() or DEFAULT_SERVICE_NAME
 
 
 class SkipOrphanClientSpans(Sampler):
@@ -118,7 +128,7 @@ def setup_tracing(app: FastAPI, settings: Settings) -> bool:
         return False
     if _provider is not None:
         return True
-    resource = Resource.create({SERVICE_NAME: DEFAULT_SERVICE_NAME, SERVICE_VERSION: app.version})
+    resource = Resource.create({SERVICE_NAME: service_name(), SERVICE_VERSION: app.version})
     provider = TracerProvider(resource=resource, sampler=build_sampler(settings.otel_traces_sample_ratio))
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     trace.set_tracer_provider(provider)

@@ -12,30 +12,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind
-from opentelemetry.util._once import Once
 
 from backend.http_logging import HttpLoggingMiddleware
-from backend.tracing import build_sampler, excluded_urls, instrument_app
+from backend.tracing import excluded_urls, instrument_app
 from tg_jobs_parser.utils.logger import RequestIdFilter
 
 
 @pytest.fixture
-def exporter():
-    """Глобальный TracerProvider с in-memory экспортом; после теста — сброс (как в тестах OTel)."""
-    exp = InMemorySpanExporter()
-    provider = TracerProvider(sampler=build_sampler(1.0))
-    provider.add_span_processor(SimpleSpanProcessor(exp))
-    trace._TRACER_PROVIDER_SET_ONCE = Once()
-    trace._TRACER_PROVIDER = None
-    trace.set_tracer_provider(provider)
-    yield exp
-    provider.shutdown()
-    trace._TRACER_PROVIDER_SET_ONCE = Once()
-    trace._TRACER_PROVIDER = None
+def exporter(otel_exporter):
+    return otel_exporter
 
 
 @pytest.fixture

@@ -12,6 +12,7 @@ from typing import Any
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 
+from tg_jobs_parser.ai.models_catalog import LlmModelEntry
 from tg_jobs_parser.ai.prompts import (
     build_cover_letter_messages,
     build_match_messages,
@@ -24,8 +25,15 @@ from tg_jobs_parser.ai.rate_limit import (
 )
 from tg_jobs_parser.ai.schema import VacancyAIExtraction, VacancyMatchExtraction
 from tg_jobs_parser.ai.search_context import SearchContext
+from tg_jobs_parser.ai.token_cost import cost_usd_for_tokens, rates_for_model
 from tg_jobs_parser.config.schema import AiConfig
-from tg_jobs_parser.observability.llm_metrics import record_request, record_tokens
+from tg_jobs_parser.observability.llm_metrics import (
+    record_cost,
+    record_rate_gate_wait,
+    record_request,
+    record_retry,
+    record_tokens,
+)
 from tg_jobs_parser.utils.logger import get_logger
 
 _LOG = get_logger(__name__)
@@ -156,8 +164,16 @@ def _is_transient_error(exc: Exception) -> bool:
 class OpenRouterClient:
     """OpenRouter (OpenAI-compatible). Клиент — ``openai`` SDK; ``poetry install --extras ai``."""
 
-    def __init__(self, ai: AiConfig, rate_limiter: OpenRouterRateLimiter | None = None) -> None:
+    def __init__(
+        self,
+        ai: AiConfig,
+        rate_limiter: OpenRouterRateLimiter | None = None,
+        *,
+        catalog: list[LlmModelEntry] | None = None,
+    ) -> None:
         self._ai = ai
+        # Цены моделей (llm_models.yaml) — для метрики llm_cost_usd_total; без каталога не считаем.
+        self._catalog = catalog or []
         self._api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
         if not self._api_key:
             raise RuntimeError("OPENROUTER_API_KEY не задан. Добавьте ключ в .env (см. .env.example).")
@@ -220,45 +236,69 @@ class OpenRouterClient:
         # по max_retries_on_error.
         rate_limit_retries = 0
         transient_retries = 0
-        while True:
-            try:
-                self._rate_limiter.acquire()
-                return self._get_sdk().chat.completions.create(**kwargs)
-            except LlmQuotaExhausted:
-                raise
-            except Exception as e:
-                if not _is_rate_limit_error(e):
-                    if _is_transient_error(e) and transient_retries < self._ai.max_retries_on_error:
-                        transient_retries += 1
-                        self._rate_limiter.wait_after_transient_error(transient_retries, e)
+        gate_wait = 0.0
+        model = str(kwargs.get("model") or "")
+        try:
+            while True:
+                try:
+                    gate_wait += self._acquire_slot()
+                    return self._get_sdk().chat.completions.create(**kwargs)
+                except LlmQuotaExhausted:
+                    raise
+                except Exception as e:
+                    if not _is_rate_limit_error(e):
+                        if _is_transient_error(e) and transient_retries < self._ai.max_retries_on_error:
+                            transient_retries += 1
+                            record_retry(model=model, reason="transient")
+                            self._rate_limiter.wait_after_transient_error(transient_retries, e)
+                            continue
+                        raise RuntimeError(f"OpenRouter API: {e}") from e
+
+                    headers = extract_rate_limit_headers(e)
+                    rem = headers.get("X-RateLimit-Remaining") or headers.get("x-ratelimit-remaining")
+                    if self._ai.stop_llm_when_rate_limited and (
+                        (rem is not None and int(rem) <= 0) or "per-day" in str(e).lower()
+                    ):
+                        try:
+                            self._rate_limiter.apply_error(e)
+                        except LlmQuotaExhausted:
+                            raise
+
+                    if rate_limit_retries < self._rate_limiter.max_retries and not self._rate_limiter.llm_disabled:
+                        rate_limit_retries += 1
+                        record_retry(model=model, reason="rate_limit")
+                        try:
+                            self._rate_limiter.wait_after_429(e)
+                        except LlmQuotaExhausted:
+                            raise
                         continue
+
+                    if self._ai.stop_llm_when_rate_limited:
+                        try:
+                            self._rate_limiter.apply_error(e)
+                        except LlmQuotaExhausted:
+                            raise
+
                     raise RuntimeError(f"OpenRouter API: {e}") from e
+        finally:
+            # Span ``chat …`` — текущий: видно, сколько вызова ушло на лимит, а не на API.
+            span = trace.get_current_span()
+            span.set_attribute("llm.rate_gate.wait_seconds", round(gate_wait, 3))
+            span.set_attribute("llm.retries", rate_limit_retries + transient_retries)
 
-                headers = extract_rate_limit_headers(e)
-                rem = headers.get("X-RateLimit-Remaining") or headers.get("x-ratelimit-remaining")
-                if self._ai.stop_llm_when_rate_limited and (
-                    (rem is not None and int(rem) <= 0) or "per-day" in str(e).lower()
-                ):
-                    try:
-                        self._rate_limiter.apply_error(e)
-                    except LlmQuotaExhausted:
-                        raise
+    def _acquire_slot(self) -> float:
+        """Слот RPM-лимита; возвращает ожидание в секундах.
 
-                if rate_limit_retries < self._rate_limiter.max_retries and not self._rate_limiter.llm_disabled:
-                    rate_limit_retries += 1
-                    try:
-                        self._rate_limiter.wait_after_429(e)
-                    except LlmQuotaExhausted:
-                        raise
-                    continue
-
-                if self._ai.stop_llm_when_rate_limited:
-                    try:
-                        self._rate_limiter.apply_error(e)
-                    except LlmQuotaExhausted:
-                        raise
-
-                raise RuntimeError(f"OpenRouter API: {e}") from e
+        Wall time, а не ``total_waits_seconds`` лимитера: при concurrency>1 основное
+        ожидание — на его lock, пока другой поток выдерживает интервал.
+        """
+        started = time.perf_counter()
+        try:
+            self._rate_limiter.acquire()
+        finally:
+            waited = time.perf_counter() - started
+            record_rate_gate_wait(waited)
+        return waited
 
     def _call_llm(
         self,
@@ -367,6 +407,22 @@ class OpenRouterClient:
                         prompt_tokens=usage.prompt_tokens,
                         completion_tokens=usage.completion_tokens,
                     )
+                    cost = self._cost_usd(use_model, usage)
+                    if cost is not None:
+                        span.set_attribute("llm.cost_usd", round(cost, 6))
+                        record_cost(model=use_model, usd=cost)
+
+    def _cost_usd(self, model: str, usage: LLMUsage) -> float | None:
+        rates = rates_for_model(self._catalog, model)
+        if rates is None:
+            return None
+        _, _, total = cost_usd_for_tokens(
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            input_per_million=rates[0],
+            output_per_million=rates[1],
+        )
+        return total
 
     def extract(
         self,

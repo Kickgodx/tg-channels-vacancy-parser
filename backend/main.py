@@ -11,7 +11,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace
 from prometheus_fastapi_instrumentator import Instrumentator
 
-import backend.observability  # noqa: F401 — регистрация доменных метрик и db_* gauges в /metrics
 import tg_jobs_parser.observability.llm_metrics  # noqa: F401 — регистрация llm_* в /metrics
 from backend.api.routes import (
     ai_cache,
@@ -33,6 +32,7 @@ from backend.db import repository as repo
 from backend.db.session import init_db, session_scope
 from backend.errors import register_exception_handlers
 from backend.http_logging import HttpLoggingMiddleware
+from backend.observability import register_db_stats_collector
 from backend.settings import check_exposure, get_settings
 from backend.tracing import setup_tracing, shutdown_tracing
 from tg_jobs_parser.config.loader import load_config
@@ -245,6 +245,8 @@ app.add_middleware(
     exclude_paths=settings.http_log_exclude_path_set,
 )
 setup_tracing(app, settings)
+# db_* gauges (COUNT по таблицам) — только в процессе API, см. register_db_stats_collector.
+register_db_stats_collector()
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")

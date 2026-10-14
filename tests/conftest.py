@@ -72,6 +72,44 @@ def no_real_telegram():
     mp.undo()
 
 
+@pytest.fixture
+def otel_exporter():
+    """Глобальный TracerProvider с in-memory экспортом; после теста — сброс (как в тестах OTel).
+
+    Модульный ``_TRACER = trace.get_tracer(...)`` навсегда привязан к провайдеру:
+    ``ProxyTracer`` — к первому выставленному, а модуль, импортированный при уже
+    выставленном, получает SDK-tracer именно этого провайдера. Без сброса span'ы
+    второго теста того же модуля уходят в провайдер первого.
+    """
+    import sys
+
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.util._once import Once
+
+    from backend.tracing import build_sampler
+
+    def reset() -> None:
+        trace._TRACER_PROVIDER_SET_ONCE = Once()
+        trace._TRACER_PROVIDER = None
+        for name, module in list(sys.modules.items()):
+            if name.startswith(("backend.", "tg_jobs_parser.")) and isinstance(
+                getattr(module, "_TRACER", None), trace.Tracer
+            ):
+                module._TRACER = trace.ProxyTracer(name)
+
+    exp = InMemorySpanExporter()
+    provider = TracerProvider(sampler=build_sampler(1.0))
+    provider.add_span_processor(SimpleSpanProcessor(exp))
+    reset()
+    trace.set_tracer_provider(provider)
+    yield exp
+    provider.shutdown()
+    reset()
+
+
 def metrics_text() -> str:
     """Тело scrape /metrics backend'а (тот же REGISTRY, что отдаёт сервер на API_METRICS_PORT)."""
     from prometheus_client import REGISTRY, generate_latest

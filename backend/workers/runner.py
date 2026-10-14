@@ -48,8 +48,7 @@ def run_rq_worker(
 
     # Без fork (SimpleWorker): метрики в том же процессе, что и порт метрик; меньше пик RAM
     # (Worker fork'ает work horse на каждую джобу — COW-копия + счётчики теряются).
-    # DB COUNT-collector только на backend; db_pool_* — и здесь (свой QueuePool).
-    os.environ["TG_JOBS_METRICS_ROLE"] = "worker"
+    # db_* (COUNT по таблицам) отдаёт только backend; db_pool_* — и здесь (свой QueuePool).
 
     try:
         from prometheus_client import start_http_server
