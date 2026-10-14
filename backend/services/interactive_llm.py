@@ -27,6 +27,7 @@ def _fingerprint(ai: AiConfig) -> tuple:
         ai.max_retries_on_error,
         ai.retry_base_delay_seconds,
         ai.stop_llm_when_rate_limited,
+        ai.interactive_daily_request_budget,
         ai.request_timeout_seconds,
         ai.resolved_match_model(),
         ai.resolved_cover_letter_model(),
@@ -47,6 +48,8 @@ def get_interactive_client() -> OpenRouterClient:
                 max_retries_on_429=cfg.ai.max_retries_on_429,
                 retry_base_delay_seconds=cfg.ai.retry_base_delay_seconds,
                 stop_llm_when_rate_limited=cfg.ai.stop_llm_when_rate_limited,
+                # Бюджет — только пользовательскому LLM; парсинг (админ) им не ограничен.
+                daily_request_budget=cfg.ai.interactive_daily_request_budget,
             )
             _client = OpenRouterClient(cfg.ai, rate_limiter=limiter, catalog=cfg.llm_model_catalog)
             _ai_fingerprint = fp

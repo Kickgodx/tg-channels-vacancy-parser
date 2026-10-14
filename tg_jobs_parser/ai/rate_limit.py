@@ -6,7 +6,8 @@ import random
 import re
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as dt_time
 from typing import Protocol
 
 from tg_jobs_parser.utils.logger import get_logger
@@ -36,6 +37,37 @@ class GlobalRateGate(Protocol):
     def wait_seconds(self, key: str, per_minute: float) -> float:
         """Занять слот под запрос. 0 — можно идти сейчас, иначе через сколько секунд повторить."""
         ...
+
+    def take_daily(self, key: str, budget: int) -> bool:
+        """Списать запрос из суточного (UTC) бюджета ``budget``. False — бюджет на сегодня исчерпан."""
+        ...
+
+
+class _LocalDailyBudget:
+    """Суточный бюджет внутри процесса — когда общего хранилища нет или оно недоступно."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._day: date | None = None
+        self._used = 0
+
+    def take(self, budget: int) -> bool:
+        today = datetime.now(UTC).date()
+        with self._lock:
+            if self._day != today:
+                self._day, self._used = today, 0
+            if self._used >= budget:
+                return False
+            self._used += 1
+            return True
+
+
+_local_daily_budget = _LocalDailyBudget()
+
+
+def _next_utc_midnight_ms() -> int:
+    tomorrow = datetime.now(UTC).date() + timedelta(days=1)
+    return int(datetime.combine(tomorrow, dt_time.min, tzinfo=UTC).timestamp() * 1000)
 
 
 _global_gate: GlobalRateGate | None = None
@@ -103,8 +135,10 @@ class OpenRouterRateLimiter:
         max_retries_on_429: int,
         retry_base_delay_seconds: float,
         stop_llm_when_rate_limited: bool = True,
+        daily_request_budget: int = 0,  # 0 — без суточного бюджета (парсинг)
     ) -> None:
         self._rpm = max(0.1, requests_per_minute)
+        self._daily_budget = max(0, daily_request_budget)
         self._min_interval = 60.0 / self._rpm
         self._max_retries = max(0, max_retries_on_429)
         self._base_delay = max(0.5, retry_base_delay_seconds)
@@ -170,7 +204,44 @@ class OpenRouterRateLimiter:
             self.disable_llm_for_run("дневной лимит API", reset_epoch_ms=reset_ms)
             raise LlmQuotaExhausted(self.llm_disabled_reason or "daily limit") from error
 
+    def _reenable_if_reset_passed(self) -> None:
+        """Лимит со временем сброса (дневная квота, суточный бюджет) после него снова пускает в LLM.
+
+        Без этого долгоживущий лимитер (интерактивный клиент API) оставался бы выключенным
+        до рестарта процесса.
+        """
+        until = self.llm_disabled_until_epoch
+        if not self.llm_disabled or until is None or time.time() < until:
+            return
+        with self._lock:
+            self.llm_disabled = False
+            self.llm_disabled_until_epoch = None
+        _LOG.info("OpenRouter: время сброса лимита прошло — LLM снова включён.")
+
+    def _take_daily_budget(self) -> None:
+        if self._daily_budget <= 0:
+            return
+        allowed: bool | None = None
+        gate = _global_gate
+        if gate is not None:
+            try:
+                allowed = gate.take_daily(_GLOBAL_RATE_KEY, self._daily_budget)
+            except Exception as e:
+                if not self._global_gate_failed:
+                    self._global_gate_failed = True
+                    _LOG.warning("Общий суточный бюджет LLM недоступен (%s) — считаем в процессе.", e)
+        if allowed is None:
+            allowed = _local_daily_budget.take(self._daily_budget)
+        if allowed:
+            return
+        self.disable_llm_for_run(
+            f"суточный бюджет запросов исчерпан ({self._daily_budget} в сутки)",
+            reset_epoch_ms=_next_utc_midnight_ms(),
+        )
+        raise LlmQuotaExhausted(self.llm_disabled_reason or "daily budget")
+
     def acquire(self) -> None:
+        self._reenable_if_reset_passed()
         if self.llm_disabled:
             raise LlmQuotaExhausted(self.llm_disabled_reason or "LLM отключён (rate limit)")
         with self._lock:
@@ -181,6 +252,7 @@ class OpenRouterRateLimiter:
                 self.total_waits_seconds += delay
             self._last_request_at = time.monotonic()
         self._acquire_global_slot()
+        self._take_daily_budget()
 
     def _acquire_global_slot(self) -> None:
         """Слот общего лимита (если backend его зарегистрировал). Сбой хранилища — не блокирует запрос."""

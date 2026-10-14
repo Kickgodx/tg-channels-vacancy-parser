@@ -106,6 +106,111 @@ def test_no_gate_without_redis(monkeypatch):
         get_settings.cache_clear()
 
 
+# --- суточный бюджет запросов к провайдеру ---
+
+
+def test_redis_gate_daily_budget_per_utc_day(monkeypatch):
+    server = fakeredis.FakeStrictRedis()
+    a, b = RedisWindowRateGate(lambda: server), RedisWindowRateGate(lambda: server)
+    clock = [86_400.0 * 100 + 10]
+    monkeypatch.setattr(llm_rate_gate.time, "time", lambda: clock[0])
+
+    assert [a.take_daily("k", 2), b.take_daily("k", 2), a.take_daily("k", 2)] == [True, True, False]
+    clock[0] += 86_400  # следующие UTC-сутки — новый счётчик
+    assert b.take_daily("k", 2) is True
+
+
+@pytest.fixture
+def budget_limiter(monkeypatch):
+    monkeypatch.setattr(rate_limit.time, "sleep", lambda s: None)
+    monkeypatch.setattr(rate_limit, "_local_daily_budget", rate_limit._LocalDailyBudget())
+    lim = OpenRouterRateLimiter(
+        requests_per_minute=600, max_retries_on_429=0, retry_base_delay_seconds=1, daily_request_budget=2
+    )
+    yield lim
+    register_global_rate_gate(None)
+
+
+def test_daily_budget_disables_llm_until_utc_midnight(budget_limiter):
+    lim = budget_limiter
+    lim.acquire()
+    lim.acquire()
+    with pytest.raises(LlmQuotaExhausted, match="суточный бюджет"):
+        lim.acquire()
+    assert lim.llm_disabled
+    assert lim.llm_disabled_until_epoch == rate_limit._next_utc_midnight_ms() / 1000
+
+    # Полночь прошла — долгоживущий лимитер (интерактивный клиент) снова пускает в LLM.
+    lim.llm_disabled_until_epoch = rate_limit.time.time() - 1
+    rate_limit._local_daily_budget = rate_limit._LocalDailyBudget()
+    lim.acquire()
+    assert not lim.llm_disabled
+
+
+def test_daily_budget_is_shared_through_gate(budget_limiter):
+    class _BudgetGate:
+        def __init__(self):
+            self.taken = 0
+
+        def wait_seconds(self, key, per_minute):
+            return 0.0
+
+        def take_daily(self, key, budget):
+            self.taken += 1
+            return self.taken <= 1  # остальное съели другие процессы
+
+    gate = _BudgetGate()
+    register_global_rate_gate(gate)
+    budget_limiter.acquire()
+    with pytest.raises(LlmQuotaExhausted):
+        budget_limiter.acquire()
+    assert gate.taken == 2
+
+
+def test_daily_budget_counts_locally_when_gate_fails(budget_limiter):
+    class _BrokenGate:
+        def wait_seconds(self, key, per_minute):
+            return 0.0
+
+        def take_daily(self, key, budget):
+            raise ConnectionError("redis down")
+
+    register_global_rate_gate(_BrokenGate())
+    budget_limiter.acquire()
+    budget_limiter.acquire()
+    with pytest.raises(LlmQuotaExhausted):
+        budget_limiter.acquire()
+
+
+def test_no_budget_by_default(limiter):
+    lim, _ = limiter
+    for _ in range(5):
+        lim.acquire()
+    assert not lim.llm_disabled
+
+
+def test_budget_applies_to_interactive_llm_only(monkeypatch, default_test_config):
+    """Мэтчинг и письма — под бюджетом; парсинг (только админ) — без него."""
+    from backend.services import interactive_llm
+    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
+    from tg_jobs_parser.config.loader import load_config
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    cfg = load_config(default_test_config)
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"interactive_daily_request_budget": 3})})
+    monkeypatch.setattr(interactive_llm, "load_config", lambda *a, **k: cfg)
+    interactive_llm.reset_interactive_client()
+    try:
+        assert interactive_llm.get_interactive_client().rate_limiter._daily_budget == 3
+    finally:
+        interactive_llm.reset_interactive_client()
+    parse_client = OpenRouterClient(cfg.ai)
+    try:
+        assert parse_client.rate_limiter._daily_budget == 0
+    finally:
+        parse_client.close()
+
+
 # --- суточная квота ---
 
 
