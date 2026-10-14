@@ -82,11 +82,6 @@ def load_config(path: str | Path) -> AppConfig:
     return cfg.model_copy(deep=True)
 
 
-def clear_config_cache() -> None:
-    with _cache_lock:
-        _cache.clear()
-
-
 def _load_config_uncached(path: Path) -> tuple[AppConfig, str | None]:
     """Разбор и валидация; второй элемент — ``ai.llm_models_path`` из YAML (для ключа кэша)."""
     try:

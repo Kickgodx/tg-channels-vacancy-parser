@@ -9,7 +9,7 @@ from tg_jobs_parser.extraction.normalizer import normalize_for_match
 from tg_jobs_parser.models.vacancy import Vacancy
 
 
-def matches_specialization_filter(v: Vacancy, selected: list[str], spec_map: dict[str, list[str]]) -> bool:
+def matches_specialization_filter(v: Vacancy, selected: list[str]) -> bool:
     """Если ``selected`` пуст — разрешаем все специализации из словаря."""
     if not selected:
         return True
@@ -84,7 +84,6 @@ def matches_location_policy(
 def apply_post_filters(
     v: Vacancy,
     config: AppConfig,
-    spec_map: dict[str, list[str]],
     *,
     exclude_keywords: list[str] | None = None,
 ) -> bool:
@@ -98,7 +97,7 @@ def apply_post_filters(
         return False
     if v.vacancy_substantive_score < config.parser.vacancy_min_substantive_score:
         return False
-    if not matches_specialization_filter(v, config.filters.specializations, spec_map):
+    if not matches_specialization_filter(v, config.filters.specializations):
         return False
     excl = exclude_keywords if exclude_keywords is not None else config.merged_exclude_keywords()
     if not matches_exclude_keywords(v, excl):

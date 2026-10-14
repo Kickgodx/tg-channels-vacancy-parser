@@ -55,7 +55,7 @@ def test_cache_put_get_roundtrip(db_session):
         ttl_days=0,
     )
     db_session.commit()
-    got = cache_get(db_session, cache_key=key, ttl_days=0)
+    got = cache_get(db_session, cache_key=key)
     assert got is not None
     assert got.detected_specializations == ["Python"]
     assert cache_count(db_session) == 1
@@ -79,7 +79,7 @@ def test_cache_ttl_expires(db_session):
     assert row is not None
     row.expires_at = datetime.now(UTC) - timedelta(seconds=1)
     db_session.commit()
-    assert cache_get(db_session, cache_key=key, ttl_days=1) is None
+    assert cache_get(db_session, cache_key=key) is None
     assert cache_count(db_session) == 0
 
 

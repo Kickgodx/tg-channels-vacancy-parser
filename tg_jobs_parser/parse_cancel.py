@@ -90,7 +90,7 @@ def install_sigint_cancel_handler(
     if threading.current_thread() is not threading.main_thread():
         return
 
-    def _handler(signum: int, frame: object | None) -> None:
+    def _handler(_signum: int, _frame: object | None) -> None:
         if token.is_cancelled():
             raise KeyboardInterrupt
         token.request_cancel()

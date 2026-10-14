@@ -171,31 +171,3 @@ def abandon(
         row = idem_repo.get_idempotency(session, key=nk, scope=scope, actor=actor)
         if row is not None and row.status_code == PENDING_STATUS:
             idem_repo.delete_idempotency(session, key=nk, scope=scope, actor=actor)
-
-
-def lookup(
-    *,
-    key: str | None,
-    scope: str,
-    actor: str,
-) -> CachedIdempotentResponse | None:
-    """Устаревший API: только готовый кэш (не pending). Предпочтительно ``begin``."""
-    nk = normalize_key(key)
-    if nk is None:
-        return None
-    with session_scope() as session:
-        row = idem_repo.get_idempotency(session, key=nk, scope=scope, actor=actor)
-        if row is None or row.status_code == PENDING_STATUS:
-            return None
-        return CachedIdempotentResponse(status_code=row.status_code, body=_public_body(row.body))
-
-
-def store(
-    *,
-    key: str | None,
-    scope: str,
-    actor: str,
-    status_code: int,
-    body: dict[str, Any],
-) -> None:
-    complete(key=key, scope=scope, actor=actor, status_code=status_code, body=body)

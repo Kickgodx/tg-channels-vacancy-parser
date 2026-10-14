@@ -34,7 +34,7 @@ class DbAIExtractionCache:
         key = make_cache_key(text=text, model=model, prompt_version=prompt_version, mode=mode)
         try:
             with session_scope() as session:
-                return cache_get(session, cache_key=key, ttl_days=self._ttl_days)
+                return cache_get(session, cache_key=key)
         except Exception as e:
             _LOG.warning("Кэш LLM (read) недоступен, пропуск: %s", e)
             return None

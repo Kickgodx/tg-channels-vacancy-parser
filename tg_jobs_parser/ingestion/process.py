@@ -22,7 +22,6 @@ def apply_ingest_stages(
     *,
     policy: IngestPolicy,
     ai_service: AIEnrichmentService | None = None,
-    spec_map: dict[str, list[str]] | None = None,
     exclude_keywords: list[str] | None = None,
     cancel: ParseCancellationToken | None = None,
 ) -> Vacancy | None:
@@ -38,11 +37,8 @@ def apply_ingest_stages(
         if v.vacancy_score < policy.score_threshold_without_ai:
             return None
 
-    if policy.apply_post_filters:
-        if spec_map is None:
-            spec_map = config.merged_specializations()
-        if not apply_post_filters(v, config, spec_map, exclude_keywords=exclude_keywords):
-            return None
+    if policy.apply_post_filters and not apply_post_filters(v, config, exclude_keywords=exclude_keywords):
+        return None
     return v
 
 
@@ -73,7 +69,6 @@ def process_raw_post(
         config,
         policy=policy,
         ai_service=ai_service,
-        spec_map=spec_map,
         exclude_keywords=exclude_keywords,
         cancel=cancel,
     )

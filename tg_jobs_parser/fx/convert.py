@@ -114,15 +114,6 @@ def monthly_salary_amount(
     return to_monthly_salary_amount(amount, currency)
 
 
-def rate_date_for_vacancy(post_date: datetime | None) -> date:
-    """Календарный день поста (для архива/отладки; не для отображения зарплаты)."""
-    if post_date is None:
-        return datetime.now(UTC).date()
-    if getattr(post_date, "tzinfo", None):
-        return post_date.astimezone(UTC).date()
-    return post_date.date()
-
-
 def rate_date_for_live_display() -> date:
     """Дата курса для отображения вакансий: сегодня (последний снимок ЦБ в кэше)."""
     return datetime.now(UTC).date()

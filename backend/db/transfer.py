@@ -43,10 +43,6 @@ class DumpStats:
     vacancies: int = 0
     ai_extraction_cache: int = 0
 
-    @property
-    def total_rows(self) -> int:
-        return self.parse_runs + self.exchange_rates + self.vacancies + self.ai_extraction_cache
-
 
 @dataclass(frozen=True)
 class ImportStats:
@@ -54,10 +50,6 @@ class ImportStats:
     exchange_rates: int = 0
     vacancies: int = 0
     ai_extraction_cache: int = 0
-
-    @property
-    def total_rows(self) -> int:
-        return self.parse_runs + self.exchange_rates + self.vacancies + self.ai_extraction_cache
 
 
 def _serialize_value(value: Any) -> Any:

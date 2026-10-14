@@ -100,10 +100,9 @@ def create_resume(
     *,
     name: str,
     text: str,
-    skills: list | None = None,
     user_id: int | None = None,
 ) -> ResumeRow:
-    row = ResumeRow(name=name, text=text, skills_json=skills, user_id=user_id)
+    row = ResumeRow(name=name, text=text, user_id=user_id)
     session.add(row)
     session.flush()
     return row

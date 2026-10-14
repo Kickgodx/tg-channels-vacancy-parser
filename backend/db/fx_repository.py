@@ -14,7 +14,6 @@ from backend.db.models import ExchangeRateRow
 from backend.observability import record_fx_fetch
 from tg_jobs_parser.config.schema import FxConfig
 from tg_jobs_parser.fx.cbr import fetch_cbr_rates
-from tg_jobs_parser.fx.convert import currency_for_rate_lookup, is_ruble_currency
 
 _LOG = logging.getLogger(__name__)
 
@@ -24,43 +23,6 @@ def get_rates(session: Session, rate_date: date) -> dict[str, float]:
     if not rows:
         return {}
     return {r.currency: float(r.rate_to_rub) for r in rows}
-
-
-def get_rate_to_rub(
-    session: Session,
-    currency: str,
-    rate_date: date,
-    *,
-    config: FxConfig | None = None,
-) -> float | None:
-    """
-    Курс валюты к рублю на дату; если на день нет — последний известный курс на эту дату или раньше.
-    """
-    cur = str(currency).upper().strip()
-    if is_ruble_currency(cur):
-        return 1.0
-    lookup = currency_for_rate_lookup(cur) or cur
-    rates = get_rates(session, rate_date)
-    if lookup in rates:
-        return rates[lookup]
-    row = session.scalar(
-        select(ExchangeRateRow.rate_to_rub)
-        .where(
-            ExchangeRateRow.currency == lookup,
-            ExchangeRateRow.rate_date <= rate_date,
-        )
-        .order_by(ExchangeRateRow.rate_date.desc())
-        .limit(1)
-    )
-    if row is not None:
-        return float(row)
-    if config is None or not config.enabled:
-        return None
-    ensure_rates(session, rate_date, config)
-    rates = get_rates(session, rate_date)
-    if lookup in rates:
-        return rates[lookup]
-    return None
 
 
 def upsert_rates(
@@ -125,16 +87,6 @@ def ensure_rates(
         record_fx_fetch("failed")
         _LOG.warning("ЦБ: курс на %s не загружен: %s", rate_date, e)
         return {}
-
-
-def ensure_rates_for_dates(session: Session, dates: set[date], config: FxConfig) -> None:
-    """Догружает в БД только отсутствующие даты (по одному HTTP-запросу на дату)."""
-    missing = [d for d in dates if not get_rates(session, d)]
-    if not missing:
-        return
-    _LOG.info("ЦБ: загрузка курсов для %s дат (из %s уникальных)…", len(missing), len(dates))
-    for d in sorted(missing):
-        ensure_rates(session, d, config)
 
 
 def get_latest_rate_date(session: Session) -> date | None:

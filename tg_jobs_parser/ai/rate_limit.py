@@ -152,10 +152,6 @@ class OpenRouterRateLimiter:
         self.rate_limit_retries: int = 0
         self._global_gate_failed = False
 
-    @property
-    def daily_limit_exceeded(self) -> bool:
-        return self.llm_disabled
-
     def disable_llm_for_run(
         self,
         reason: str,

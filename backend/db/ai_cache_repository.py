@@ -32,8 +32,8 @@ def cache_get(
     session: Session,
     *,
     cache_key: str,
-    ttl_days: int,
 ) -> VacancyAIExtraction | None:
+    """Срок жизни проверяется по ``expires_at``, выставленному в ``cache_put``."""
     row = session.get(AIExtractionCacheRow, cache_key)
     if row is None:
         return None

@@ -16,7 +16,6 @@ from tg_jobs_parser.hh.models import (
     VacancyDetail,
     VacancySearchParams,
     VacancySearchResponse,
-    VacancyShort,
 )
 
 _RESPONSE_BODY_LOG_LIMIT = 2000
@@ -197,31 +196,6 @@ class HHClient:
             if (page + 1) * per_page >= HH_VACANCIES_DEPTH_LIMIT:
                 break
             page += 1
-
-    def iter_vacancies(
-        self,
-        params: VacancySearchParams | None = None,
-        /,
-        *,
-        max_items: int | None = None,
-        **overrides: Any,
-    ) -> Iterator[VacancyShort]:
-        limit = HH_VACANCIES_DEPTH_LIMIT if max_items is None else min(max_items, HH_VACANCIES_DEPTH_LIMIT)
-        if limit <= 0:
-            return
-        yielded = 0
-        for index, page_result in enumerate(self.iter_vacancy_pages(params, **overrides)):
-            if index == 0:
-                _LOG.info(
-                    "HH search found=%s, fetching up to %s",
-                    page_result.found,
-                    min(limit, page_result.found),
-                )
-            for item in page_result.items:
-                yield item
-                yielded += 1
-                if yielded >= limit:
-                    return
 
     def get_vacancy(self, vacancy_id: str) -> VacancyDetail:
         payload = self.request("GET", f"/vacancies/{vacancy_id}")

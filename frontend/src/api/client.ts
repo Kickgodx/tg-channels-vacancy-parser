@@ -608,8 +608,6 @@ export const api = {
   getVacancyMatch: (resumeId: number, vacancyId: string) =>
     request<VacancyMatch>(`/resumes/${resumeId}/match/${vacancyId}`),
 
-  getLlmJob: (jobId: string) => request<LlmJob>(`/llm-jobs/${jobId}`),
-
   /** Письмо: кэш → сразу; иначе 202 job + poll. */
   generateCoverLetter: (
     resumeId: number,
@@ -625,17 +623,6 @@ export const api = {
 
   getCoverLetter: (resumeId: number, vacancyId: string) =>
     request<CoverLetter>(`/resumes/${resumeId}/cover-letter/${vacancyId}`),
-
-  deleteCoverLetter: async (resumeId: number, vacancyId: string) => {
-    const res = await fetch(
-      `${API_BASE}/resumes/${resumeId}/cover-letter/${vacancyId}`,
-      { method: "DELETE", headers: authHeaders() },
-    );
-    if (res.status === 401)
-      handleUnauthorized(`/resumes/${resumeId}/cover-letter/${vacancyId}`);
-    if (!res.ok && res.status !== 404)
-      throw new Error(`Удаление письма: ${res.status} ${res.statusText}`);
-  },
 
   subscribeRunEvents(
     runId: string,
