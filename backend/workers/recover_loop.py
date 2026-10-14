@@ -9,6 +9,18 @@ from collections.abc import Callable
 _LOG = logging.getLogger(__name__)
 
 
+def rq_job_still_live(rq_job_id: str, connection) -> bool:
+    """True, если RQ-задача ещё есть и не в finished/failed."""
+    from rq.exceptions import NoSuchJobError
+    from rq.job import Job
+
+    try:
+        job = Job.fetch(rq_job_id, connection=connection)
+    except NoSuchJobError:
+        return False
+    return not (job.is_finished or job.is_failed)
+
+
 def start_periodic_recover(
     recover_fn: Callable[[], int],
     *,

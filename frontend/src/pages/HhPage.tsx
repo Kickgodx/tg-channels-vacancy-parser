@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { api } from "../api/client";
-import type { HhSyncResult, HhSyncWindow } from "../types/api";
+import type { HhSyncJob, HhSyncProgress, HhSyncWindow } from "../types/api";
 
 const WINDOW_OPTIONS: { value: HhSyncWindow; label: string }[] = [
   { value: "all", label: "Все" },
@@ -11,6 +11,23 @@ const WINDOW_OPTIONS: { value: HhSyncWindow; label: string }[] = [
   { value: "30d", label: "30 дней" },
   { value: "range", label: "Диапазон" },
 ];
+
+const STATUS_LABEL: Record<HhSyncJob["status"], string> = {
+  queued: "в очереди",
+  running: "выполняется",
+  completed: "завершён",
+  failed: "ошибка",
+};
+
+const PHASE_LABEL: Record<HhSyncProgress["phase"], string> = {
+  search: "поиск",
+  details: "детали вакансий",
+  purge: "очистка кэша",
+};
+
+function isActive(job: HhSyncJob | null | undefined): boolean {
+  return job?.status === "queued" || job?.status === "running";
+}
 
 export default function HhPage() {
   const queryClient = useQueryClient();
@@ -24,18 +41,45 @@ export default function HhPage() {
     queryFn: () => api.hhStatus(),
     enabled: Boolean(meQ.data?.is_admin),
   });
+  // Последний sync: после перезагрузки страницы видно идущий или итог прошлого.
+  const lastJobQ = useQuery({
+    queryKey: ["hh-sync-jobs"],
+    queryFn: () => api.hhSyncJobs(1),
+    enabled: Boolean(meQ.data?.is_admin),
+  });
+
+  const [liveJob, setLiveJob] = useState<HhSyncJob | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const job = liveJob ?? lastJobQ.data?.[0] ?? null;
+  const activeJobId = isActive(job) ? job!.id : null;
+
+  useEffect(() => {
+    if (!activeJobId) return;
+    return api.subscribeHhSyncJob(
+      activeJobId,
+      (update) => {
+        setStreamError(null);
+        setLiveJob(update);
+        if (!isActive(update)) {
+          void queryClient.invalidateQueries({ queryKey: ["hh-status"] });
+          void queryClient.invalidateQueries({ queryKey: ["hh-sync-jobs"] });
+          void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
+        }
+      },
+      (err) => setStreamError(err.message),
+    );
+  }, [activeJobId, queryClient]);
 
   const syncM = useMutation({
-    mutationFn: () =>
-      api.hhSync(
+    mutationFn: async () => {
+      const accepted = await api.hhSync(
         syncWindow === "range"
           ? { window: syncWindow, date_from: dateFrom, date_to: dateTo }
           : { window: syncWindow },
-      ),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["hh-status"] });
-      void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
+      );
+      return api.hhSyncJob(accepted.job_id);
     },
+    onSuccess: (created) => setLiveJob(created),
   });
 
   if (meQ.isLoading) {
@@ -46,12 +90,14 @@ export default function HhPage() {
   }
 
   const status = statusQ.data;
-  const result: HhSyncResult | undefined = syncM.data;
+  const result = job?.result ?? null;
+  const progress = isActive(job) ? (job?.progress ?? null) : null;
   const rangeInvalid =
     syncWindow === "range" && (!dateFrom || !dateTo || dateFrom > dateTo);
   const canRun =
     Boolean(status?.enabled && status.token_configured && status.email_configured) &&
     !syncM.isPending &&
+    !isActive(job) &&
     !rangeInvalid;
 
   return (
@@ -149,9 +195,11 @@ export default function HhPage() {
           disabled={!canRun}
           onClick={() => syncM.mutate()}
         >
-          {syncM.isPending ? "Синхронизация…" : "Запустить sync"}
+          {isActive(job) ? "Синхронизация…" : "Запустить sync"}
         </button>
-        {syncM.isPending && <span className="muted">Идёт запрос к HH API, подождите…</span>}
+        {isActive(job) && (
+          <span className="muted">Идёт в фоне — страницу можно закрыть, итог сохранится.</span>
+        )}
       </div>
 
       {syncM.isError && (
@@ -159,10 +207,36 @@ export default function HhPage() {
           {(syncM.error as Error).message}
         </p>
       )}
+      {streamError && isActive(job) && (
+        <p className="error" style={{ marginTop: "1rem" }}>
+          Статус sync не обновляется: {streamError}
+        </p>
+      )}
 
-      {result && (
+      {job && (
         <div style={{ marginTop: "1.25rem" }}>
-          <h3>Итог</h3>
+          <p>
+            Последний sync: <strong>{STATUS_LABEL[job.status]}</strong>
+            {job.created_at ? ` · запущен ${new Date(job.created_at).toLocaleString()}` : ""}
+            {job.attempts > 1 ? ` · попытка ${job.attempts}` : ""}
+          </p>
+          {progress && (
+            <p className="muted">
+              Этап: {PHASE_LABEL[progress.phase] ?? progress.phase}
+              {progress.phase === "details" && progress.total > 0
+                ? ` — ${progress.done} / ${progress.total}`
+                : ""}
+              {" · "}найдено {progress.searched}, уникальных {progress.unique}, detail{" "}
+              {progress.details_fetched}, в БД +{progress.vacancies_inserted}
+            </p>
+          )}
+          {job.error_message && <p className="error">{job.error_message}</p>}
+        </div>
+      )}
+
+      {result && !isActive(job) && (
+        <div style={{ marginTop: "1.25rem" }}>
+          <h3>{job?.status === "failed" ? "Итог до сбоя" : "Итог"}</h3>
           <ul className="plain-list">
             <li>
               Окно: {result.window}

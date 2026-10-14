@@ -2,7 +2,7 @@
 
 Локальное **Windows-first** приложение для парсинга Telegram-каналов с IT-вакансиями: **Telethon** (ваш аккаунт, MTProto), правиловое извлечение полей, опциональный **AI** (OpenRouter), фильтры, дедуп, метрики, экспорт **Excel/JSON**. Дополнительно — admin-sync вакансий с **HH.ru**, матчинг резюме и сопроводительные письма (фоновые LLM-джобы).
 
-**Основной способ работы** — веб-интерфейс на **React** + **FastAPI** backend + **PostgreSQL** + **Redis** / `parse-worker` + `llm-worker` (Docker Compose). Парсинг ставится в очередь RQ, прогресс пишется в БД (SSE + poll), вакансии сохраняются в PostgreSQL.
+**Основной способ работы** — веб-интерфейс на **React** + **FastAPI** backend + **PostgreSQL** + **Redis** / `parse-worker` + `llm-worker` + `hh-worker` (Docker Compose). Парсинг ставится в очередь RQ, прогресс пишется в БД (SSE + poll), вакансии сохраняются в PostgreSQL.
 
 Дополнительно — **CLI (Typer)** для первой авторизации Telethon, дампа/импорта БД и отладки без UI.
 
@@ -37,7 +37,7 @@ docker compose up --build
 | **PostgreSQL** | `127.0.0.1:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
 | **Redis** | `127.0.0.1:16379` → контейнер `:6379` (очереди RQ: parse + LLM) |
 
-В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `parse-worker` (тот же образ, команда `tg-jobs-parse-worker`) выполняет прогоны парсинга через RQ (очередь `parse`, concurrency=1, volume `sessions/` для Telethon); метрики — контейнерный `:9102` (на хост не публикуется). Сервис `llm-worker` (`tg-jobs-llm-worker`) обрабатывает матчинг и письма; метрики — `:9101` (тоже без host mapping, чтобы работал `--scale`).
+В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `parse-worker` (тот же образ, команда `tg-jobs-parse-worker`) выполняет прогоны парсинга через RQ (очередь `parse`, concurrency=1, volume `sessions/` для Telethon); метрики — контейнерный `:9102` (на хост не публикуется). Сервис `llm-worker` (`tg-jobs-llm-worker`) обрабатывает матчинг и письма; метрики — `:9101` (тоже без host mapping, чтобы работал `--scale`). Сервис `hh-worker` (`tg-jobs-hh-worker`, очередь `hh`) выполняет HH sync; метрики — `:9103`. Redis хранит очереди на томе `redis_data` с AOF (`appendonly yes`): рестарт контейнера их не теряет.
 
 Полный стек (Prometheus, Grafana, Loki, Alloy, Tempo) включается профилем
 `observability` через `COMPOSE_PROFILES=observability` в `.env` (уже есть в
@@ -338,14 +338,16 @@ uvicorn backend.main:app --reload --port 8000
 
 Прогон парсинга: API создаёт строку `parse_runs` со статусом `queued` и ставит RQ-джобу (в Docker — `PARSE_JOB_BACKEND=rq`). `parse-worker` claim'ит прогон → `running`, пишет `progress` в БД (+ Redis pub/sub для SSE). Рестарт backend не обрывает воркер: прогресс продолжает обновляться, cancel идёт через `cancel_requested` в БД. Локально без Redis: `PARSE_JOB_BACKEND=inprocess` (ThreadPool в процессе API).
 
-Самовосстановление джоб (parse и LLM устроены одинаково):
+Самовосстановление джоб (parse, LLM и HH sync устроены одинаково):
 
 - **Зависший `running`** (lease истёк — воркер упал или завис) recover-цикл возвращает в `queued` и запускает заново. В режиме `rq` цикл живёт в воркерах, в `inprocess` — в самом API: при старте он сразу поднимает `queued`, оставшиеся от прошлого процесса, а оборванный рестартом `running` — после истечения lease (до ~3 минут при настройках по умолчанию).
-- **Лимит попыток.** Каждый claim увеличивает `attempts`; прогон, который воркер не довёл до конца `PARSE_JOB_MAX_ATTEMPTS` раз (по умолчанию 3; для LLM-джоб — `LLM_JOB_MAX_ATTEMPTS`, 2), завершается `failed` / `error` с пояснением, а не уходит на очередной круг.
-- **Неполный прогон.** Если в `ai.mode: primary` LLM отключился по лимиту, оставшиеся посты не разбираются. Такой прогон получает статус `failed` с причиной в `error_message`; уже разобранные вакансии сохранены, а неразобранные посты не кэшируются — повторный прогон после сброса лимита обработает их.
+- **Лимит попыток.** Каждый claim увеличивает `attempts`; прогон, который воркер не довёл до конца `PARSE_JOB_MAX_ATTEMPTS` раз (по умолчанию 3; для LLM-джоб — `LLM_JOB_MAX_ATTEMPTS`, 2; для HH sync — `HH_SYNC_JOB_MAX_ATTEMPTS`, 2), завершается `failed` / `error` с пояснением, а не уходит на очередной круг.
+- **Отказ LLM при парсинге.** Транзиентные сбои (5xx, таймаут) повторяются с backoff; после `ai.circuit_breaker_errors` (5) постов подряд с ошибкой срабатывает circuit breaker — LLM отключается до конца прогона, как при исчерпанной квоте, и остальные посты не ждут повторов. 429 определяется по HTTP-статусу ответа.
+- **Неполный прогон — `partial`.** Если в `ai.mode: primary` LLM отключился (лимит или circuit breaker) или доля ошибок LLM выше `ai.max_error_ratio` (10%), часть постов не разобрана. Такой прогон получает статус `partial` с причиной в `error_message`; уже разобранные вакансии сохранены, чекпоинты каналов не двигаются, неразобранные посты не кэшируются — повторный прогон обработает их.
 - **Docker Compose:** у сервисов приложения `restart: unless-stopped` и healthcheck; воркеры стартуют после того, как backend стал healthy (то есть применил миграции).
+- **Liveness воркеров.** Healthcheck воркера проверяет не ответ порта, а возраст heartbeat в `/metrics` (`worker_heartbeat_timestamp_seconds`): его обновляют цикл RQ (в простое раз в 45 с) и продление lease выполняемой джобы. Старше `WORKER_HEARTBEAT_MAX_AGE_SECONDS` (180 с) — `unhealthy`. Docker unhealthy-контейнер сам не перезапускает, поэтому воркер, чей heartbeat молчит дольше `WORKER_STALL_EXIT_SECONDS` (900 с), завершается сам, restart policy поднимает его, а recover возвращает джобу в очередь.
 
-SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`): один подписчик `redis.asyncio` на процесс API раздаёт события всем стримам — соединения не занимают потоки, а БД читается вне event loop. Каждые 15 с тишины стрим шлёт комментарий `: ping` (прокси не рвут соединение по idle-timeout), раз в 5 с сверяет статус с БД на случай пропущенного `done`. Без Redis или при его сбое стрим переходит на опрос БД и живёт до терминального статуса.
+SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`): один подписчик `redis.asyncio` на процесс API раздаёт события всем стримам — соединения не занимают потоки, а БД читается вне event loop. Каждые 15 с тишины стрим шлёт комментарий `: ping` (прокси не рвут соединение по idle-timeout), раз в 5 с сверяет статус с БД на случай пропущенного `done`. Без Redis или при его сбое стрим переходит на опрос БД и живёт до терминального статуса.
 
 Инкрементальная вычитка каналов:
 
@@ -379,7 +381,9 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`): один подписчик 
 | `GET` | `/vacancies/{id}` | Полная вакансия (`raw_text` / `cleaned_text`) для карточки |
 | `POST` | `/vacancies/import` | Импорт вакансий из текста: `{texts, source_url?}` → rules + LLM → запись в БД |
 | `GET` | `/hh/status` | Статус HH sync (admin): токен задан?, TTL listings, счётчики кэша |
-| `POST` | `/hh/sync` | Синхронный sync HH (admin): поиск → dedup → detail только для новых → БД |
+| `POST` | `/hh/sync` | HH sync в фоне (admin): 202 `{job_id}`; 409, если sync уже идёт. Поиск → dedup → detail только для новых → БД |
+| `GET` | `/hh/sync-jobs` \| `/hh/sync-jobs/{id}` | Последние sync / один sync (admin): статус, прогресс, итог (у `failed` — частичный) |
+| `GET` | `/hh/sync-jobs/{id}/events` | SSE статуса HH sync (admin; Bearer или `?access_token=`) |
 | `GET` | `/vacancies/metrics` | Агрегаты для графиков по текущим фильтрам |
 | `GET` | `/vacancies/export.xlsx` | Excel всех вакансий в БД (те же фильтры, что у списка) |
 | `GET` | `/analytics/salaries` \| `/sources` \| `/companies` | Зарплатные квантили, качество каналов, топ компаний |
@@ -418,7 +422,11 @@ Query-параметры списка, метрик, аналитики и эк�
 без него текст сохраняется как есть.
 
 Вакансии с HH (`source_channel = "hh"`) появляются после admin-sync
-(`/hh` или `POST /hh/sync`): поля берутся из API без LLM, дедуп мультигорода
+(`/hh` или `POST /hh/sync`). Sync — фоновая durable-джоба (`hh_sync_jobs`,
+lease и recover как у прогонов; в Docker — `hh-worker`, без Redis —
+`HH_SYNC_JOB_BACKEND=inprocess`): до ~2000 detail-запросов при 3 rps идут
+10+ минут, внутри HTTP-запроса их обрывал бы прокси. Страница `/hh` показывает
+ход и итог последнего sync и после перезагрузки. Поля берутся из API без LLM, дедуп мультигорода
 как в MVP hhparser, TTL вакансий — общий `retention.vacancy_ttl_days`
 (soft-archive: строки остаются в БД для исторических метрик).
 Грейд HH мапится из `experience.id`: `noExperience`→`intern`,
@@ -435,14 +443,15 @@ Query-параметры списка, метрик, аналитики и эк�
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…020`, head —
-`020_llm_user_usage`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…022`, head —
+`022_hh_sync_jobs`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
 | `parse_runs` | Журнал прогонов: статус, метрики, снимок конфигурации |
 | `vacancies` | Уникальные вакансии (`id` = content-hash или `sha256(hh:{id})` для HH), `archived_at` — TTL |
 | `hh_listings` | Кэш короткой выдачи HH + `detail_fetched_at` (anti-DDOS detail) |
+| `hh_sync_jobs` | Фоновые HH sync: статус, lease, прогресс, итог |
 | `exchange_rates` | Курсы ЦБ по датам |
 | `ai_extraction_cache` | Кэш ответов LLM при парсинге |
 | `saved_filters` | Пресеты фильтров (`user_id`) |
@@ -470,7 +479,7 @@ tg_jobs_parser/
   pyproject.toml
   config.yaml
   llm_models.yaml
-  docker-compose.yml       — postgres, redis, backend, parse-worker, llm-worker,
+  docker-compose.yml       — postgres, redis, backend, parse-worker, llm-worker, hh-worker,
                              frontend; observability — profile `observability`
   Dockerfile.backend
 
@@ -480,10 +489,11 @@ tg_jobs_parser/
     db/                    — модели, Alembic, bounded repos (+ repository facade),
                              кэш LLM (DbAIExtractionCache), UPSERT
     services/              — run/match/cover_letter/llm_job/interactive_llm,
-                             llm_job_events, parse_run_events, auth, import, hh_sync
-    workers/               — parse_worker / llm_worker (RQ), parse/llm_tasks, recover
-    queue/                 — RQ Redis connection (очереди parse + default)
-  alembic/                 — миграции SQL (001…014)
+                             llm_job_events, parse_run_events, auth, import, hh_sync(_job)
+    workers/               — parse/llm/hh_worker (RQ, общий runner), *_tasks, recover*,
+                             liveness (heartbeat + watchdog), healthcheck
+    queue/                 — RQ Redis connection (очереди parse, llm, hh)
+  alembic/                 — миграции SQL (001…022)
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes
@@ -608,7 +618,9 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 | `fallback_models` | Запасные модели |
 | `concurrency`, `requests_per_minute` | Темп и параллелизм парсинга |
 | `interactive_concurrency`, `interactive_per_user_limit` | Пул и лимит на пользователя для фоновых мэтч/письмо (in-process; несколько реплик backend → нужна внешняя очередь) |
-| `stop_llm_when_rate_limited` | Отключить LLM при 429 до конца прогона. В `mode: primary` оставшиеся посты не разбираются, и прогон завершается `failed` (см. «Самовосстановление джоб») |
+| `stop_llm_when_rate_limited` | Отключить LLM при 429 до конца прогона. В `mode: primary` оставшиеся посты не разбираются, и прогон завершается `partial` (см. «Самовосстановление джоб») |
+| `circuit_breaker_errors` | Столько постов подряд с ошибкой LLM — и LLM отключается до конца прогона (по умолчанию 5, `0` — выключен) |
+| `max_error_ratio` | `mode: primary`: доля ошибок LLM, выше которой прогон — `partial` (по умолчанию 0.1) |
 | `max_retries_on_error` | Повторы при транзиентном сбое — 5xx, таймаут, обрыв соединения (по умолчанию 2, backoff 2/4/8… с; `0` — без повторов). Действует для парсинга, матчинга и писем |
 | `max_completion_tokens` | Лимит выходных токенов |
 | `use_cache` | Дисковый/Postgres кэш LLM |
@@ -706,7 +718,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 |-----------|------------|
 | **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
 | **`GET /metrics`** | Эндпоинт Prometheus на отдельном порту `API_METRICS_PORT` (`backend:9100`, только Docker-сеть; не путать с `/api/v1/vacancies/metrics`) |
-| **Prometheus** | Scrape backend, llm-worker и parse-worker каждые 15 с (`observability/prometheus.yml`) |
+| **Prometheus** | Scrape backend, llm-worker, parse-worker и hh-worker каждые 15 с (`observability/prometheus.yml`) |
 | **Grafana** | Дашборды **API**, **LLM**, **LLM jobs / queue**, **Pipeline**, **HH.ru sync**, **DB pool** |
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
 | **Доменные метрики** | прогоны, UPSERT/TTL, импорт, матчинг, письма, LLM-джобы (`llm_job_enqueue_*`, `llm_worker_*`, `llm_rq_queue_jobs`, `llm_jobs_by_status`, recover), parse recover (`parse_jobs_recover_total`), auth, ЦБ |

@@ -72,7 +72,7 @@ def test_completed_run_passes_and_saves_checkpoints(monkeypatch, run_id):
     assert _stored() == {"chan": CP_NEW}
 
 
-def test_failed_run_does_not_move_checkpoints(monkeypatch, run_id):
+def test_partial_run_does_not_move_checkpoints(monkeypatch, run_id):
     with session_scope() as session:
         save_channel_checkpoints(session, {"chan": CP_OLD})
     result = ParseResult(channel_checkpoints={"chan": CP_NEW}, incomplete_reason="LLM отключён")
@@ -81,7 +81,7 @@ def test_failed_run_does_not_move_checkpoints(monkeypatch, run_id):
     run_parse_job(str(run_id))
 
     with session_scope() as session:
-        assert pr.get_parse_run(session, run_id).status == "failed"
+        assert pr.get_parse_run(session, run_id).status == "partial"
     assert _stored() == {"chan": CP_OLD}
 
 

@@ -61,9 +61,10 @@ flowchart LR
 | frontend | 5173 | Web UI |
 | backend | 9000→8000; 9100 (только Docker-сеть) | API, парсинг, JWT, enqueue LLM jobs; `/metrics` — на :9100 |
 | llm-worker | 9101 (только Docker-сеть) | RQ `SimpleWorker`: мэтч/письма; `/metrics` без DB COUNT-collector, с `db_pool_*` |
-| redis | 6379 | Очередь RQ `llm` + pub/sub статуса SSE |
+| hh-worker | 9103 (только Docker-сеть) | RQ `SimpleWorker`: фоновый HH sync (очередь `hh`) |
+| redis | 6379 | Очереди RQ `llm` / `parse` / `hh` (AOF на томе `redis_data`) + pub/sub статуса SSE |
 | postgres | 5432 | Вакансии, runs, users, FX, cache, `llm_jobs` |
-| prometheus | 9090 | Scrape backend + llm-worker (`dns_sd`) |
+| prometheus | 9090 | Scrape backend + воркеры (`dns_sd`) |
 | grafana | 3000 | Дашборды / Explore (в т.ч. **DB pool**, **LLM jobs / queue**) |
 | alloy | 12345 | Логи Docker + OTLP → Loki/Tempo |
 | loki | 3100 | Логи |

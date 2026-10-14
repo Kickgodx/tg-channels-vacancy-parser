@@ -20,7 +20,7 @@ from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.parse_result import ParseResult
 
 _ACTIVE_PARSE_STATUSES = frozenset({"queued", "running"})
-_TERMINAL_PARSE_STATUSES = frozenset({"completed", "cancelled", "failed"})
+_TERMINAL_PARSE_STATUSES = frozenset({"completed", "partial", "cancelled", "failed"})
 
 
 def create_parse_run(session: Session, *, config_snapshot: dict, status: str = "queued") -> ParseRunRow:

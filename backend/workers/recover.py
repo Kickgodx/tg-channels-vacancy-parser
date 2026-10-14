@@ -12,21 +12,10 @@ from backend.db.session import session_scope
 from backend.observability import record_llm_job, record_llm_jobs_recover
 from backend.services.llm_job_events import publish_llm_job_event
 from backend.settings import get_settings
+from backend.workers.recover_loop import rq_job_still_live
 from tg_jobs_parser.config.loader import load_config
 
 _LOG = logging.getLogger(__name__)
-
-
-def _rq_job_still_live(rq_job_id: str, connection) -> bool:
-    """True, если RQ-задача ещё есть и не в finished/failed."""
-    from rq.exceptions import NoSuchJobError
-    from rq.job import Job
-
-    try:
-        job = Job.fetch(rq_job_id, connection=connection)
-    except NoSuchJobError:
-        return False
-    return not (job.is_finished or job.is_failed)
 
 
 def recover_stuck_llm_jobs(*, requeue_all_queued: bool = False) -> int:
@@ -121,7 +110,7 @@ def recover_stuck_llm_jobs(*, requeue_all_queued: bool = False) -> int:
 
             if backend == "rq":
                 assert redis_conn is not None
-                if rq_job_id and _rq_job_still_live(rq_job_id, redis_conn):
+                if rq_job_id and rq_job_still_live(rq_job_id, redis_conn):
                     _LOG.info(
                         "LLM job %s: skip recover, RQ job %s ещё в очереди/выполняется",
                         jid,

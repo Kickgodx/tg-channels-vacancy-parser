@@ -51,6 +51,7 @@ tg-jobs-parser = "tg_jobs_parser.cli.app:main"
 tg-jobs-api = "backend.main:main"
 tg-jobs-llm-worker = "backend.workers.llm_worker:main"
 tg-jobs-parse-worker = "backend.workers.parse_worker:main"
+tg-jobs-hh-worker = "backend.workers.hh_worker:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

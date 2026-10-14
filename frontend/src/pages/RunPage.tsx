@@ -145,6 +145,7 @@ export default function RunPage() {
 
   const runFinished =
     run.data?.status === "completed" ||
+    run.data?.status === "partial" ||
     run.data?.status === "failed" ||
     run.data?.status === "cancelled" ||
     progress?.phase === "post_processing_done";

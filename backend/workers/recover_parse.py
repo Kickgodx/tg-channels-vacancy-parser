@@ -12,20 +12,9 @@ from backend.db.session import session_scope
 from backend.observability import record_parse_jobs_recover, record_parse_run_finished
 from backend.services.parse_run_events import publish_parse_run_event
 from backend.settings import get_settings
+from backend.workers.recover_loop import rq_job_still_live
 
 _LOG = logging.getLogger(__name__)
-
-
-def _rq_job_still_live(rq_job_id: str, connection) -> bool:
-    """True, если RQ-задача ещё есть и не в finished/failed."""
-    from rq.exceptions import NoSuchJobError
-    from rq.job import Job
-
-    try:
-        job = Job.fetch(rq_job_id, connection=connection)
-    except NoSuchJobError:
-        return False
-    return not (job.is_finished or job.is_failed)
 
 
 def _finish_reclaimed(run_id: UUID, outcome: str, *, legacy: bool = False) -> bool:
@@ -125,7 +114,7 @@ def recover_stuck_parse_runs(*, requeue_all_queued: bool = False) -> int:
 
             if backend == "rq":
                 assert redis_conn is not None
-                if rq_job_id and _rq_job_still_live(rq_job_id, redis_conn):
+                if rq_job_id and rq_job_still_live(rq_job_id, redis_conn):
                     _LOG.info(
                         "Parse run %s: skip recover, RQ job %s ещё в очереди/выполняется",
                         rid,

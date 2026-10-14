@@ -5,8 +5,9 @@ import type {
   CoverLetter,
   CoverLetterTone,
   HhStatus,
+  HhSyncAccepted,
+  HhSyncJob,
   HhSyncRequest,
-  HhSyncResult,
   LlmJob,
   LlmJobAccepted,
   LlmModelsCatalog,
@@ -166,12 +167,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const LLM_JOB_POLL_MS = 1000;
+const HH_SYNC_POLL_MS = 1500;
+const HH_SYNC_TERMINAL: ReadonlySet<HhSyncJob["status"]> = new Set(["completed", "failed"]);
 const RUN_POLL_MS = 2000;
 /** Как часто SSE переключается на poll при долгом молчании (не hard-fail). */
 const SSE_FALLBACK_IDLE_MS = 5 * 60 * 1000;
 
 const RUN_TERMINAL: ReadonlySet<RunStatus> = new Set([
   "completed",
+  "partial",
   "failed",
   "cancelled",
 ]);
@@ -491,11 +495,62 @@ export const api = {
 
   hhStatus: () => request<HhStatus>("/hh/status"),
 
+  /** 202: sync поставлен в очередь; ход и итог — hhSyncJob / subscribeHhSyncJob. */
   hhSync: (body?: HhSyncRequest) =>
-    request<HhSyncResult>("/hh/sync", {
+    request<HhSyncAccepted>("/hh/sync", {
       method: "POST",
       body: JSON.stringify(body ?? {}),
     }),
+
+  hhSyncJobs: (limit = 10) => request<HhSyncJob[]>(`/hh/sync-jobs?limit=${limit}`),
+
+  hhSyncJob: (jobId: string) => request<HhSyncJob>(`/hh/sync-jobs/${jobId}`),
+
+  /** SSE со статусом sync до completed/failed; при обрыве — poll. Возвращает отписку. */
+  subscribeHhSyncJob(
+    jobId: string,
+    onUpdate: (job: HhSyncJob) => void,
+    onError: (err: Error) => void,
+  ): () => void {
+    let cancelled = false;
+    let polling = false;
+    const es = new EventSource(`${API_BASE}/hh/sync-jobs/${jobId}/events${sseAuthQuery()}`);
+
+    const startFallbackPoll = () => {
+      if (cancelled || polling) return;
+      polling = true;
+      es.close();
+      void (async () => {
+        while (!cancelled) {
+          const job = await request<HhSyncJob>(`/hh/sync-jobs/${jobId}`);
+          if (cancelled) return;
+          onUpdate(job);
+          if (HH_SYNC_TERMINAL.has(job.status)) return;
+          await sleep(HH_SYNC_POLL_MS);
+        }
+      })().catch((err: unknown) => {
+        if (!cancelled) onError(err instanceof Error ? err : new Error(String(err)));
+      });
+    };
+
+    es.addEventListener("status", (ev) => {
+      try {
+        onUpdate(JSON.parse((ev as MessageEvent).data) as HhSyncJob);
+      } catch {
+        /* ignore parse */
+      }
+    });
+    es.addEventListener("done", () => es.close());
+    es.onerror = () => {
+      // EventSource сам переподключается; надёжнее дочитать статус опросом.
+      if (es.readyState !== EventSource.CLOSED) startFallbackPoll();
+    };
+
+    return () => {
+      cancelled = true;
+      es.close();
+    };
+  },
 
   listResumes: () => request<{ items: Resume[] }>("/resumes"),
 

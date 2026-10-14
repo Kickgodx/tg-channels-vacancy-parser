@@ -3,6 +3,8 @@ export type RunStatus =
   | "queued"
   | "running"
   | "completed"
+  /** Дошёл до конца, но часть постов не разобрана LLM (причина — в error_message). */
+  | "partial"
   | "cancelled"
   | "failed";
 
@@ -252,6 +254,46 @@ export interface HhSyncRequest {
   window?: HhSyncWindow;
   date_from?: string;
   date_to?: string;
+}
+
+export type HhSyncJobStatus = "queued" | "running" | "completed" | "failed";
+
+export interface HhSyncAccepted {
+  job_id: string;
+  status: HhSyncJobStatus;
+}
+
+export interface HhSyncProgress {
+  /** search → details (done/total групп) → purge */
+  phase: "search" | "details" | "purge";
+  done: number;
+  total: number;
+  searched: number;
+  pages: number;
+  unique: number;
+  duplicates: number;
+  details_fetched: number;
+  details_skipped: number;
+  vacancies_inserted: number;
+  vacancies_updated: number;
+  errors: number;
+}
+
+/** Фоновый HH sync (POST /hh/sync → 202). result у failed — частичный, на момент сбоя. */
+export interface HhSyncJob {
+  id: string;
+  status: HhSyncJobStatus;
+  window: string;
+  period: number | null;
+  date_from: string | null;
+  date_to: string | null;
+  progress: HhSyncProgress | null;
+  result: HhSyncResult | null;
+  error_message: string | null;
+  attempts: number;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 export interface HhSyncResult {

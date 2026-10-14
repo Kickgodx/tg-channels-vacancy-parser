@@ -1,4 +1,4 @@
-"""Подключение к Redis и очереди RQ ``llm`` / ``parse``."""
+"""Подключение к Redis и очереди RQ ``llm`` / ``parse`` / ``hh``."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from backend.settings import get_settings
 
 LLM_QUEUE_NAME = "llm"
 PARSE_QUEUE_NAME = "parse"
+HH_QUEUE_NAME = "hh"
 
 _connection: Any | None = None
 
@@ -78,3 +79,9 @@ def parse_queue_depth() -> int | None:
         return int(get_parse_queue().count)
     except Exception:
         return None
+
+
+def get_hh_queue():
+    from rq import Queue
+
+    return Queue(HH_QUEUE_NAME, connection=get_redis_connection())

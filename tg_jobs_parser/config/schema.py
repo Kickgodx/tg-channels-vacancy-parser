@@ -246,6 +246,24 @@ class AiConfig(BaseModel):
         default=True,
         description="При X-RateLimit-Remaining=0 / дневном лимите — отключить LLM до конца прогона (rules).",
     )
+    circuit_breaker_errors: int = Field(
+        default=5,
+        ge=0,
+        le=100,
+        description=(
+            "Circuit breaker прогона: столько постов подряд с ошибкой LLM (после повторов и fallback) — "
+            "LLM отключается до конца прогона, как при исчерпанной квоте. 0 — выключен."
+        ),
+    )
+    max_error_ratio: float = Field(
+        default=0.1,
+        ge=0,
+        le=1,
+        description=(
+            "Режим primary: доля LLM-запросов с ошибкой, выше которой прогон считается неполным "
+            "(статус partial) — посты с ошибкой отброшены. 1 — не проверять."
+        ),
+    )
     use_few_shot: bool = False
     prompt_version: str = Field(
         default="extract-v6",
@@ -491,8 +509,8 @@ class RetentionConfig(BaseModel):
         default=180,
         ge=0,
         description=(
-            "Через сколько дней после завершения удалять прогон из parse_runs (снимок конфига, метрики). "
-            "Вакансии остаются. 0 — хранить всегда."
+            "Через сколько дней после завершения удалять прогон из parse_runs (снимок конфига, метрики) "
+            "и HH sync из hh_sync_jobs. Вакансии остаются. 0 — хранить всегда."
         ),
     )
     llm_jobs_ttl_days: int = Field(

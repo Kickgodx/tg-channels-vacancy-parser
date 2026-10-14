@@ -252,6 +252,43 @@ class HhListingRow(Base):
     )
 
 
+class HhSyncJobRow(Base):
+    """Фоновый HH sync: durable-джоба с lease и recover, как ``parse_runs``."""
+
+    __tablename__ = "hh_sync_jobs"
+    __table_args__ = (
+        # Один активный sync: partial UNIQUE (миграция 022), как uq_parse_runs_one_active.
+        Index(
+            "uq_hh_sync_jobs_one_active",
+            text("(true)"),
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running')"),
+            sqlite_where=text("status IN ('queued', 'running')"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    # Окно поиска (window / period / date_from / date_to) — снимок запроса.
+    params: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Итог sync (HhSyncResult) — и частичный, если sync упал на середине.
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    progress_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    rq_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Сколько раз джобу брали в работу (claim); лимит — HH_SYNC_JOB_MAX_ATTEMPTS.
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
 class LlmJobRow(Base):
     """Фоновая LLM-задача (мэтчинг / сопроводительное письмо)."""
 

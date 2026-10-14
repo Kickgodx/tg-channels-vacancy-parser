@@ -86,11 +86,17 @@
 | **`interactive_per_user_limit`** | Сколько LLM-джоб (`queued`+`running`) одновременно на одного пользователя (по умолчанию 2); сверх лимита — HTTP 429. |
 | **`requests_per_minute`** | Темп запросов к OpenRouter. При заданном `REDIS_URL` — **общий** на все процессы (API, parse-worker, реплики llm-worker): счётчик минутного окна в Redis; внутри процесса запросы дополнительно разносятся равномерно. Без Redis (или при его сбое) — лимит каждого процесса отдельно. |
 | **`max_retries_on_error`** | Сколько раз повторить вызов при транзиентном сбое: 5xx, 408/409, таймаут, обрыв соединения (по умолчанию 2, `0` — без повторов). Пауза 2/4/8… с, не дольше 30 с. Отдельно от `max_retries_on_429`. |
-| **`mode`** | `assist` — при отключении LLM по лимиту остаток постов разбирается rules. `primary` — остаток не разбирается, прогон завершается `failed` с причиной в `error_message` (собранные вакансии сохраняются). |
+| **`circuit_breaker_errors`** | Circuit breaker прогона: после стольких постов подряд с ошибкой LLM (уже после повторов и fallback-моделей) LLM отключается до конца прогона — как при исчерпанной квоте (по умолчанию 5, `0` — выключен). При полном отказе провайдера остальные посты не ждут повторов и таймаутов. |
+| **`max_error_ratio`** | Только `mode: primary`: доля LLM-запросов с ошибкой, выше которой прогон считается неполным — статус `partial` (по умолчанию `0.1`, `1` — не проверять). Посты с ошибкой в `primary` отброшены, чекпоинты каналов не двигаются. |
+| **`mode`** | `assist` — при отключении LLM (лимит или circuit breaker) остаток постов разбирается rules. `primary` — остаток не разбирается, прогон завершается `partial` с причиной в `error_message` (собранные вакансии сохраняются). |
 
 Env (не yaml): `LLM_JOB_BACKEND=inprocess|rq`, `REDIS_URL`, `LLM_WORKER_METRICS_PORT`, `LLM_JOB_STUCK_MINUTES`, `LLM_JOB_LEASE_SECONDS`, `LLM_RQ_JOB_TIMEOUT_SECONDS`, `LLM_JOB_MAX_ATTEMPTS`, `JOB_RECOVER_INTERVAL_SECONDS` — см. `.env.example`.
 
 Прогоны парсинга (не yaml): `PARSE_JOB_BACKEND=inprocess|rq`, `PARSE_JOB_STUCK_MINUTES`, `PARSE_JOB_LEASE_SECONDS`, `PARSE_JOB_MAX_ATTEMPTS`, `PARSE_RQ_JOB_TIMEOUT_SECONDS`, `PARSE_WORKER_METRICS_PORT` — в Docker Compose по умолчанию `rq` + сервис `parse-worker`; см. `.env.example` и README.
+
+HH sync (не yaml): `HH_SYNC_JOB_BACKEND=inprocess|rq`, `HH_SYNC_JOB_STUCK_MINUTES`, `HH_SYNC_JOB_LEASE_SECONDS`, `HH_SYNC_JOB_MAX_ATTEMPTS`, `HH_SYNC_RQ_JOB_TIMEOUT_SECONDS`, `HH_WORKER_METRICS_PORT` — в Docker Compose `rq` + сервис `hh-worker`.
+
+Liveness RQ-воркеров (не yaml): `WORKER_HEARTBEAT_MAX_AGE_SECONDS` (порог healthcheck, 180 с), `WORKER_STALL_EXIT_SECONDS` (watchdog завершает зависший воркер, 900 с; `0` — выключен).
 
 **Идемпотентность мутаций:** заголовок `Idempotency-Key` на `POST /runs`, `POST /hh/sync`, `POST /vacancies/import` (TTL 24ч). Повтор с тем же ключом возвращает сохранённый ответ.
 

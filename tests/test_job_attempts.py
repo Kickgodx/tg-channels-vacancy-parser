@@ -215,7 +215,7 @@ def test_api_start_recovers_queued_run_inprocess(monkeypatch, default_test_confi
 
     stops = _start_inprocess_job_recovery()
     try:
-        assert len(stops) == 2  # parse + llm, оба backend'а inprocess
+        assert len(stops) == 3  # parse + llm + hh sync, все backend'ы inprocess
         assert _wait_for_status(rid, "completed") == "completed"
     finally:
         for stop in stops:
@@ -245,6 +245,7 @@ def test_api_start_skips_recovery_for_rq_backends(monkeypatch):
 
     monkeypatch.setenv("PARSE_JOB_BACKEND", "rq")
     monkeypatch.setenv("LLM_JOB_BACKEND", "rq")
+    monkeypatch.setenv("HH_SYNC_JOB_BACKEND", "rq")
     get_settings.cache_clear()
 
     assert _start_inprocess_job_recovery() == []

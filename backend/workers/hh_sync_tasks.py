@@ -1,0 +1,192 @@
+"""Исполнение фонового HH sync (импортируется RQ по dotted-path)."""
+
+from __future__ import annotations
+
+import dataclasses
+import logging
+import threading
+import time
+import uuid
+
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind, Status, StatusCode
+
+from backend.db import hh_sync_job_repository as jobs
+from backend.db.session import session_scope
+from backend.services.hh_sync_events import publish_hh_sync_event
+from backend.services.hh_sync_service import HhSyncConflict, HhSyncResult, run_hh_sync
+from backend.services.hh_sync_window import ResolvedHhSearchWindow
+from backend.settings import get_settings
+from backend.workers import liveness
+from tg_jobs_parser.config.loader import load_config
+from tg_jobs_parser.hh.client import HHApiError
+
+_LOG = logging.getLogger(__name__)
+_TRACER = trace.get_tracer(__name__)
+
+_LEASE_HEARTBEAT_S = 30.0
+_PROGRESS_MIN_INTERVAL_S = 1.0
+_ERROR_MESSAGE_MAX = 500
+
+
+class HhSyncLeaseLost(RuntimeError):
+    """Lease перехвачен recover: sync продолжает другой воркер — этот прекращает работу."""
+
+
+def _result_dict(result: HhSyncResult | None) -> dict | None:
+    return dataclasses.asdict(result) if result is not None else None
+
+
+def _progress_dict(phase: str, result: HhSyncResult, done: int, total: int) -> dict:
+    return {
+        "phase": phase,
+        "done": done,
+        "total": total,
+        "searched": result.searched,
+        "pages": result.pages,
+        "unique": result.unique,
+        "duplicates": result.duplicates,
+        "details_fetched": result.details_fetched,
+        "details_skipped": result.details_skipped,
+        "vacancies_inserted": result.vacancies_inserted,
+        "vacancies_updated": result.vacancies_updated,
+        "errors": len(result.errors),
+    }
+
+
+def _error_message(exc: Exception) -> str:
+    if isinstance(exc, HHApiError):
+        return f"HH API error: HTTP {exc.status_code}"
+    if isinstance(exc, HhSyncConflict):
+        return str(exc)
+    msg = f"{type(exc).__name__}: {exc}"
+    return msg if len(msg) <= _ERROR_MESSAGE_MAX else msg[: _ERROR_MESSAGE_MAX - 1] + "…"
+
+
+def run_hh_sync_job(job_id: str, traceparent: str | None = None) -> None:
+    """Claim queued ``hh_sync_jobs`` и выполнить sync (in-process или RQ hh-worker)."""
+    jid = uuid.UUID(str(job_id))
+    ctx = None
+    if traceparent:
+        try:
+            from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+            ctx = TraceContextTextMapPropagator().extract(carrier={"traceparent": traceparent})
+        except Exception:
+            ctx = None
+    with _TRACER.start_as_current_span(
+        "hh_sync_job",
+        context=ctx,
+        kind=SpanKind.CONSUMER,
+        attributes={"hh.job_id": str(jid)},
+    ) as span:
+        _run_traced(jid, span)
+
+
+def _run_traced(job_id: uuid.UUID, span) -> None:
+    lease_owner = jobs.new_lease_owner()
+    with session_scope() as session:
+        claimed = jobs.claim_hh_sync_job(session, job_id, lease_owner=lease_owner)
+        if claimed is None:
+            return
+        params = dict(claimed.params or {})
+        attempt = claimed.attempts
+    publish_hh_sync_event(job_id, status="running")
+    _LOG.info("HH sync %s: старт (попытка %s, окно %s)", job_id, attempt, params.get("window"))
+
+    stop_lease = threading.Event()
+    lease_lost = threading.Event()
+
+    def _lease_loop() -> None:
+        while not stop_lease.wait(timeout=_LEASE_HEARTBEAT_S):
+            try:
+                with session_scope() as session:
+                    ok = jobs.touch_hh_sync_job_lease(session, job_id, lease_owner=lease_owner)
+            except Exception as e:
+                _LOG.debug("HH sync %s lease heartbeat: %s", job_id, e)
+                continue  # транзиентная ошибка — не сдаём lease
+            if not ok:
+                if not stop_lease.is_set():
+                    _LOG.warning("HH sync %s: lease lost (fencing) — прерываем", job_id)
+                    lease_lost.set()
+                return
+            liveness.beat()
+
+    lease_thread = threading.Thread(target=_lease_loop, name=f"hh-sync-lease-{job_id}", daemon=True)
+    lease_thread.start()
+
+    latest: HhSyncResult | None = None
+    last_write = 0.0
+
+    def on_progress(phase: str, result: HhSyncResult, done: int, total: int) -> None:
+        nonlocal latest, last_write
+        latest = result
+        if lease_lost.is_set():
+            raise HhSyncLeaseLost("lease lost")
+        now = time.monotonic()
+        final = phase == "purge"
+        if not final and now - last_write < _PROGRESS_MIN_INTERVAL_S:
+            return
+        last_write = now
+        try:
+            with session_scope() as session:
+                ok = jobs.patch_hh_sync_job_progress(
+                    session, job_id, _progress_dict(phase, result, done, total), lease_owner=lease_owner
+                )
+        except Exception as e:
+            # Прогресс необязателен: транзиентный сбой БД не должен ронять sync.
+            _LOG.warning("HH sync %s: прогресс не записан: %s", job_id, e)
+            return
+        if not ok:
+            lease_lost.set()
+            raise HhSyncLeaseLost("lease lost")
+        publish_hh_sync_event(job_id, status="running")
+
+    status = "failed"
+    error: str | None = None
+    try:
+        window = ResolvedHhSearchWindow(
+            window=params.get("window") or "all",
+            period=params.get("period"),
+            date_from=params.get("date_from"),
+            date_to=params.get("date_to"),
+        )
+        settings = get_settings()
+        config = load_config(settings.config_path)
+        with session_scope() as session:
+            latest = run_hh_sync(
+                session,
+                config=config,
+                settings=settings,
+                search_window=window,
+                progress_callback=on_progress,
+            )
+        status = "completed"
+    except HhSyncLeaseLost:
+        _LOG.warning("HH sync %s: остановлен — lease перехвачен recover", job_id)
+    except Exception as e:
+        error = _error_message(e)
+        _LOG.exception("HH sync %s упал: %s", job_id, e)
+    finally:
+        stop_lease.set()
+        lease_thread.join(timeout=1.0)
+
+    span.set_attribute("hh.status", status)
+    if lease_lost.is_set():
+        span.set_status(Status(StatusCode.ERROR, "lease lost"))
+        return
+    with session_scope() as session:
+        wrote = jobs.finish_hh_sync_job(
+            session,
+            job_id,
+            status,
+            lease_owner=lease_owner,
+            result=_result_dict(latest),
+            error_message=error,
+        )
+    if not wrote:
+        _LOG.warning("HH sync %s: finalize no-op (fencing)", job_id)
+        return
+    if status == "failed":
+        span.set_status(Status(StatusCode.ERROR, error or "failed"))
+    publish_hh_sync_event(job_id, status=status)

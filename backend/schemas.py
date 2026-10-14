@@ -13,7 +13,8 @@ from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 
-RunStatus = Literal["pending", "queued", "running", "completed", "cancelled", "failed"]
+# partial — прогон дошёл до конца, но часть постов не разобрана (LLM отключён / много ошибок в primary).
+RunStatus = Literal["pending", "queued", "running", "completed", "partial", "cancelled", "failed"]
 
 
 class _RunOverrides(BaseModel):

@@ -148,8 +148,8 @@ def test_completed_run_has_vacancies_and_upsert_stats(monkeypatch, run_id):
         assert session.get(VacancyRow, vacancy.id) is not None
 
 
-def test_incomplete_run_is_failed_but_keeps_vacancies(monkeypatch, run_id):
-    """LLM отключился в primary: собранное сохраняем, но статус не completed."""
+def test_incomplete_run_is_partial_and_keeps_vacancies(monkeypatch, run_id):
+    """LLM отключился в primary: собранное сохраняем, статус partial, а не completed."""
     vacancy = _vacancy()
     reason = "AI: LLM отключён (дневной лимит); в режиме primary не разобрано постов: 7."
     result = _result(vacancy).model_copy(update={"incomplete_reason": reason})
@@ -158,7 +158,7 @@ def test_incomplete_run_is_failed_but_keeps_vacancies(monkeypatch, run_id):
     run_parse_job(str(run_id))
 
     status, error_message, run_params = _run_row(run_id)
-    assert status == "failed"
+    assert status == "partial"
     assert error_message == reason
     assert run_params["vacancies_inserted"] == 1
     with session_scope() as session:

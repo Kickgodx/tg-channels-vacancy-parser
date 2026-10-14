@@ -46,11 +46,15 @@ x-worker-depends-on: &worker-depends-on
   backend:
     condition: service_healthy
 
-# В образе backend нет curl/wget — проверяем через python. Воркеры отвечают
-# на порту метрик: это «процесс жив», а не «джобы выполняются».
+# В образе backend нет curl/wget — проверяем через python. Healthcheck воркера смотрит
+# не на ответ порта метрик («процесс жив»), а на возраст heartbeat в /metrics: цикл RQ
+# и lease выполняемой джобы (backend/workers/liveness.py), порог — 180 с
+# (WORKER_HEARTBEAT_MAX_AGE_SECONDS). unhealthy Docker сам не перезапускает — поэтому
+# воркер, чей heartbeat молчит дольше WORKER_STALL_EXIT_SECONDS (900), завершается сам,
+# а restart: unless-stopped поднимает его заново.
 x-worker-healthcheck: &worker-healthcheck
   interval: 15s
-  timeout: 5s
+  timeout: 10s
   retries: 4
   start_period: 30s
 
@@ -81,9 +85,13 @@ services:
     # Host 6379 often falls into Windows Hyper-V/WinNAT excluded ranges (≈6251–6450).
     # Containers still use redis:6379; host clients → 127.0.0.1:16379.
     # Пароль — из REDISCLI_AUTH: его же берёт redis-cli в healthcheck (без -a в argv).
-    command: ["sh", "-c", 'exec redis-server --requirepass "$$REDISCLI_AUTH"']
+    # AOF (fsync раз в секунду) на томе redis_data: рестарт контейнера не теряет очереди
+    # RQ — без него потерянные джобы поднимал только recover-цикл, с задержкой.
+    command: ["sh", "-c", 'exec redis-server --requirepass "$$REDISCLI_AUTH" --appendonly yes --appendfsync everysec']
     environment:
       REDISCLI_AUTH: ${REDIS_PASSWORD:?задайте REDIS_PASSWORD в .env}
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
     ports:
       - "${INFRA_BIND_ADDR:-127.0.0.1}:16379:6379"
@@ -109,6 +117,7 @@ services:
       OTEL_SERVICE_NAME: tg-jobs-parser-backend
       LLM_JOB_BACKEND: rq
       PARSE_JOB_BACKEND: rq
+      HH_SYNC_JOB_BACKEND: rq
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
@@ -147,7 +156,7 @@ services:
       - ./llm_models.yaml:/app/llm_models.yaml:ro
     healthcheck:
       <<: *worker-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/metrics', timeout=4)"]
+      test: ["CMD", "python", "-m", "backend.workers.healthcheck", "--port", "9101"]
 
   # Parse: один active run на БД; concurrency=1 (не scale). sessions/ — Telethon.
   # Метрики :9102 в Docker-сети (Prometheus dns_sd).
@@ -166,7 +175,26 @@ services:
       - ./sessions:/app/sessions
     healthcheck:
       <<: *worker-healthcheck
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9102/metrics', timeout=4)"]
+      test: ["CMD", "python", "-m", "backend.workers.healthcheck", "--port", "9102"]
+
+  # HH sync (POST /hh/sync → 202): до ~2000 detail-запросов при 3 rps, 10+ минут.
+  # Своя очередь hh — sync не ждёт многочасовой прогон в очереди parse.
+  # Метрики :9103 в Docker-сети (Prometheus dns_sd).
+  hh-worker:
+    <<: *app-common
+    command: ["tg-jobs-hh-worker"]
+    depends_on: *worker-depends-on
+    environment:
+      <<: *app-env
+      HH_SYNC_JOB_BACKEND: rq
+      HH_WORKER_METRICS_PORT: "9103"
+      OTEL_SERVICE_NAME: tg-jobs-parser-hh-worker
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./llm_models.yaml:/app/llm_models.yaml:ro
+    healthcheck:
+      <<: *worker-healthcheck
+      test: ["CMD", "python", "-m", "backend.workers.healthcheck", "--port", "9103"]
 
   frontend:
     build:
@@ -304,6 +332,7 @@ networks:
 
 volumes:
   pgdata:
+  redis_data:
   grafana_data:
   loki_data:
   alloy_data:

@@ -237,6 +237,27 @@ def _checkpoints_if_fully_processed(
     return new
 
 
+def _llm_error_ratio_reason(config: AppConfig, ai_service: AIEnrichmentService) -> str | None:
+    """Причина неполного прогона, если в ``primary`` доля ошибок LLM выше ``ai.max_error_ratio``.
+
+    В ``primary`` пост с ошибкой LLM отбрасывается: без порога прогон с половиной
+    потерянных постов выглядел бы ``completed``.
+    """
+    if config.ai.mode != "primary":
+        return None
+    errors = ai_service.stats.errors
+    calls = ai_service.stats.calls
+    if not errors or not calls:
+        return None
+    ratio = errors / calls
+    if ratio <= config.ai.max_error_ratio:
+        return None
+    return (
+        f"AI: ошибок LLM {errors} из {calls} запросов ({ratio:.0%} > {config.ai.max_error_ratio:.0%}); "
+        "в режиме primary посты с ошибкой не разобраны — повторный прогон перечитает окно."
+    )
+
+
 def _api_run(cli_overrides: dict | None) -> bool:
     """Прогон через REST API — служебные строки не дублируем в parse_warnings (есть run_params / UI)."""
     return bool(cli_overrides and cli_overrides.get("api"))
@@ -593,6 +614,10 @@ def run_parse(
                 all_warnings.append(
                     f"AI: LLM отключён ({rate_limiter.llm_disabled_reason}). Оставшиеся посты обработаны только rules."
                 )
+            if incomplete_reason is None:
+                incomplete_reason = _llm_error_ratio_reason(config, ai_service)
+                if incomplete_reason and not _api_run(cli_overrides):
+                    all_warnings.append(incomplete_reason)
         _LOG.info(
             "Пост-обработка завершена за %.1f с. После фильтров осталось вакансий-кандидатов: %s",
             process_elapsed,
