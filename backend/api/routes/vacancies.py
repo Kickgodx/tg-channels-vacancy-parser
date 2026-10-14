@@ -10,9 +10,9 @@ from backend.db import repository as repo
 from backend.db.aggregate_cache import cached_aggregate
 from backend.db.models import UserRow
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
-from backend.errors import CODE_IDEMPOTENCY_IN_PROGRESS, CODE_VALIDATION, AppError, http_error
+from backend.errors import CODE_IDEMPOTENCY_IN_PROGRESS, CODE_RATE_LIMITED, CODE_VALIDATION, AppError, http_error
 from backend.schemas import (
-    VacancyImportItemResult,
+    LlmJobAccepted,
     VacancyImportRequest,
     VacancyImportResponse,
     VacancyListResponse,
@@ -21,6 +21,7 @@ from backend.schemas import (
     VacancySortOrder,
 )
 from backend.services import idempotency, import_service
+from backend.services.llm_job_service import KIND_IMPORT, LlmJobUserLimitError, llm_job_runner
 from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -32,14 +33,26 @@ router = APIRouter(
 )
 
 
-@router.post("/import", response_model=VacancyImportResponse)
+@router.post(
+    "/import",
+    response_model=None,
+    responses={
+        200: {"model": VacancyImportResponse},
+        202: {"model": LlmJobAccepted},
+    },
+)
 def import_vacancies(
     body: VacancyImportRequest,
     db: Session = Depends(get_db),
     user: UserRow = Depends(get_current_user),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-) -> VacancyImportResponse | JSONResponse:
-    """Импорт вакансий из текста: rules + LLM-разбор и запись в БД (как в прогоне)."""
+) -> JSONResponse:
+    """Импорт вакансий из текста: rules + LLM-разбор и запись в БД (как в прогоне).
+
+    Без LLM (AI выключен или все тексты уже в базе) — сразу 200 с итогом. Нужен LLM —
+    202 ``{job_id}``: разбор идёт LLM-джобой, итог по текстам растёт в
+    ``GET /llm-jobs/{id}`` (``import_result``) и приходит в её SSE.
+    """
     actor = idempotency.actor_for_user(user.id)
     scope = idempotency.SCOPE_IMPORT
     req_hash = idempotency.request_fingerprint(body.model_dump(mode="json"))
@@ -59,32 +72,34 @@ def import_vacancies(
         if not any(texts):
             raise http_error(400, CODE_VALIDATION, "Пустой текст вакансии")
         source_url = (body.source_url or "").strip() or None
-        result = import_service.import_vacancy_texts(db, texts, source_url=source_url, user_id=user.id)
+        if import_service.needs_llm(db, texts, source_url=source_url):
+            try:
+                queued = llm_job_runner.enqueue(
+                    user_id=user.id,
+                    kind=KIND_IMPORT,
+                    params=import_service.job_params(texts, source_url),
+                )
+            except LlmJobUserLimitError as e:
+                raise http_error(429, CODE_RATE_LIMITED, str(e), retryable=True) from e
+            status_code = 202
+            content = LlmJobAccepted(job_id=queued.job_id, status="queued").model_dump(mode="json")
+        else:
+            result = import_service.import_vacancy_texts(db, texts, source_url=source_url)
+            status_code = 200
+            content = import_service.to_import_response(result).model_dump(mode="json")
     except Exception:
         idempotency.abandon(key=idempotency_key, scope=scope, actor=actor)
         raise
 
-    items = [
-        VacancyImportItemResult(index=it.index, status=it.status, message=it.message, vacancy=it.vacancy)
-        for it in result.items
-    ]
-    resp = VacancyImportResponse(
-        items=items,
-        created=sum(1 for it in items if it.status == "created"),
-        existing=sum(1 for it in items if it.status == "exists"),
-        rejected=sum(1 for it in items if it.status in ("not_vacancy", "error")),
-        ai_enabled=result.ai_enabled,
-        warning=result.warning,
-    )
     idempotency.complete(
         key=idempotency_key,
         scope=scope,
         actor=actor,
-        status_code=200,
-        body=resp.model_dump(mode="json"),
+        status_code=status_code,
+        body=content,
         request_hash=req_hash,
     )
-    return resp
+    return JSONResponse(status_code=status_code, content=content)
 
 
 @router.get("/export.xlsx")

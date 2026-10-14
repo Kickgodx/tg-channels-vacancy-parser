@@ -290,7 +290,7 @@ class HhSyncJobRow(Base):
 
 
 class LlmJobRow(Base):
-    """Фоновая LLM-задача (мэтчинг / сопроводительное письмо)."""
+    """Фоновая LLM-задача (мэтчинг / сопроводительное письмо / ручной импорт)."""
 
     __tablename__ = "llm_jobs"
 
@@ -298,17 +298,20 @@ class LlmJobRow(Base):
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # match | cover_letter
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # match | cover_letter | import
     # Индексы на FK (миграция 018): каскадное удаление резюме / вакансии без seq scan.
-    resume_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False, index=True
+    # У импорта (миграция 023) их нет — тексты в params.
+    resume_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    vacancy_id: Mapped[str] = mapped_column(
-        String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), nullable=False, index=True
+    vacancy_id: Mapped[str | None] = mapped_column(
+        String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), nullable=True, index=True
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
     force: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     params: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Импорт: поэлементный итог, дописывается по мере обработки (ретрай продолжает с него).
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     rq_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

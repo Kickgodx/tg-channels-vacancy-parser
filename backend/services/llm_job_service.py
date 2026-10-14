@@ -23,6 +23,18 @@ _TRACER = trace.get_tracer(__name__)
 
 KIND_MATCH = "match"
 KIND_COVER_LETTER = "cover_letter"
+KIND_IMPORT = "import"
+
+# Импорт — до 50 текстов, каждый со своим вызовом LLM: базового таймаута RQ на него мало.
+IMPORT_SECONDS_PER_TEXT = 60
+
+
+def rq_job_timeout(kind: str, params: dict | None) -> int:
+    """Таймаут RQ-джобы: базовый LLM_RQ_JOB_TIMEOUT_SECONDS + запас на тексты импорта."""
+    base = get_settings().llm_rq_job_timeout_seconds
+    if kind != KIND_IMPORT:
+        return base
+    return base + IMPORT_SECONDS_PER_TEXT * len((params or {}).get("texts") or [])
 
 
 class LlmJobUserLimitError(RuntimeError):
@@ -91,11 +103,15 @@ class LlmJobRunner:
         *,
         user_id: int,
         kind: str,
-        resume_id: int,
-        vacancy_id: str,
+        resume_id: int | None = None,
+        vacancy_id: str | None = None,
         force: bool = False,
         params: dict | None = None,
     ) -> EnqueueResult:
+        """Поставить джобу. Матч / письмо: активная джоба той же пары переиспользуется,
+        вызов списывается из суточной квоты сразу. Импорт: не переиспользуется (повтор
+        запроса ловит Idempotency-Key), квота списывается в воркере по текстам.
+        """
         settings = get_settings()
         backend = settings.llm_job_backend_normalized
         cfg = load_config(settings.config_path)
@@ -113,13 +129,15 @@ class LlmJobRunner:
             },
         ) as span:
             with session_scope() as session:
-                existing = repo.find_active_llm_job(
-                    session,
-                    user_id=user_id,
-                    kind=kind,
-                    resume_id=resume_id,
-                    vacancy_id=vacancy_id,
-                )
+                existing = None
+                if kind != KIND_IMPORT:
+                    existing = repo.find_active_llm_job(
+                        session,
+                        user_id=user_id,
+                        kind=kind,
+                        resume_id=resume_id,
+                        vacancy_id=vacancy_id,
+                    )
                 if existing is not None:
                     span.set_attribute("llm_job.id", str(existing.id))
                     record_llm_job_enqueue(backend=backend, kind=kind, outcome="reused")
@@ -131,11 +149,12 @@ class LlmJobRunner:
                     raise LlmJobUserLimitError(
                         f"Слишком много параллельных LLM-задач (лимит {per_user}). Дождитесь завершения."
                     )
-                try:
-                    reserve_user_llm_calls(session, user_id=user_id, calls=1)
-                except LlmDailyQuotaError:
-                    record_llm_job_enqueue(backend=backend, kind=kind, outcome="rejected_quota")
-                    raise
+                if kind != KIND_IMPORT:
+                    try:
+                        reserve_user_llm_calls(session, user_id=user_id, calls=1)
+                    except LlmDailyQuotaError:
+                        record_llm_job_enqueue(backend=backend, kind=kind, outcome="rejected_quota")
+                        raise
 
                 row = repo.create_llm_job(
                     session,
@@ -151,7 +170,7 @@ class LlmJobRunner:
             span.set_attribute("llm_job.id", str(job_id))
             record_llm_job(outcome="queued", kind=kind)
             try:
-                self._dispatch(job_id, backend=backend, pool_workers=workers)
+                self._dispatch(job_id, backend=backend, pool_workers=workers, timeout=rq_job_timeout(kind, params))
             except Exception:
                 record_llm_job_enqueue(backend=backend, kind=kind, outcome="error")
                 with session_scope() as session:
@@ -171,15 +190,13 @@ class LlmJobRunner:
             )
             return EnqueueResult(job_id=job_id, reused=False)
 
-    def _dispatch(self, job_id: uuid.UUID, *, backend: str, pool_workers: int) -> None:
+    def _dispatch(self, job_id: uuid.UUID, *, backend: str, pool_workers: int, timeout: int) -> None:
         from backend.workers.llm_tasks import run_llm_job
 
         traceparent = current_traceparent()
         if backend == "rq":
             from backend.queue.rq_conn import get_llm_queue
-            from backend.settings import get_settings
 
-            timeout = get_settings().llm_rq_job_timeout_seconds
             q = get_llm_queue()
             rq_job = q.enqueue(
                 run_llm_job,

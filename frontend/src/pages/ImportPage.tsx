@@ -3,7 +3,12 @@ import { useState } from "react";
 import { api } from "../api/client";
 import VacancyModal from "../components/VacancyModal";
 import VacancyTable from "../components/VacancyTable";
-import type { Vacancy, VacancyImportItem, VacancyImportStatus } from "../types/api";
+import type {
+  Vacancy,
+  VacancyImportItem,
+  VacancyImportResponse,
+  VacancyImportStatus,
+} from "../types/api";
 
 const STATUS_LABEL: Record<VacancyImportStatus, string> = {
   created: "Сохранена",
@@ -46,6 +51,8 @@ export default function ImportPage() {
   const [text, setText] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [selected, setSelected] = useState<{ v: Vacancy; idx: number } | null>(null);
+  // Частичный итог фоновой джобы (импорт с LLM), пока она идёт.
+  const [progress, setProgress] = useState<VacancyImportResponse | null>(null);
 
   const recentQ = useQuery({
     queryKey: ["imported-vacancies"],
@@ -59,7 +66,10 @@ export default function ImportPage() {
   });
 
   const importM = useMutation({
-    mutationFn: () => api.importVacancies(splitTexts(text), sourceUrl.trim() || undefined),
+    mutationFn: () => {
+      setProgress(null);
+      return api.importVacancies(splitTexts(text), sourceUrl.trim() || undefined, setProgress);
+    },
     onSuccess: () => {
       setText("");
       void queryClient.invalidateQueries({ queryKey: ["imported-vacancies"] });
@@ -67,8 +77,12 @@ export default function ImportPage() {
     },
   });
 
-  const items: VacancyImportItem[] = importM.data?.items ?? [];
+  const result = importM.data ?? (importM.isPending ? progress : null);
+  const items: VacancyImportItem[] = result?.items ?? [];
   const canSubmit = splitTexts(text).length > 0 && !importM.isPending;
+  const pendingLabel = progress
+    ? `Разбор… ${progress.items.length} из ${progress.total}`
+    : "Разбор…";
 
   return (
     <>
@@ -99,11 +113,16 @@ export default function ImportPage() {
         </label>
         <div className="modal-actions">
           <button type="button" disabled={!canSubmit} onClick={() => importM.mutate()}>
-            {importM.isPending ? "Разбор…" : "Разобрать и сохранить"}
+            {importM.isPending ? pendingLabel : "Разобрать и сохранить"}
           </button>
         </div>
+        {importM.isPending && progress && (
+          <p className="caption">
+            LLM-разбор идёт в фоне: со страницы можно уйти — вакансии всё равно сохранятся.
+          </p>
+        )}
         {importM.isError && <p className="error">{(importM.error as Error).message}</p>}
-        {importM.data?.warning && <p className="warning">{importM.data.warning}</p>}
+        {result?.warning && <p className="warning">{result.warning}</p>}
         {importM.data && (
           <p className="caption">
             Итого: сохранено {importM.data.created}, уже были {importM.data.existing},

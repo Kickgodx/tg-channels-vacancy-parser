@@ -1,4 +1,4 @@
-"""Статус фоновых LLM-джоб (мэтчинг / сопроводительные письма) + SSE."""
+"""Статус фоновых LLM-джоб (мэтчинг / сопроводительные письма / импорт) + SSE."""
 
 from __future__ import annotations
 
@@ -32,8 +32,9 @@ from backend.db.session import session_scope
 from backend.errors import CODE_NOT_AUTHENTICATED, http_error
 from backend.observability import LLM_JOB_SSE_CONNECTIONS
 from backend.schemas import LlmJobOut
+from backend.services import import_service
 from backend.services.llm_job_events import channel_for
-from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_MATCH
+from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_IMPORT, KIND_MATCH
 from backend.services.pubsub_hub import PubSubUnavailable, get_pubsub_hub
 from backend.settings import get_settings
 
@@ -45,7 +46,12 @@ router = APIRouter(prefix="/llm-jobs", tags=["llm-jobs"])
 def _job_to_out(db: Session, row) -> LlmJobOut:
     match_out = None
     letter_out = None
-    if row.status == "done":
+    import_out = None
+    if row.kind == KIND_IMPORT:
+        # Частичный итог тоже отдаём: по нему UI показывает прогресс импорта.
+        if row.result:
+            import_out = import_service.to_import_response(import_service.import_result_from_job(db, row.result))
+    elif row.status == "done":
         if row.kind == KIND_MATCH:
             m = repo.get_vacancy_match(db, resume_id=row.resume_id, vacancy_id=row.vacancy_id)
             if m is not None:
@@ -64,6 +70,7 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
         error_message=row.error_message,
         match=match_out,
         cover_letter=letter_out,
+        import_result=import_out,
         created_at=row.created_at,
         started_at=row.started_at,
         finished_at=row.finished_at,
