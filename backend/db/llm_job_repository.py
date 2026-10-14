@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from backend.db.models import LlmJobRow
@@ -310,3 +310,21 @@ def reset_llm_job_to_queued(session: Session, job_id: uuid.UUID) -> LlmJobRow | 
 def count_llm_jobs_by_status(session: Session) -> dict[str, int]:
     rows = session.execute(select(LlmJobRow.status, func.count()).group_by(LlmJobRow.status))
     return {str(status): int(n) for status, n in rows}
+
+
+def purge_finished_llm_jobs(session: Session, *, older_than: datetime, limit: int = 1000) -> int:
+    """Удалить до ``limit`` завершённых (done/error) джоб, закончившихся раньше ``older_than``.
+
+    Результат джобы хранится отдельно (``vacancy_matches`` / ``cover_letters``), строка
+    джобы после завершения нужна только SSE/опросу статуса.
+    """
+    finished = (
+        select(LlmJobRow.id)
+        .where(
+            LlmJobRow.status.in_(("done", "error")),
+            func.coalesce(LlmJobRow.finished_at, LlmJobRow.created_at) < older_than,
+        )
+        .limit(limit)
+    )
+    result = session.execute(delete(LlmJobRow).where(LlmJobRow.id.in_(finished)))
+    return int(result.rowcount or 0)

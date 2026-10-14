@@ -478,13 +478,29 @@ class FxConfig(BaseModel):
 
 
 class RetentionConfig(BaseModel):
-    """Хранение вакансий: TTL → soft delete (archived_at)."""
+    """Хранение: TTL вакансий (soft delete, archived_at) и очистка служебных таблиц."""
 
     vacancy_ttl_days: int = Field(
         default=40,
         ge=0,
         description=(
             "Через сколько дней архивировать вакансию (по post_date, а без неё — по parsed_at). 0 — не архивировать."
+        ),
+    )
+    parse_runs_ttl_days: int = Field(
+        default=180,
+        ge=0,
+        description=(
+            "Через сколько дней после завершения удалять прогон из parse_runs (снимок конфига, метрики). "
+            "Вакансии остаются. 0 — хранить всегда."
+        ),
+    )
+    llm_jobs_ttl_days: int = Field(
+        default=30,
+        ge=0,
+        description=(
+            "Через сколько дней удалять завершённые LLM-джобы (done/error). Матчи и письма хранятся "
+            "отдельно и не удаляются. 0 — хранить всегда."
         ),
     )
 

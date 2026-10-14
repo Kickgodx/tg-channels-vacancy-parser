@@ -384,8 +384,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`): один подписчик 
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…017`, head —
-`017_channel_checkpoints`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…018`, head —
+`018_llm_jobs_fk_indexes`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -401,6 +401,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`): один подписчик 
 | `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 | `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
+
+Служебные таблицы чистятся сами (при старте и раз в час): просроченный кэш LLM и ключи идемпотентности, завершённые LLM-джобы старше `retention.llm_jobs_ttl_days` (30) и прогоны старше `retention.parse_runs_ttl_days` (180) — см. [config.md](config.md). Вакансии только архивируются, не удаляются.
 
 **Если меняете колонки/таблицы** — добавьте новую миграцию (`alembic revision`) и обновите модели в `backend/db/models.py`; при следующем `docker compose up` она применится автоматически, данные сохранятся.
 

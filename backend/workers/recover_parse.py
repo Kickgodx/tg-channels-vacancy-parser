@@ -63,15 +63,6 @@ def recover_stuck_parse_runs(*, requeue_all_queued: bool = False) -> int:
     seen: set[UUID] = set()
 
     with session_scope() as session:
-        try:
-            from backend.db import idempotency_repository as idem_repo
-
-            purged = idem_repo.purge_expired_idempotency(session)
-            if purged:
-                _LOG.info("idempotency_keys: purged expired=%s", purged)
-        except Exception as e:
-            _LOG.debug("idempotency purge skipped: %s", e)
-
         expired = pr.list_parse_runs_with_expired_lease(session, now=now)
         for row in expired:
             if row.id in seen:

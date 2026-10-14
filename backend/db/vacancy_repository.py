@@ -73,9 +73,19 @@ def _get_cached_vacancy_count(key: str) -> int | None:
         return total
 
 
+# Ключ включает свободный текст ``q``: без вытеснения кэш рос бы на каждый новый поиск.
+_COUNT_CACHE_MAX_ENTRIES = 256
+
+
 def _set_cached_vacancy_count(key: str, total: int) -> None:
     with _count_cache_lock:
-        _count_cache[key] = (time.monotonic(), total)
+        now = time.monotonic()
+        if len(_count_cache) >= _COUNT_CACHE_MAX_ENTRIES:
+            for k in [k for k, (ts, _) in _count_cache.items() if now - ts > _COUNT_CACHE_TTL_S]:
+                del _count_cache[k]
+            if len(_count_cache) >= _COUNT_CACHE_MAX_ENTRIES:
+                _count_cache.clear()
+        _count_cache[key] = (now, total)
 
 
 def invalidate_vacancy_count_cache() -> None:

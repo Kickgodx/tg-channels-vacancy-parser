@@ -256,8 +256,13 @@ class LlmJobRow(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     kind: Mapped[str] = mapped_column(String(32), nullable=False)  # match | cover_letter
-    resume_id: Mapped[int] = mapped_column(Integer, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
-    vacancy_id: Mapped[str] = mapped_column(String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), nullable=False)
+    # Индексы на FK (миграция 018): каскадное удаление резюме / вакансии без seq scan.
+    resume_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    vacancy_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
     force: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     params: Mapped[dict | None] = mapped_column(JSON, nullable=True)

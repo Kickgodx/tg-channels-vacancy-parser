@@ -76,10 +76,21 @@ def _cleanup_expired_vacancies() -> None:
         logging.getLogger(__name__).warning("TTL вакансий/HH listings не применён: %s", e)
 
 
+def _periodic_cleanup() -> None:
+    """TTL вакансий и очистка служебных таблиц (кэш LLM, LLM-джобы, idempotency, прогоны)."""
+    _cleanup_expired_vacancies()
+    try:
+        from backend.services.db_cleanup import purge_service_tables
+
+        purge_service_tables(load_config(get_settings().config_path).retention)
+    except Exception as e:
+        logging.getLogger(__name__).warning("Очистка служебных таблиц не выполнена: %s", e)
+
+
 def _vacancy_retention_worker(stop_event: threading.Event) -> None:
     """Переходит к следующей проверке TTL каждый час, пока жив backend."""
     while not stop_event.wait(timeout=60 * 60):
-        _cleanup_expired_vacancies()
+        _periodic_cleanup()
 
 
 def _start_inprocess_job_recovery() -> list[threading.Event]:
@@ -135,7 +146,7 @@ async def lifespan(_app: FastAPI):
     )
     log.info("Инициализация БД…")
     init_db()
-    _cleanup_expired_vacancies()
+    _periodic_cleanup()
     log.info("Backend готов.")
     threading.Thread(
         target=_sync_fx_on_startup,

@@ -107,3 +107,14 @@ def cache_count(session: Session) -> int:
 def cache_clear_all(session: Session) -> int:
     result = session.execute(delete(AIExtractionCacheRow))
     return int(result.rowcount or 0)
+
+
+def purge_expired_cache(session: Session, *, limit: int = 1000) -> int:
+    """Удалить до ``limit`` просроченных записей (иначе они уходят только при чтении того же ключа)."""
+    expired = (
+        select(AIExtractionCacheRow.cache_key)
+        .where(AIExtractionCacheRow.expires_at.isnot(None), AIExtractionCacheRow.expires_at <= _utcnow())
+        .limit(limit)
+    )
+    result = session.execute(delete(AIExtractionCacheRow).where(AIExtractionCacheRow.cache_key.in_(expired)))
+    return int(result.rowcount or 0)
