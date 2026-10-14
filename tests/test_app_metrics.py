@@ -293,12 +293,9 @@ def test_metrics_server_on_separate_port(api_client, monkeypatch):
     assert "db_users 1.0" in body
 
 
-def test_db_stats_collector_caches_reads(monkeypatch):
-    from backend.observability import _DBStatsCollector
-    from backend.settings import get_settings
-
-    calls = []
-    empty = (
+def _empty_db_stats():
+    """Снимок ``_DBStatsCollector._read_db`` для пустой БД."""
+    return (
         {
             k: 0
             for k in (
@@ -319,9 +316,16 @@ def test_db_stats_collector_caches_reads(monkeypatch):
         {},
     )
 
+
+def test_db_stats_collector_caches_reads(monkeypatch):
+    from backend.observability import _DBStatsCollector
+    from backend.settings import get_settings
+
+    calls = []
+
     def _read_db():
         calls.append(1)
-        return empty
+        return _empty_db_stats()
 
     monkeypatch.setattr(_DBStatsCollector, "_read_db", staticmethod(_read_db))
     collector = _DBStatsCollector()
@@ -354,6 +358,17 @@ def test_db_stats_collector_does_not_cache_failures(monkeypatch):
     assert list(collector.collect()) == []
     assert collector._cached is None
     get_settings.cache_clear()
+
+
+def test_db_stats_collector_sets_rq_queue_depths(monkeypatch):
+    from backend.observability import _DBStatsCollector
+
+    monkeypatch.setattr(_DBStatsCollector, "_read_db", staticmethod(_empty_db_stats))
+    monkeypatch.setattr("backend.queue.rq_conn.llm_queue_length", lambda: 3)
+    monkeypatch.setattr("backend.queue.rq_conn.parse_queue_depth", lambda: 1)
+    list(_DBStatsCollector().collect())
+    assert REGISTRY.get_sample_value("llm_rq_queue_jobs", {"queue": "llm"}) == 3
+    assert REGISTRY.get_sample_value("llm_rq_queue_jobs", {"queue": "parse"}) == 1
 
 
 def test_worker_imports_do_not_register_db_stats_collector():

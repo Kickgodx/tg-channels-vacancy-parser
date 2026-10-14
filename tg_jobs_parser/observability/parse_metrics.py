@@ -30,8 +30,16 @@ TELEGRAM_MESSAGES_SCANNED = Counter(
 
 TELEGRAM_CHANNEL_DURATION = Histogram(
     "telegram_channel_fetch_duration_seconds",
-    "Длительность обхода одного канала (с ожиданием FloodWait)",
+    "Длительность обхода одного канала (с ожиданием FloodWait и паузами между страницами)",
     buckets=(0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0),
+)
+
+# Цена ``parser.sleep_between_requests_seconds``: доля пауз во времени обхода —
+# rate(telegram_request_pause_seconds_total) / rate(telegram_channel_fetch_duration_seconds_sum).
+TELEGRAM_REQUEST_PAUSE_SECONDS = Counter(
+    "telegram_request_pause_seconds_total",
+    "Секунды пауз между страницами истории канала (parser.sleep_between_requests_seconds; "
+    "параллельные каналы складываются)",
 )
 
 TELEGRAM_FLOOD_WAITS = Counter(
@@ -75,8 +83,17 @@ for _phase in ("fetch", "process", "dedup"):
     PARSE_PHASE_DURATION.labels(phase=_phase)
 
 
-def record_channel_fetched(*, result: str, posts: int, scanned: int, duration_seconds: float) -> None:
+def record_channel_fetched(
+    *,
+    result: str,
+    posts: int,
+    scanned: int,
+    duration_seconds: float,
+    paused_seconds: float = 0.0,
+) -> None:
     TELEGRAM_CHANNELS.labels(result=result).inc()
+    if paused_seconds > 0:
+        TELEGRAM_REQUEST_PAUSE_SECONDS.inc(paused_seconds)
     if posts > 0:
         TELEGRAM_POSTS.inc(posts)
     if scanned > 0:
