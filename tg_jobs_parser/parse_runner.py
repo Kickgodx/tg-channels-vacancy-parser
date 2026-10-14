@@ -34,6 +34,7 @@ from tg_jobs_parser.parse_cancel import (
     install_sigint_cancel_handler,
 )
 from tg_jobs_parser.parse_progress import (
+    PROGRESS_PREVIEW_LIMIT,
     ParseProgressCallback,
     ParseProgressSnapshot,
     clear_partial_batches,
@@ -442,12 +443,14 @@ def run_parse(
             rl = ai_service._client.rate_limiter if ai_service is not None else None
             # В UI/SSE отдаём уникальные (инкрементальный дедуп уже прогнан):
             # candidates могут делить один content-id → React key warning.
-            unique_so_far = list(deduplicator.unique)
+            # Превью нужен только хвост; полный список копируем лишь для partial-батчей
+            # (опция отладки) — иначе каждый тик копировал бы все уникальные прогона.
+            unique_so_far = deduplicator.unique
             snap = ParseProgressSnapshot(
                 posts_processed=posts_processed,
                 posts_total=len(all_posts),
                 vacancies_found=len(unique_so_far),
-                vacancies=unique_so_far,
+                vacancies=list(unique_so_far) if partial_dir else unique_so_far[-PROGRESS_PREVIEW_LIMIT:],
                 phase=phase,
                 ai_llm_disabled=bool(rl and rl.llm_disabled),
                 ai_llm_disabled_reason=rl.llm_disabled_reason if rl else None,

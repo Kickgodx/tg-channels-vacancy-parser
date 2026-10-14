@@ -175,10 +175,10 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             cancel_token.request_cancel()
             return
         last_progress = snap
-        payload = snapshot_to_progress_dict(snap)
         now = time.monotonic()
         if now - _last_db_progress >= 1.0:
             _last_db_progress = now
+            payload = snapshot_to_progress_dict(snap)
             try:
                 with session_scope() as session:
                     if not repo.touch_parse_run_lease(session, run_id, lease_owner=lease_owner):

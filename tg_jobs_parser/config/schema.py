@@ -431,6 +431,14 @@ class ParserConfig(BaseModel):
     sleep_between_requests_seconds: float = 1.0
     vacancy_fuzzy_duplicate_threshold: int = 88
     fuzzy_compare_prefix_len: int = 500
+    fuzzy_dedup_block_by_specializations: bool = Field(
+        default=True,
+        description=(
+            "Fuzzy-дедуп сравнивает вакансию только с группами с тем же набором специализаций. "
+            "Убирает квадрат по всем группам прогона; дубли с разными специализациями fuzzy не ловит "
+            "(точные по хэшу текста — ловит всегда). false — сравнение со всеми группами."
+        ),
+    )
 
 
 class FxConfig(BaseModel):

@@ -13,13 +13,17 @@ from tg_jobs_parser.models.vacancy import Vacancy
 
 ParseProgressCallback = Callable[["ParseProgressSnapshot"], None]
 
+# Сколько последних уникальных вакансий несёт снимок прогресса (live-таблица в UI).
+PROGRESS_PREVIEW_LIMIT = 30
+
 
 @dataclass
 class ParseProgressSnapshot:
     """Промежуточное состояние во время ``run_parse``.
 
-    ``vacancies`` / ``vacancies_found`` — уникальные на текущий момент
-    (инкрементальный дедуп), чтобы live-preview в UI имел стабильные id.
+    ``vacancies_found`` — число уникальных на текущий момент (инкрементальный
+    дедуп), ``vacancies`` — последние ``PROGRESS_PREVIEW_LIMIT`` из них для
+    live-preview (все — только при ``output.save_progress_batches``).
     """
 
     posts_processed: int

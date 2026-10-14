@@ -178,3 +178,24 @@ def test_no_sink_still_returns_full_result(monkeypatch):
     result = parse_runner.run_parse(cfg)
 
     assert len(result.vacancies_unique) == 5
+
+
+def test_progress_snapshot_carries_only_preview_tail(monkeypatch):
+    """Снимок прогресса несёт хвост уникальных, а не копию всех (без partial-батчей)."""
+    from tg_jobs_parser.parse_progress import PROGRESS_PREVIEW_LIMIT
+
+    posts = [_post(i) for i in range(PROGRESS_PREVIEW_LIMIT + 15)]
+    snaps = []
+    cfg = _config(progress_batch_posts=5)
+    monkeypatch.setattr(
+        parse_runner,
+        "_channel_parser",
+        lambda config, cancellation=None: _FakeChannelParser(posts),
+    )
+    result = parse_runner.run_parse(cfg, progress_callback=snaps.append)
+
+    last = snaps[-1]
+    assert last.vacancies_found == len(result.vacancies_unique) == len(posts)
+    assert len(last.vacancies) == PROGRESS_PREVIEW_LIMIT
+    # Последовательный путь (< 200 постов, без AI): порядок уникальных = порядок постов.
+    assert [v.post_url for v in last.vacancies] == [p.post_url for p in posts[-PROGRESS_PREVIEW_LIMIT:]]
