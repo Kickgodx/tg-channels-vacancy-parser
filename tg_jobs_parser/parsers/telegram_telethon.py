@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
+from tg_jobs_parser.parsers.base import BaseChannelParser, ChannelCheckpoint, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import resolve_search_date_from, resolve_search_date_to
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
@@ -16,6 +16,9 @@ from tg_jobs_parser.utils.logger import get_logger
 from tg_jobs_parser.utils.text import compact_whitespace
 
 _LOG = get_logger(__name__)
+
+# Сколько раз за обход одного канала ждать FloodWait и продолжать с места остановки.
+_MAX_FLOOD_RESUMES = 3
 
 
 @dataclass(frozen=True)
@@ -273,7 +276,16 @@ class TelegramTelethonParser(BaseChannelParser):
         await start_telethon_client(client)
 
     async def _iter_channel(self, client, username: str) -> tuple[list[RawPost], str | None]:
-        """Вычитка одного канала на уже подключённом клиенте."""
+        """Вычитка одного канала на уже подключённом клиенте.
+
+        Идёт от новых сообщений к старым. ``date_to`` в прошлом — старт с ``offset_date``,
+        а не перебор всего, что новее окна. Есть чекпоинт канала, покрывающий
+        ``date_from``, — читаем только сообщения новее него (``min_id``). FloodWait
+        дольше ``parser.flood_wait_max_seconds`` или ошибка посреди обхода не
+        выбрасывают уже прочитанные посты: канал возвращается частично, с предупреждением.
+        """
+        from telethon.errors import FloodWaitError
+
         max_scan = self.config.parser.max_posts_per_channel
 
         df_d = resolve_search_date_from(self.config.search.date_from)
@@ -281,69 +293,153 @@ class TelegramTelethonParser(BaseChannelParser):
         dt_start = _combine_utc(df_d, end_of_day=False) if df_d else None
         dt_end = _combine_utc(dt_d, end_of_day=True) if dt_d else None
         use_date_window = dt_start is not None and dt_end is not None
+        # Окно упирается в «сейчас» — обход начинается с самого нового сообщения,
+        # и только тогда прочитанное сплошь можно зафиксировать чекпоинтом.
+        from_newest = dt_end is None or dt_end >= datetime.now(UTC)
+        offset_date = None if from_newest else dt_end
+
+        checkpoint = self.checkpoints.get(username)
+        use_checkpoint = (
+            self.config.parser.incremental_fetch
+            and checkpoint is not None
+            and use_date_window
+            and from_newest
+            and df_d >= checkpoint.covered_from
+        )
+        min_id = checkpoint.last_message_id if use_checkpoint else 0
 
         # При полном диапазоне дат крутим историю до выхода за date_from; limit в Telethon —
         # это потолок по числу **просмотренных** сообщений (включая пропущенные по дате).
         iter_limit = None if use_date_window else max_scan
 
         scanned = 0
+        max_seen_id = 0
+        reached_window_start = False
+        stopped_early = False  # лимит, отмена или ошибка: покрытие не сплошное
+        warning: str | None = None
         posts: list[RawPost] = []
+        offset_id = 0  # продолжение после FloodWait: сообщения старше последнего просмотренного
+        flood_resumes = 0
 
         cancel = self.cancellation
-        async for msg in client.iter_messages(username, limit=iter_limit):
-            if cancel and cancel.is_cancelled():
-                _LOG.warning("Telethon @%s: обход прерван (отмена).", username)
-                break
-            scanned += 1
-            if scanned > max_scan:
-                _LOG.warning(
-                    "Telethon @%s: достигнут лимит max_posts_per_channel=%s просмотренных сообщений. "
-                    "Увеличьте parser.max_posts_per_channel в config.yaml, если нужна более глубокая история.",
+        while True:
+            try:
+                async for msg in client.iter_messages(
                     username,
-                    max_scan,
+                    limit=iter_limit,
+                    offset_date=offset_date,
+                    offset_id=offset_id,
+                    min_id=min_id,
+                ):
+                    if cancel and cancel.is_cancelled():
+                        _LOG.warning("Telethon @%s: обход прерван (отмена).", username)
+                        stopped_early = True
+                        break
+                    scanned += 1
+                    if scanned > max_scan:
+                        _LOG.warning(
+                            "Telethon @%s: достигнут лимит max_posts_per_channel=%s просмотренных сообщений. "
+                            "Увеличьте parser.max_posts_per_channel в config.yaml, если нужна более глубокая история.",
+                            username,
+                            max_scan,
+                        )
+                        stopped_early = True
+                        break
+                    offset_id = msg.id
+                    max_seen_id = max(max_seen_id, msg.id)
+
+                    raw = getattr(msg, "message", None)
+                    if not raw or not str(raw).strip():
+                        continue
+
+                    md = getattr(msg, "date", None)
+                    if md is None:
+                        continue
+                    msg_dt = md
+                    msg_dt = msg_dt.replace(tzinfo=UTC) if msg_dt.tzinfo is None else msg_dt.astimezone(UTC)
+
+                    if use_date_window:
+                        if msg_dt > dt_end:
+                            continue
+                        if msg_dt < dt_start:
+                            reached_window_start = True
+                            break
+
+                    post_id = str(msg.id)
+                    text = compact_whitespace(str(raw))
+                    post_url = f"https://t.me/{username}/{post_id}"
+
+                    posts.append(
+                        RawPost(
+                            channel_username=username,
+                            post_id=post_id,
+                            text=text,
+                            post_date=msg_dt,
+                            post_url=post_url,
+                        )
+                    )
+                break
+            except FloodWaitError as e:
+                wait_s = int(getattr(e, "seconds", 0) or 0)
+                limit_s = self.config.parser.flood_wait_max_seconds
+                if wait_s > limit_s or flood_resumes >= _MAX_FLOOD_RESUMES:
+                    warning = (
+                        f"@{username}: FloodWait {wait_s} с (ждём не дольше {limit_s} с, "
+                        f"до {_MAX_FLOOD_RESUMES} раз) — канал прочитан частично: {len(posts)} постов."
+                    )
+                    _LOG.warning("Telethon %s", warning)
+                    stopped_early = True
+                    break
+                flood_resumes += 1
+                _LOG.warning(
+                    "Telethon @%s: FloodWait %s с — ждём и продолжаем со сообщений старше id %s.",
+                    username,
+                    wait_s,
+                    offset_id,
                 )
+                if not await self._sleep_cancellable(wait_s):
+                    stopped_early = True
+                    break
+            except Exception as e:
+                if not posts:
+                    raise
+                warning = f"@{username}: Telethon — {e}; канал прочитан частично: {len(posts)} постов."
+                _LOG.warning("Telethon %s", warning)
+                stopped_early = True
                 break
 
-            raw = getattr(msg, "message", None)
-            if not raw or not str(raw).strip():
-                continue
-
-            md = getattr(msg, "date", None)
-            if md is None:
-                continue
-            msg_dt = md
-            msg_dt = msg_dt.replace(tzinfo=UTC) if msg_dt.tzinfo is None else msg_dt.astimezone(UTC)
-
-            if use_date_window:
-                if msg_dt > dt_end:
-                    continue
-                if msg_dt < dt_start:
-                    break
-
-            post_id = str(msg.id)
-            text = compact_whitespace(str(raw))
-            post_url = f"https://t.me/{username}/{post_id}"
-
-            posts.append(
-                RawPost(
-                    channel_username=username,
-                    post_id=post_id,
-                    text=text,
-                    post_date=msg_dt,
-                    post_url=post_url,
-                )
-            )
+        if from_newest and use_date_window and not stopped_early:
+            # Дошли до date_from — покрыто с него. Кончились сообщения выше min_id —
+            # покрытие сплошное с прошлым чекпоинтом. Кончилась вся история — с date_from.
+            covered_from = checkpoint.covered_from if use_checkpoint and not reached_window_start else df_d
+            last_id = max(max_seen_id, min_id)
+            if last_id:
+                self.new_checkpoints[username] = ChannelCheckpoint(last_message_id=last_id, covered_from=covered_from)
 
         posts.sort(key=lambda p: p.post_date or datetime.min.replace(tzinfo=UTC))
         cnt = len(posts)
         _LOG.info(
-            "Telethon: @%s — текстовых сообщений в выборке: %s (просмотрено сообщений API: %s, лимит сканирования: %s)",
+            "Telethon: @%s — текстовых сообщений в выборке: %s (просмотрено сообщений API: %s, "
+            "лимит сканирования: %s%s)",
             username,
             cnt,
             scanned,
             max_scan,
+            f", только новее id {min_id}" if min_id else "",
         )
-        return posts, None
+        return posts, warning
+
+    async def _sleep_cancellable(self, seconds: float) -> bool:
+        """Пауза с проверкой отмены раз в секунду. False — прогон отменён во время ожидания."""
+        cancel = self.cancellation
+        remaining = float(seconds)
+        while remaining > 0:
+            if cancel and cancel.is_cancelled():
+                return False
+            step = min(1.0, remaining)
+            await asyncio.sleep(step)
+            remaining -= step
+        return not (cancel and cancel.is_cancelled())
 
 
 __all__ = [

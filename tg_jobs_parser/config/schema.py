@@ -427,6 +427,23 @@ class ParserConfig(BaseModel):
             "1 = последовательно (старое поведение). Разумный диапазон — 3..8: больше повышает риск FloodWait."
         ),
     )
+    incremental_fetch: bool = Field(
+        default=True,
+        description=(
+            "Telethon: читать из канала только сообщения новее чекпоинта прошлого успешного прогона "
+            "(если окно дат до «сегодня» и чекпоинт покрывает date_from). Чекпоинты хранит backend; "
+            "false — каждый прогон перечитывает всё окно."
+        ),
+    )
+    flood_wait_max_seconds: int = Field(
+        default=300,
+        ge=0,
+        le=3600,
+        description=(
+            "Telethon: FloodWait не дольше N секунд пережидаем и продолжаем обход канала с места остановки; "
+            "дольше — канал возвращается частично (с предупреждением). Короткие (до 60 с) Telethon ждёт сам."
+        ),
+    )
     request_timeout_seconds: float = 20.0
     sleep_between_requests_seconds: float = 1.0
     vacancy_fuzzy_duplicate_threshold: int = 88

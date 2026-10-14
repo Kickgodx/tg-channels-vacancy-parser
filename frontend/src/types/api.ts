@@ -407,7 +407,12 @@ export interface RunCreateBody {
     cities?: string[];
     work_formats?: string[];
   };
-  parser?: { vacancy_score_threshold?: number; vacancy_min_substantive_score?: number };
+  parser?: {
+    vacancy_score_threshold?: number;
+    vacancy_min_substantive_score?: number;
+    /** false — перечитать окно целиком, не глядя на чекпоинты каналов. */
+    incremental_fetch?: boolean;
+  };
   ai?: { enabled?: boolean; model?: string; fallback_models?: string[]; use_cache?: boolean };
 }
 
@@ -427,4 +432,5 @@ export interface ParseFormState {
   aiModel: string;
   aiFallbacks: string[];
   ignoreLlmCache: boolean;
+  fullRescan: boolean;
 }

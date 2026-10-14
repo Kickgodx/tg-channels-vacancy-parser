@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from tg_jobs_parser.config.schema import AppConfig
@@ -24,6 +24,18 @@ class RawPost:
     post_url: str | None
 
 
+@dataclass(frozen=True)
+class ChannelCheckpoint:
+    """Сплошное покрытие канала: прочитаны все сообщения с ``covered_from`` по ``last_message_id``.
+
+    Следующий прогон с ``date_from >= covered_from`` (и окном до «сегодня») читает
+    только сообщения новее ``last_message_id`` (``min_id`` в Telethon).
+    """
+
+    last_message_id: int
+    covered_from: date
+
+
 class BaseChannelParser(ABC):
     """Абстракция источника постов (Telethon и др.)."""
 
@@ -35,6 +47,10 @@ class BaseChannelParser(ABC):
     ) -> None:
         self.config = config
         self.cancellation = cancellation
+        # Чекпоинты на вход (из БД) и новые — по каналам, прочитанным сплошь от новых
+        # сообщений до границы окна. Парсеры без поддержки их просто не заполняют.
+        self.checkpoints: dict[str, ChannelCheckpoint] = {}
+        self.new_checkpoints: dict[str, ChannelCheckpoint] = {}
 
     @abstractmethod
     def fetch_posts(self, channel_username: str) -> tuple[list[RawPost], str | None]:

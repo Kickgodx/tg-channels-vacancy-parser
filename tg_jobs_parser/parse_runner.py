@@ -40,7 +40,7 @@ from tg_jobs_parser.parse_progress import (
     clear_partial_batches,
     save_partial_batch,
 )
-from tg_jobs_parser.parsers.base import BaseChannelParser, RawPost
+from tg_jobs_parser.parsers.base import BaseChannelParser, ChannelCheckpoint, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import (
     clamp_range_days,
@@ -102,6 +102,7 @@ def _build_parse_result(
     process_elapsed_sec: float = 0.0,
     fx_rates: dict[date, dict[str, float]] | None = None,
     incomplete_reason: str | None = None,
+    channel_checkpoints: dict[str, ChannelCheckpoint] | None = None,
 ) -> ParseResult:
     _LOG.info(
         "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
@@ -170,6 +171,7 @@ def _build_parse_result(
         duplicates=dups,
         metrics=metrics,
         incomplete_reason=incomplete_reason,
+        channel_checkpoints=channel_checkpoints or {},
     )
 
 
@@ -210,6 +212,31 @@ def _end_span(span: trace.Span, ctx_token) -> None:
     span.end()
 
 
+def _checkpoints_if_fully_processed(
+    channel_fetcher,
+    *,
+    config: AppConfig,
+    ai_service: AIEnrichmentService | None,
+    incomplete_reason: str | None,
+    all_warnings: list[str],
+) -> dict[str, ChannelCheckpoint]:
+    """Новые чекпоинты каналов — только если ни один прочитанный пост не потерян.
+
+    Сдвинутый чекпоинт означает «эти сообщения больше не читать»: пост, отброшенный
+    из-за сбоя LLM в ``primary``, следующий прогон уже не увидел бы.
+    """
+    new = dict(getattr(channel_fetcher, "new_checkpoints", None) or {})
+    if not new or incomplete_reason:
+        return {}
+    if ai_service is not None and config.ai.mode == "primary" and ai_service.stats.errors:
+        all_warnings.append(
+            f"Чекпоинты каналов не сдвинуты: {ai_service.stats.errors} постов не разобраны LLM "
+            "(режим primary) — следующий прогон перечитает окно."
+        )
+        return {}
+    return new
+
+
 def _api_run(cli_overrides: dict | None) -> bool:
     """Прогон через REST API — служебные строки не дублируем в parse_warnings (есть run_params / UI)."""
     return bool(cli_overrides and cli_overrides.get("api"))
@@ -224,6 +251,7 @@ def run_parse(
     cancel: ParseCancellationToken | None = None,
     vacancy_batch_sink: Callable[[list[Vacancy]], None] | None = None,
     fx_rates: dict[date, dict[str, float]] | None = None,
+    channel_checkpoints: dict[str, ChannelCheckpoint] | None = None,
 ) -> ParseResult:
     """
     Основной сценарий MVP.
@@ -235,6 +263,9 @@ def run_parse(
     (что наступит раньше) и в конце прогона — чтобы сохранять вакансии в БД по ходу
     обработки, а не только в конце.
     ``fx_rates`` — готовые курсы (из БД); если заданы, метрики не ходят в ЦБ.
+    ``channel_checkpoints`` — чекпоинты каналов прошлых прогонов (из БД) для
+    инкрементальной вычитки; новые возвращаются в ``ParseResult.channel_checkpoints``
+    только если все прочитанные посты разобраны (см. ``parser.incremental_fetch``).
     """
     try_load_dotenv()
 
@@ -242,6 +273,8 @@ def run_parse(
         install_sigint_cancel_handler(cancel, log=_LOG.warning)
 
     channel_fetcher = _channel_parser(config, cancellation=cancel)
+    if channel_checkpoints and isinstance(channel_fetcher, BaseChannelParser):
+        channel_fetcher.checkpoints = dict(channel_checkpoints)
 
     date_from = resolve_search_date_from(config.search.date_from)
     date_to = resolve_search_date_to(config.search.date_to)
@@ -566,6 +599,14 @@ def run_parse(
             len(candidates),
         )
 
+        new_checkpoints = _checkpoints_if_fully_processed(
+            channel_fetcher,
+            config=config,
+            ai_service=ai_service,
+            incomplete_reason=incomplete_reason,
+            all_warnings=all_warnings,
+        )
+
         _flush_pending()
         return _build_parse_result(
             config=config,
@@ -582,6 +623,7 @@ def run_parse(
             process_elapsed_sec=process_elapsed,
             fx_rates=fx_rates,
             incomplete_reason=incomplete_reason,
+            channel_checkpoints=new_checkpoints,
         )
     except ParseCancelled:
         _LOG.warning("Прогон прерван (отмена).")

@@ -43,6 +43,8 @@ class RunFiltersOverrides(_RunOverrides):
 class RunParserOverrides(_RunOverrides):
     vacancy_score_threshold: int | None = None
     vacancy_min_substantive_score: int | None = Field(default=None, ge=0)
+    # false — разово перечитать окно целиком, не глядя на чекпоинты каналов.
+    incremental_fetch: bool | None = None
 
 
 class RunAiOverrides(_RunOverrides):

@@ -8,6 +8,7 @@ from pydantic import AliasChoices, BaseModel, Field
 
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.parsers.base import ChannelCheckpoint
 
 
 class ParseResult(BaseModel):
@@ -31,4 +32,9 @@ class ParseResult(BaseModel):
             "Прогон дошёл до конца, но часть постов осталась неразобранной (LLM отключён "
             "в режиме primary). Собранные вакансии валидны; статус прогона — не completed."
         ),
+    )
+    channel_checkpoints: dict[str, ChannelCheckpoint] = Field(
+        default_factory=dict,
+        exclude=True,
+        description="Новые чекпоинты каналов (инкрементальная вычитка); backend сохраняет их при completed.",
     )

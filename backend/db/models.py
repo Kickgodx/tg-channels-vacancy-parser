@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -298,3 +299,18 @@ class AIExtractionCacheRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class TelegramChannelCheckpointRow(Base):
+    """Чекпоинт инкрементальной вычитки канала: прочитано всё с ``covered_from`` по ``last_message_id``.
+
+    Пишется вместе с финализацией ``completed``-прогона (см. ``ChannelCheckpoint``).
+    """
+
+    __tablename__ = "telegram_channel_checkpoints"
+
+    channel: Mapped[str] = mapped_column(String(128), primary_key=True)
+    last_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    covered_from: Mapped[date] = mapped_column(Date, nullable=False)
+    parse_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

@@ -11,6 +11,7 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from backend.db import repository as repo
+from backend.db.channel_checkpoint_repository import load_channel_checkpoints, save_channel_checkpoints
 from backend.db.session import session_scope
 from backend.observability import (
     PARSE_RUNS_ACTIVE,
@@ -26,6 +27,7 @@ from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.parse_cancel import ParseCancellationToken, ParseCancelled
 from tg_jobs_parser.parse_progress import ParseProgressSnapshot
 from tg_jobs_parser.parse_runner import run_parse
+from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)
@@ -257,6 +259,10 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
                 updated_existing=upsert_totals.updated_existing + stats.updated_existing,
             )
             repo.patch_run_vacancy_upsert_stats(session, run_id, totals)
+            if final_status == "completed":
+                # Чекпоинты двигаем только вместе с успешной финализацией: иначе
+                # следующий прогон пропустил бы посты, которые этот не сохранил.
+                save_channel_checkpoints(session, res.channel_checkpoints, parse_run_id=run_id)
         upsert_totals = totals
         flushed_ids.update(v.id for v in remaining)
         return totals
@@ -279,6 +285,15 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
         except Exception as e:
             _LOG.warning("Прогон %s: не удалось взять курсы из БД: %s", run_id, e)
 
+    checkpoints = None
+    if config.parser.incremental_fetch:
+        try:
+            channels = [u for u in (normalize_channel_username(c) for c in config.sources.channels) if u]
+            with session_scope() as session:
+                checkpoints = load_channel_checkpoints(session, channels)
+        except Exception as e:
+            _LOG.warning("Прогон %s: чекпоинты каналов не прочитаны, читаем окно целиком: %s", run_id, e)
+
     try:
         result = run_parse(
             config,
@@ -287,6 +302,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             cancel=cancel_token,
             vacancy_batch_sink=flush_vacancies,
             fx_rates=fx_rates,
+            channel_checkpoints=checkpoints,
         )
         if lease_lost.is_set():
             status = "failed"

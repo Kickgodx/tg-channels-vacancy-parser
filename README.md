@@ -301,6 +301,13 @@ uvicorn backend.main:app --reload --port 8000
 - **Неполный прогон.** Если в `ai.mode: primary` LLM отключился по лимиту, оставшиеся посты не разбираются. Такой прогон получает статус `failed` с причиной в `error_message`; уже разобранные вакансии сохранены, а неразобранные посты не кэшируются — повторный прогон после сброса лимита обработает их.
 - **Docker Compose:** у сервисов приложения `restart: unless-stopped` и healthcheck; воркеры стартуют после того, как backend стал healthy (то есть применил миграции).
 
+Инкрементальная вычитка каналов:
+
+- **Чекпоинты.** После `completed`-прогона для каждого канала, прочитанного сплошь до границы окна, сохраняется чекпоинт «прочитано всё с даты X по сообщение N» (`telegram_channel_checkpoints`). Следующий прогон читает из канала только сообщения новее N — ежедневный запуск не перечитывает недельное окно заново. Чекпоинт не двигается, если канал прочитан не до конца или пост потерян (`failed`, отмена, в `primary` — сбой LLM на посте). Полный перечит окна (после смены фильтров или промпта) — галочка «Перечитать окно дат целиком» в форме запуска. Подробности — `parser.incremental_fetch` в [config.md](config.md).
+- **Окно в прошлом.** Если `date_to` раньше сегодняшнего дня, обход начинается с `date_to` (`offset_date`), а не перебирает всё, что новее окна, расходуя `max_posts_per_channel`.
+- **FloodWait.** Ожидание до `parser.flood_wait_max_seconds` пережидается с продолжением обхода с места остановки; более долгое или ошибка посреди канала возвращают уже прочитанные посты с предупреждением, а не пустой канал.
+- **Дедуп** внутри прогона сравнивает fuzzy-ключи только в блоке с тем же набором специализаций (`parser.fuzzy_dedup_block_by_specializations`), а снимок прогресса несёт последние 30 вакансий, а не копию всех уникальных.
+
 ---
 
 ## Backend API (FastAPI)
@@ -344,7 +351,8 @@ uvicorn backend.main:app --reload --port 8000
 `API_KEY`, если задан, — дополнительный заголовок `X-API-Key` поверх JWT, а не замена ему.
 
 Тело `POST /runs` — whitelist overrides поверх `config.yaml`: `channels`,
-`search.date_from|date_to`, `filters.*`, `parser.vacancy_score_threshold|vacancy_min_substantive_score`,
+`search.date_from|date_to`, `filters.*`,
+`parser.vacancy_score_threshold|vacancy_min_substantive_score|incremental_fetch`,
 `ai.enabled|model|fallback_models|use_cache` (модели — только id из `llm_models.yaml`).
 Любое другое поле → 422: `ai.base_url`, лимиты, concurrency и путь к Telethon-сессии
 задаются только на сервере.
@@ -374,8 +382,8 @@ uvicorn backend.main:app --reload --port 8000
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…016`, head —
-`016_job_attempts`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…017`, head —
+`017_channel_checkpoints`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -390,6 +398,7 @@ uvicorn backend.main:app --reload --port 8000
 | `llm_jobs` | Фоновые LLM-задачи мэтчинга/писем (`queued`/`running`/`done`/`error`) |
 | `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
+| `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
 
 **Если меняете колонки/таблицы** — добавьте новую миграцию (`alembic revision`) и обновите модели в `backend/db/models.py`; при следующем `docker compose up` она применится автоматически, данные сохранятся.
 
