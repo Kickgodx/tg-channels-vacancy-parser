@@ -101,6 +101,37 @@ services:
       timeout: 3s
       retries: 10
 
+  # Плановый pg_dump всей базы + проверка восстановления во временный кластер внутри
+  # контейнера (scripts/pg_backup.sh). Дампы — на хосте в BACKUP_HOST_DIR (переживают
+  # down -v). Образ — та же major-версия, что у postgres: pg_dump не может быть старше сервера.
+  # Внеплановый дамп: docker compose exec pg-backup /scripts/pg_backup.sh once
+  # unhealthy — последний проверенный дамп старше 1,5 × BACKUP_INTERVAL_HOURS.
+  pg-backup:
+    image: postgres:16-alpine
+    logging: *default-logging
+    entrypoint: ["/bin/sh", "/scripts/pg_backup.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: tgjobs
+      PGDATABASE: tgjobs
+      PGPASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_KEEP: ${BACKUP_KEEP:-7}
+    volumes:
+      - ./scripts/pg_backup.sh:/scripts/pg_backup.sh:ro
+      - ${BACKUP_HOST_DIR:-./backup/pg}:/backups
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - test $$(( $$(date +%s) - $$(cat /backups/.last_verified 2>/dev/null || echo 0) )) -lt $$(( BACKUP_INTERVAL_HOURS * 5400 ))
+      interval: 5m
+      timeout: 5s
+      start_period: 1h
+
   backend:
     <<: *app-common
     ports:

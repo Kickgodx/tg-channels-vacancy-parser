@@ -42,7 +42,8 @@ docker compose up --build
 Полный стек (Prometheus, Grafana, Loki, Alloy, Tempo) включается профилем
 `observability` через `COMPOSE_PROFILES=observability` в `.env` (уже есть в
 `.env.example`). Без этой переменной `docker compose up` поднимает только
-ядро: postgres, redis, backend, workers, frontend.
+ядро: postgres, redis, backend, workers, frontend, pg-backup
+([резервное копирование](#резервное-копирование-pg_dump-по-расписанию)).
 
 Если `.env` создан раньше — добавьте строку `COMPOSE_PROFILES=observability`,
 иначе Grafana/Prometheus не стартуют.
@@ -89,6 +90,9 @@ GRAFANA_ADMIN_PASSWORD=...      # только с профилем observability
 # APP_ENV=dev                     # dev (локально) или prod — см. «Режимы dev и prod» ниже
 # BIND_ADDR=127.0.0.1             # адрес публикации портов UI/API в compose; 0.0.0.0 — открыть в сеть
 # INFRA_BIND_ADDR=127.0.0.1       # то же для Postgres, Redis и observability
+# BACKUP_INTERVAL_HOURS=24        # pg-backup: период pg_dump (см. «Резервное копирование»)
+# BACKUP_KEEP=7                   # pg-backup: сколько проверенных дампов хранить
+# BACKUP_HOST_DIR=./backup/pg     # pg-backup: каталог дампов на хосте
 # API_KEY=                        # если задан — заголовок X-API-Key для API (дополнительно к JWT)
 # JWT_SECRET=                     # подпись access-токенов; в dev без него — эфемерный (сессии сгорают при рестарте), в prod обязателен (32+ символа)
 # JWT_TTL_MINUTES=60              # TTL access-токена
@@ -506,8 +510,9 @@ tg_jobs_parser/
   config.yaml
   llm_models.yaml
   docker-compose.yml       — postgres, redis, backend, parse-worker, llm-worker, hh-worker,
-                             frontend; observability — profile `observability`
+                             frontend, pg-backup; observability — profile `observability`
   Dockerfile.backend
+  scripts/pg_backup.sh     — плановый pg_dump + проверка восстановления (сервис pg-backup)
 
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
     api/routes/            — health, auth, config, runs, vacancies, hh,
@@ -699,11 +704,52 @@ python -m tg_jobs_parser.cli login --telegram-session sessions/tg_jobs.session
 
 Короткая команда после `poetry install`: `poetry run tg-jobs-parser login`
 
+### Резервное копирование (pg_dump по расписанию)
+
+Сервис `pg-backup` в `docker-compose.yml` (входит в ядро, не в профиль observability)
+раз в `BACKUP_INTERVAL_HOURS` (по умолчанию 24) снимает `pg_dump -Fc` **всей** базы —
+пользователи, резюме, матчи, письма, пресеты, HH, чекпоинты каналов, квоты LLM.
+Логика — `scripts/pg_backup.sh`.
+
+- **Проверка восстановления — на каждом дампе.** Дамп восстанавливается во временный
+  кластер внутри контейнера (боевой Postgres не нагружается), затем сверяются набор
+  таблиц и `alembic_version` с источником; таблица, где в источнике есть строки, а после
+  восстановления пусто, — провал. Не прошедший проверку дамп остаётся как
+  `*.dump.unverified`, повтор — через `BACKUP_RETRY_MINUTES` (60).
+- **Где лежит.** `BACKUP_HOST_DIR` на хосте (по умолчанию `./backup/pg`, в `.gitignore`):
+  `tgjobs_<UTC-время>.dump` + `.counts` (число строк по таблицам после восстановления).
+  Каталог на хосте переживает `docker compose down -v`, но не потерю диска — копию за
+  пределы машины нужно настроить отдельно.
+- **Ротация.** Хранятся последние `BACKUP_KEEP` (7) проверенных дампов.
+- **Мониторинг.** Контейнер `unhealthy`, если последний проверенный дамп старше
+  1,5 × `BACKUP_INTERVAL_HOURS`; каждый шаг пишется в stdout (в Loki через Alloy).
+  Рестарт контейнера дамп не повторяет — отсчёт идёт от последнего удачного.
+
+```powershell
+# внеплановый дамп сейчас
+docker compose exec pg-backup /scripts/pg_backup.sh once
+# проверить восстановление существующего дампа (любого, в т.ч. снятого вручную)
+docker compose exec pg-backup /scripts/pg_backup.sh check /backups/tgjobs_20261015_030000.dump
+```
+
+**Восстановление** — в пересозданную базу: `pg_restore --clean` поверх существующей
+оставил бы таблицы из миграций новее дампа, и `alembic upgrade` при старте упал бы.
+
+```powershell
+docker compose stop backend parse-worker llm-worker hh-worker
+docker compose exec pg-backup dropdb --force tgjobs
+docker compose exec pg-backup createdb tgjobs
+docker compose exec pg-backup pg_restore -d tgjobs --no-owner --exit-on-error /backups/tgjobs_20261015_030000.dump
+docker compose start backend parse-worker llm-worker hh-worker
+```
+
+Backend при старте догонит схему миграциями, если дамп старше кода.
+
 ### Перенос данных между инстансами (дамп / импорт БД)
 
-Экспорт корпуса вакансий и служебных таблиц (прогоны, вакансии, курсы ЦБ, кэш
-LLM) в JSON. Пользователи, резюме, матчи, письма, пресеты и `hh_listings` в
-дамп **не** входят:
+Это **не** бэкап (см. выше), а перенос корпуса вакансий и служебных таблиц
+(прогоны, вакансии, курсы ЦБ, кэш LLM) в JSON. Пользователи, резюме, матчи,
+письма, пресеты и `hh_listings` в дамп **не** входят:
 
 ```powershell
 # локально (DATABASE_URL в .env)
