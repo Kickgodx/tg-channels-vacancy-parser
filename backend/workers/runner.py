@@ -32,6 +32,9 @@ def run_rq_worker(
     setup: Callable[[], None] | None = None,
 ) -> None:
     """Блокирующий цикл SimpleWorker на ``queue_name`` до остановки."""
+    from backend.db.session import set_pool_role
+
+    set_pool_role(role)
     setup_logging()
     try_load_dotenv()
     log = logging.getLogger(f"backend.workers.{role}")

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from alembic import command
@@ -38,11 +40,35 @@ def _widen_alembic_version_column() -> None:
         conn.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"))
 
 
+# Ключ pg_advisory_lock миграций (произвольная константа проекта).
+MIGRATION_LOCK_KEY = 7_242_031_001
+
+
+@contextmanager
+def migration_lock(engine) -> Iterator[None]:
+    """Взаимоисключение ``upgrade head`` между процессами (Postgres; на SQLite — no-op).
+
+    Второй процесс / реплика API ждёт, пока первый применит миграции, и затем
+    получает уже актуальную схему (upgrade — no-op), а не гонку DDL.
+    """
+    if engine.dialect.name != "postgresql":
+        yield
+        return
+    # AUTOCOMMIT: session-level lock не держит открытую транзакцию на время DDL.
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": MIGRATION_LOCK_KEY})
+        try:
+            yield
+        finally:
+            conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": MIGRATION_LOCK_KEY})
+
+
 def upgrade_head() -> None:
     cfg = Config(str(alembic_ini_path()))
     cfg.attributes["configure_logger"] = False
-    _widen_alembic_version_column()
-    command.upgrade(cfg, "head")
+    with migration_lock(get_engine()):
+        _widen_alembic_version_column()
+        command.upgrade(cfg, "head")
 
 
 def init_schema() -> None:
