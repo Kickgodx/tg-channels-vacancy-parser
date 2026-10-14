@@ -16,7 +16,7 @@ from tg_jobs_parser.observability.parse_metrics import (
     record_channel_fetched,
     record_flood_wait,
 )
-from tg_jobs_parser.parsers.base import BaseChannelParser, ChannelCheckpoint, RawPost
+from tg_jobs_parser.parsers.base import BaseChannelParser, ChannelCallback, ChannelCheckpoint, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import resolve_search_date_from, resolve_search_date_to
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
@@ -169,6 +169,17 @@ class TelegramTelethonParser(BaseChannelParser):
             return [], f"@{username}: Telethon — {e}"
 
     def fetch_posts_many(self, channel_usernames: list[str]) -> list[tuple[str, list[RawPost], str | None]]:
+        return self._run_many(channel_usernames, on_channel=None)
+
+    def stream_posts_many(self, channel_usernames: list[str], on_channel: ChannelCallback) -> None:
+        self._run_many(channel_usernames, on_channel=on_channel)
+
+    def _run_many(
+        self,
+        channel_usernames: list[str],
+        *,
+        on_channel: ChannelCallback | None,
+    ) -> list[tuple[str, list[RawPost], str | None]]:
         if err := telethon_import_error():
             raise RuntimeError("Пакет telethon не установлен. Установите: poetry install") from err
 
@@ -177,7 +188,10 @@ class TelegramTelethonParser(BaseChannelParser):
         for ch in channel_usernames:
             u = normalize_channel_username(ch)
             if not u:
-                out_placeholder.append((ch, [], "Пустое имя канала."))
+                if on_channel is not None:
+                    on_channel(ch, [], "Пустое имя канала.")
+                else:
+                    out_placeholder.append((ch, [], "Пустое имя канала."))
                 continue
             if u not in usernames:
                 usernames.append(u)
@@ -185,7 +199,7 @@ class TelegramTelethonParser(BaseChannelParser):
         if not usernames:
             return out_placeholder
 
-        results = _asyncio_run(self._fetch_many_async(usernames))
+        results = _asyncio_run(self._fetch_many_async(usernames, on_channel=on_channel))
         return out_placeholder + results
 
     async def _fetch_single_with_own_client(self, username: str) -> tuple[list[RawPost], str | None]:
@@ -203,8 +217,19 @@ class TelegramTelethonParser(BaseChannelParser):
         finally:
             await _disconnect_client(client)
 
-    async def _fetch_many_async(self, usernames: list[str]) -> list[tuple[str, list[RawPost], str | None]]:
-        """Один клиент + asyncio.gather с ограничением конкурентности."""
+    async def _fetch_many_async(
+        self,
+        usernames: list[str],
+        *,
+        on_channel: ChannelCallback | None = None,
+    ) -> list[tuple[str, list[RawPost], str | None]]:
+        """Один клиент + asyncio.gather с ограничением конкурентности.
+
+        С ``on_channel`` канал отдаётся колбэку сразу после вычитки, а в результат
+        попадает без постов. Колбэк вызывается в отдельном потоке, но внутри
+        семафора: пока он блокирован (очередь обработки полна), слот вычитки занят —
+        новые каналы не читаются.
+        """
         from telethon import TelegramClient
 
         api_id, api_hash = telegram_api_credentials()
@@ -226,16 +251,24 @@ class TelegramTelethonParser(BaseChannelParser):
 
             cancel = self.cancellation
 
+            async def _deliver(item: tuple[str, list[RawPost], str | None]) -> tuple[str, list[RawPost], str | None]:
+                if on_channel is None:
+                    return item
+                u, posts, warn = item
+                await asyncio.to_thread(on_channel, u, posts, warn)
+                return u, [], warn
+
             async def _one(u: str) -> tuple[str, list[RawPost], str | None]:
                 if cancel and cancel.is_cancelled():
                     return u, [], "Прервано (отмена)."
                 async with sem:
                     try:
                         posts, warn = await self._iter_channel(client, u)
-                        return u, posts, warn
+                        item = (u, posts, warn)
                     except Exception as e:
                         _LOG.exception("Telethon: ошибка для @%s: %s", u, e)
-                        return u, [], f"@{u}: Telethon — {e}"
+                        item = (u, [], f"@{u}: Telethon — {e}")
+                    return await _deliver(item)
 
             tasks = [asyncio.create_task(_one(u)) for u in usernames]
             task_to_user = {t: u for t, u in zip(tasks, usernames, strict=True)}

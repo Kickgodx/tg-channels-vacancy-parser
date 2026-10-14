@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import TYPE_CHECKING
@@ -34,6 +35,10 @@ class ChannelCheckpoint:
 
     last_message_id: int
     covered_from: date
+
+
+# Колбэк потоковой вычитки: (канал, посты, предупреждение) — по готовности каждого канала.
+ChannelCallback = Callable[[str, list[RawPost], str | None], None]
 
 
 class BaseChannelParser(ABC):
@@ -73,3 +78,17 @@ class BaseChannelParser(ABC):
             posts, warn = self.fetch_posts(ch)
             out.append((ch, posts, warn))
         return out
+
+    def stream_posts_many(self, channel_usernames: list[str], on_channel: ChannelCallback) -> None:
+        """
+        Потоковый вариант ``fetch_posts_many``: каждый канал отдаётся ``on_channel``
+        сразу по готовности и в памяти парсера не копится.
+
+        ``on_channel`` может блокировать (ограниченная очередь обработки) — это и есть
+        обратное давление на вычитку. Дефолт — последовательный обход через ``fetch_posts``.
+        """
+        for ch in channel_usernames:
+            if self.cancellation:
+                self.cancellation.check()
+            posts, warn = self.fetch_posts(ch)
+            on_channel(ch, posts, warn)

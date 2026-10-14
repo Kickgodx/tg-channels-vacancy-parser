@@ -85,6 +85,23 @@ def test_partial_run_does_not_move_checkpoints(monkeypatch, run_id):
     assert _stored() == {"chan": CP_OLD}
 
 
+def test_checkpoint_saved_mid_run_survives_partial_run(monkeypatch, run_id):
+    """Канал, разобранный и записанный до потери LLM, не перечитывается следующим прогоном."""
+    with session_scope() as session:
+        save_channel_checkpoints(session, {"chan": CP_OLD, "other": CP_OLD})
+
+    def fake_run_parse(config, **kwargs):
+        kwargs["checkpoint_sink"]({"chan": CP_NEW})
+        return ParseResult(channel_checkpoints={}, incomplete_reason="LLM отключён")
+
+    monkeypatch.setattr(parse_tasks, "run_parse", fake_run_parse)
+    run_parse_job(str(run_id))
+
+    with session_scope() as session:
+        assert pr.get_parse_run(session, run_id).status == "partial"
+    assert _stored() == {"chan": CP_NEW, "other": CP_OLD}
+
+
 def test_incremental_fetch_off_passes_no_checkpoints(monkeypatch, default_test_config):
     cfg = load_config(default_test_config)
     cfg = cfg.model_copy(update={"parser": cfg.parser.model_copy(update={"incremental_fetch": False})})

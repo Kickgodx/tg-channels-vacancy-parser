@@ -24,6 +24,9 @@ class ParseProgressSnapshot:
     ``vacancies_found`` — число уникальных на текущий момент (инкрементальный
     дедуп), ``vacancies`` — последние ``PROGRESS_PREVIEW_LIMIT`` из них для
     live-preview (все — только при ``output.save_progress_batches``).
+
+    Вычитка и обработка идут потоком: пока ``channels_fetched < channels_total``
+    (фаза ``fetching``), ``posts_total`` — прочитанное на текущий момент и растёт.
     """
 
     posts_processed: int
@@ -31,6 +34,8 @@ class ParseProgressSnapshot:
     vacancies_found: int
     vacancies: list[Vacancy] = field(default_factory=list)
     phase: str = "processing"
+    channels_total: int = 0
+    channels_fetched: int = 0
     ai_llm_disabled: bool = False
     ai_llm_disabled_reason: str | None = None
     ai_tokens_in: int = 0

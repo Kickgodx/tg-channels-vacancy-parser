@@ -141,6 +141,11 @@ class AIEnrichmentService:
                 self._ai.requests_per_minute,
             )
 
+    def add_to_batch(self, posts: int) -> None:
+        """Потоковый прогон: размер батча для логов растёт по мере вычитки каналов."""
+        with self.stats._lock:
+            self._progress_total += max(0, posts)
+
     def _log_llm_progress(self, vacancy: Vacancy, *, phase: str) -> None:
         if self._progress_total <= 0:
             return
