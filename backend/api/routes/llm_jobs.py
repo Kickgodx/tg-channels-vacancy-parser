@@ -11,9 +11,21 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from backend.api.deps import _extract_token, _user_from_token, get_current_user, get_db
 from backend.api.routes.resumes import _letter_to_out, _match_to_out
+from backend.api.sse import (
+    DB_POLL_INTERVAL_S,
+    HEARTBEAT_INTERVAL_S,
+    IDLE_DB_CHECK_S,
+    PUBSUB_WAIT_S,
+    SSE_DONE,
+    SSE_HEADERS,
+    SSE_PING,
+    Ticker,
+    sse_event,
+)
 from backend.db import repository as repo
 from backend.db.models import UserRow
 from backend.db.session import session_scope
@@ -22,6 +34,7 @@ from backend.observability import LLM_JOB_SSE_CONNECTIONS
 from backend.schemas import LlmJobOut
 from backend.services.llm_job_events import channel_for
 from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_MATCH
+from backend.services.pubsub_hub import PubSubUnavailable, get_pubsub_hub
 from backend.settings import get_settings
 
 _LOG = logging.getLogger(__name__)
@@ -69,86 +82,96 @@ def get_llm_job(
     return _job_to_out(db, row)
 
 
+_TERMINAL_JOB_STATUSES = frozenset({"done", "error"})
+
+
+def _load_job_out(job_id: uuid.UUID, user_id: int) -> LlmJobOut | None:
+    """Синхронное чтение — из стрима только через ``run_in_threadpool``, не в event loop."""
+    with session_scope() as session:
+        row = repo.get_llm_job(session, job_id)
+        if row is None or row.user_id != user_id:
+            return None
+        return _job_to_out(session, row)
+
+
+def _status_line(out: LlmJobOut) -> str:
+    return sse_event("status", out.model_dump_json())
+
+
+_NOT_FOUND = sse_event("error", json.dumps({"detail": "Job not found"}))
+
+
 async def _sse_llm_job(job_id: uuid.UUID, user_id: int) -> AsyncIterator[str]:
     LLM_JOB_SSE_CONNECTIONS.inc()
     try:
-        with session_scope() as session:
-            row = repo.get_llm_job(session, job_id)
-            if row is None or row.user_id != user_id:
-                yield f"event: error\ndata: {json.dumps({'detail': 'Job not found'})}\n\n"
-                return
-            initial = _job_to_out(session, row)
-        yield f"event: status\ndata: {initial.model_dump_json()}\n\n"
-        if initial.status in ("done", "error"):
-            yield "event: done\ndata: {}\n\n"
+        initial = await run_in_threadpool(_load_job_out, job_id, user_id)
+        if initial is None:
+            yield _NOT_FOUND
+            return
+        yield _status_line(initial)
+        if initial.status in _TERMINAL_JOB_STATUSES:
+            yield SSE_DONE
             return
 
-        settings = get_settings()
-        redis_url = (settings.redis_url or "").strip()
-        if not redis_url:
-            # Без Redis — короткий poll fallback на сервере
-            for _ in range(300):
-                await asyncio.sleep(1.0)
-                with session_scope() as session:
-                    row = repo.get_llm_job(session, job_id)
-                    if row is None:
-                        break
-                    out = _job_to_out(session, row)
-                yield f"event: status\ndata: {out.model_dump_json()}\n\n"
-                if out.status in ("done", "error"):
-                    yield "event: done\ndata: {}\n\n"
-                    return
-            return
-
-        from backend.queue.rq_conn import get_redis_connection
-
-        conn = get_redis_connection()
-        pubsub = conn.pubsub(ignore_subscribe_messages=True)
-        pubsub.subscribe(channel_for(job_id))
-        loop = asyncio.get_running_loop()
-        try:
-            while True:
-                message = await loop.run_in_executor(None, lambda: pubsub.get_message(timeout=1.0))
-                if message and message.get("type") == "message":
-                    raw = message.get("data")
-                    if isinstance(raw, bytes):
-                        raw = raw.decode("utf-8", errors="replace")
-                    try:
-                        payload = json.loads(raw) if isinstance(raw, str) else {}
-                    except json.JSONDecodeError:
-                        payload = {}
-                    with session_scope() as session:
-                        row = repo.get_llm_job(session, job_id)
-                        if row is None:
-                            yield f"event: error\ndata: {json.dumps({'detail': 'Job not found'})}\n\n"
-                            return
-                        out = _job_to_out(session, row)
-                    yield f"event: status\ndata: {out.model_dump_json()}\n\n"
-                    if out.status in ("done", "error") or payload.get("status") in ("done", "error"):
-                        yield "event: done\ndata: {}\n\n"
-                        return
-                else:
-                    # heartbeat / re-check terminal state
-                    with session_scope() as session:
-                        row = repo.get_llm_job(session, job_id)
-                        if row is not None and row.status in ("done", "error"):
-                            out = _job_to_out(session, row)
-                            yield f"event: status\ndata: {out.model_dump_json()}\n\n"
-                            yield "event: done\ndata: {}\n\n"
-                            return
-                await asyncio.sleep(0)
-        finally:
+        if (get_settings().redis_url or "").strip():
             try:
-                pubsub.unsubscribe(channel_for(job_id))
-                pubsub.close()
-            except Exception:
-                pass
+                async for chunk in _sse_llm_job_redis(job_id, user_id):
+                    yield chunk
+                return
+            except PubSubUnavailable as e:
+                _LOG.warning("SSE LLM-джобы %s: Redis pub/sub недоступен (%s) — опрос БД", job_id, e)
+        async for chunk in _sse_llm_job_db_poll(job_id, user_id, last=initial):
+            yield chunk
     finally:
         LLM_JOB_SSE_CONNECTIONS.dec()
 
 
+async def _sse_llm_job_db_poll(job_id: uuid.UUID, user_id: int, *, last: LlmJobOut) -> AsyncIterator[str]:
+    """Опрос БД раз в секунду: статус при изменении, до done/error."""
+    heartbeat = Ticker(HEARTBEAT_INTERVAL_S)
+    while True:
+        await asyncio.sleep(DB_POLL_INTERVAL_S)
+        out = await run_in_threadpool(_load_job_out, job_id, user_id)
+        if out is None:
+            yield _NOT_FOUND
+            return
+        if out != last:
+            last = out
+            heartbeat.reset()
+            yield _status_line(out)
+        if out.status in _TERMINAL_JOB_STATUSES:
+            yield SSE_DONE
+            return
+        if heartbeat.due():
+            yield SSE_PING
+
+
+async def _sse_llm_job_redis(job_id: uuid.UUID, user_id: int) -> AsyncIterator[str]:
+    heartbeat = Ticker(HEARTBEAT_INTERVAL_S)
+    db_check = Ticker(IDLE_DB_CHECK_S)
+    async with get_pubsub_hub().subscribe(channel_for(job_id)) as sub:
+        while True:
+            payload = await sub.get(timeout=PUBSUB_WAIT_S)
+            if payload is None and not db_check.due():
+                if heartbeat.due():
+                    yield SSE_PING
+                continue
+            # Событие (или редкая сверка в тишине): полный статус — из БД.
+            out = await run_in_threadpool(_load_job_out, job_id, user_id)
+            if out is None:
+                yield _NOT_FOUND
+                return
+            terminal = out.status in _TERMINAL_JOB_STATUSES
+            if payload is not None or terminal:
+                heartbeat.reset()
+                yield _status_line(out)
+            if terminal or (payload or {}).get("status") in _TERMINAL_JOB_STATUSES:
+                yield SSE_DONE
+                return
+
+
 @router.get("/{job_id}/events")
-async def llm_job_events(
+def llm_job_events(
     job_id: uuid.UUID,
     authorization: str | None = Header(default=None),
     access_token: str | None = Query(
@@ -159,7 +182,8 @@ async def llm_job_events(
 ) -> StreamingResponse:
     """SSE: статусы queued→running→done/error. Auth: Bearer или ``?access_token=``.
 
-    Auth/ownership — короткая ``session_scope``; стрим не держит ``get_db``.
+    Обработчик синхронный (auth/ownership в threadpool, не в event loop); стрим не
+    держит ``get_db`` — читает БД короткими сессиями.
     """
     with session_scope() as session:
         user = _user_from_token(session, _extract_token(authorization, access_token))
@@ -172,5 +196,5 @@ async def llm_job_events(
     return StreamingResponse(
         _sse_llm_job(job_id, user_id),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers=SSE_HEADERS,
     )

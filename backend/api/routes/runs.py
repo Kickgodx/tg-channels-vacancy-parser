@@ -5,10 +5,13 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from backend.api.deps import (
     _extract_token,
@@ -18,6 +21,17 @@ from backend.api.deps import (
     require_admin,
     verify_api_key,
     verify_api_key_sse,
+)
+from backend.api.sse import (
+    DB_POLL_INTERVAL_S,
+    HEARTBEAT_INTERVAL_S,
+    IDLE_DB_CHECK_S,
+    PUBSUB_WAIT_S,
+    SSE_DONE,
+    SSE_HEADERS,
+    SSE_PING,
+    Ticker,
+    sse_event,
 )
 from backend.config_builder import build_config
 from backend.db import repository as repo
@@ -43,6 +57,7 @@ from backend.schemas import (
 )
 from backend.services import idempotency, run_service
 from backend.services.parse_run_events import channel_for
+from backend.services.pubsub_hub import PubSubUnavailable, get_pubsub_hub
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import ConfigLoadError
 from tg_jobs_parser.exporters.excel_exporter import export_excel_bytes
@@ -183,107 +198,105 @@ _TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
 def _sse_progress_line(payload: dict) -> str:
-    return f"event: progress\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    return sse_event("progress", json.dumps(payload, ensure_ascii=False))
 
 
-async def _sse_events(run_id: uuid.UUID) -> AsyncIterator[str]:
+@dataclass(frozen=True)
+class _RunState:
+    status: str
+    progress: dict | None
+    progress_updated_at: datetime | None
+
+    @property
+    def terminal(self) -> bool:
+        return self.status in _TERMINAL_RUN_STATUSES
+
+
+def _load_run_state(run_id: uuid.UUID) -> _RunState | None:
+    """Синхронное чтение — из стрима только через ``run_in_threadpool``, не в event loop."""
     with session_scope() as session:
         row = repo.get_parse_run(session, run_id)
         if row is None:
-            yield f"event: error\ndata: {json.dumps({'detail': 'Run not found'})}\n\n"
+            return None
+        return _RunState(
+            status=row.status,
+            progress=dict(row.progress) if row.progress else None,
+            progress_updated_at=row.progress_updated_at,
+        )
+
+
+async def _sse_events(run_id: uuid.UUID) -> AsyncIterator[str]:
+    state = await run_in_threadpool(_load_run_state, run_id)
+    if state is None:
+        yield sse_event("error", json.dumps({"detail": "Run not found"}))
+        return
+    if state.terminal:
+        yield SSE_DONE
+        return
+    if state.progress:
+        yield _sse_progress_line(state.progress)
+
+    if (get_settings().redis_url or "").strip():
+        try:
+            async for chunk in _sse_events_redis(run_id):
+                yield chunk
             return
-        if row.status in _TERMINAL_RUN_STATUSES:
-            yield "event: done\ndata: {}\n\n"
+        except PubSubUnavailable as e:
+            _LOG.warning("SSE прогона %s: Redis pub/sub недоступен (%s) — опрос БД", run_id, e)
+    # Без Redis (или после его сбоя) — durable DB poll (SoT = parse_runs.progress).
+    async for chunk in _sse_events_db_poll(run_id, last_updated=state.progress_updated_at):
+        yield chunk
+
+
+async def _sse_events_db_poll(run_id: uuid.UUID, *, last_updated: datetime | None) -> AsyncIterator[str]:
+    """Опрос БД раз в секунду: progress при смене progress_updated_at, до терминального статуса."""
+    heartbeat = Ticker(HEARTBEAT_INTERVAL_S)
+    while True:
+        await asyncio.sleep(DB_POLL_INTERVAL_S)
+        state = await run_in_threadpool(_load_run_state, run_id)
+        if state is None:
             return
-        initial = dict(row.progress) if row.progress else None
-
-    if initial:
-        yield _sse_progress_line(initial)
-
-    settings = get_settings()
-    redis_url = (settings.redis_url or "").strip()
-    if redis_url:
-        async for chunk in _sse_events_redis(run_id):
-            yield chunk
-    else:
-        # Без Redis — durable DB poll (SoT = parse_runs.progress).
-        async for chunk in _sse_events_db_poll(run_id):
-            yield chunk
-
-
-async def _sse_events_db_poll(run_id: uuid.UUID) -> AsyncIterator[str]:
-    """Poll DB every ~1s when REDIS_URL is empty; emit progress on progress_updated_at change."""
-    last_updated = None
-    with session_scope() as session:
-        row = repo.get_parse_run(session, run_id)
-        if row is not None:
-            last_updated = row.progress_updated_at
-            if row.status in _TERMINAL_RUN_STATUSES:
-                yield "event: done\ndata: {}\n\n"
-                return
-
-    for _ in range(300):
-        await asyncio.sleep(1.0)
-        with session_scope() as session:
-            row = repo.get_parse_run(session, run_id)
-            if row is None:
-                return
-            updated = row.progress_updated_at
-            progress = dict(row.progress) if row.progress else None
-            status = row.status
-        if updated is not None and updated != last_updated and progress:
-            last_updated = updated
-            yield _sse_progress_line(progress)
-        if status in _TERMINAL_RUN_STATUSES:
-            yield "event: done\ndata: {}\n\n"
+        if state.progress_updated_at is not None and state.progress_updated_at != last_updated and state.progress:
+            last_updated = state.progress_updated_at
+            heartbeat.reset()
+            yield _sse_progress_line(state.progress)
+        if state.terminal:
+            yield SSE_DONE
             return
+        if heartbeat.due():
+            yield SSE_PING
 
 
 async def _sse_events_redis(run_id: uuid.UUID) -> AsyncIterator[str]:
-    from backend.queue.rq_conn import get_redis_connection
-
-    conn = get_redis_connection()
-    pubsub = conn.pubsub(ignore_subscribe_messages=True)
-    pubsub.subscribe(channel_for(run_id))
-    loop = asyncio.get_running_loop()
-    try:
+    heartbeat = Ticker(HEARTBEAT_INTERVAL_S)
+    db_check = Ticker(IDLE_DB_CHECK_S)
+    async with get_pubsub_hub().subscribe(channel_for(run_id)) as sub:
         while True:
-            message = await loop.run_in_executor(None, lambda: pubsub.get_message(timeout=1.0))
-            if message and message.get("type") == "message":
-                raw = message.get("data")
-                if isinstance(raw, bytes):
-                    raw = raw.decode("utf-8", errors="replace")
-                try:
-                    payload = json.loads(raw) if isinstance(raw, str) else {}
-                except json.JSONDecodeError:
-                    payload = {}
+            payload = await sub.get(timeout=PUBSUB_WAIT_S)
+            if payload is not None:
                 event = payload.pop("event", None)
                 if event == "progress":
+                    heartbeat.reset()
                     yield _sse_progress_line(payload)
-                if event == "done":
-                    yield "event: done\ndata: {}\n\n"
+                elif event == "done":
+                    yield SSE_DONE
                     return
-            else:
-                with session_scope() as session:
-                    row = repo.get_parse_run(session, run_id)
-                    if row is not None and row.status in _TERMINAL_RUN_STATUSES:
-                        yield "event: done\ndata: {}\n\n"
-                        return
-            await asyncio.sleep(0)
-    finally:
-        try:
-            pubsub.unsubscribe(channel_for(run_id))
-            pubsub.close()
-        except Exception:
-            pass
+                continue
+            if db_check.due():
+                state = await run_in_threadpool(_load_run_state, run_id)
+                if state is None or state.terminal:
+                    yield SSE_DONE
+                    return
+            if heartbeat.due():
+                yield SSE_PING
 
 
 async def _sse_done_only() -> AsyncIterator[str]:
-    yield "event: done\ndata: {}\n\n"
+    yield SSE_DONE
 
 
 @sse_router.get("/{run_id}/events", dependencies=[Depends(verify_api_key_sse)])
-async def run_events(
+def run_events(
     run_id: uuid.UUID,
     authorization: str | None = Header(default=None),
     access_token: str | None = Query(
@@ -294,7 +307,8 @@ async def run_events(
 ) -> StreamingResponse:
     """SSE прогресса прогона. Auth: Bearer или ``?access_token=``.
 
-    Auth — короткая ``session_scope``; стрим не держит ``get_db``.
+    Обработчик синхронный (auth в threadpool, не в event loop); стрим не держит
+    ``get_db`` — читает БД короткими сессиями.
     """
     with session_scope() as session:
         if _user_from_token(session, _extract_token(authorization, access_token)) is None:
@@ -303,22 +317,8 @@ async def run_events(
         if row is None:
             raise HTTPException(status_code=404, detail="Run not found")
         terminal = row.status in _TERMINAL_RUN_STATUSES
-    headers = {
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-    }
-    if terminal:
-        return StreamingResponse(
-            _sse_done_only(),
-            media_type="text/event-stream",
-            headers=headers,
-        )
-    return StreamingResponse(
-        _sse_events(run_id),
-        media_type="text/event-stream",
-        headers=headers,
-    )
+    stream = _sse_done_only() if terminal else _sse_events(run_id)
+    return StreamingResponse(stream, media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 def _parse_result_from_run(row, vacancies) -> ParseResult:
