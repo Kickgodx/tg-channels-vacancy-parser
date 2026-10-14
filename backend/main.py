@@ -33,7 +33,7 @@ from backend.db import repository as repo
 from backend.db.session import init_db, session_scope
 from backend.errors import register_exception_handlers
 from backend.http_logging import HttpLoggingMiddleware
-from backend.settings import get_settings
+from backend.settings import check_exposure, get_settings
 from backend.tracing import setup_tracing, shutdown_tracing
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
@@ -131,9 +131,34 @@ def _start_inprocess_job_recovery() -> list[threading.Event]:
     return stops
 
 
+def _start_metrics_server():
+    """``/metrics`` на ``API_METRICS_PORT`` — отдельно от порта API, как у воркеров.
+
+    Порт API публикуется клиентам, порт метрик — нет: в compose Prometheus
+    ходит на него по Docker-сети. Отдаёт тот же ``REGISTRY``, куда пишут
+    Instrumentator (HTTP), доменные и ``db_*``-метрики.
+    """
+    s = get_settings()
+    if not s.api_metrics_port:
+        return None
+    from prometheus_client import start_http_server
+
+    log = logging.getLogger(__name__)
+    try:
+        server, _thread = start_http_server(s.api_metrics_port, addr=s.api_host)
+    except OSError as e:
+        log.warning("Не удалось стартовать metrics HTTP на %s:%s: %s", s.api_host, s.api_metrics_port, e)
+        return None
+    log.info("backend metrics on %s:%s/metrics", s.api_host, s.api_metrics_port)
+    return server
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     log = logging.getLogger(__name__)
+    warning = check_exposure(get_settings())
+    if warning:
+        log.warning(warning)
     from backend.db.ai_cache import register_db_ai_cache
 
     register_db_ai_cache()
@@ -166,9 +191,13 @@ async def lifespan(_app: FastAPI):
     )
     retention_thread.start()
     recover_stops = _start_inprocess_job_recovery()
+    metrics_server = _start_metrics_server()
     try:
         yield
     finally:
+        if metrics_server is not None:
+            metrics_server.shutdown()
+            metrics_server.server_close()
         for stop in recover_stops:
             stop.set()
         retention_stop.set()
@@ -229,18 +258,18 @@ app.include_router(filters.router, prefix="/api/v1")
 app.include_router(resumes.resumes_router, prefix="/api/v1")
 app.include_router(llm_jobs.router, prefix="/api/v1")
 
+# Только сбор HTTP-метрик в REGISTRY; отдаёт их сервер на API_METRICS_PORT (_start_metrics_server).
 Instrumentator(
     should_group_status_codes=False,
     should_ignore_untemplated=True,
     should_instrument_requests_inprogress=True,
     excluded_handlers=[
-        "/metrics",
         "/api/v1/health",
         "/docs",
         "/openapi.json",
         "/redoc",
     ],
-).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+).instrument(app)
 
 
 def main() -> None:

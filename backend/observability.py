@@ -4,9 +4,9 @@
 Instrumentator (HTTP): прогоны парсинга, UPSERT вакансий, TTL-архивация,
 ручной импорт, матчинг резюме↔вакансия, auth, загрузки курсов ЦБ.
 
-Плюс ``_DBStatsCollector`` — COUNT-агрегаты по таблицам, собираемые на каждый
-scrape ``/metrics``. При недоступной БД коллектор молча отдаёт пустой набор,
-чтобы не ломать scrape.
+Плюс ``_DBStatsCollector`` — COUNT-агрегаты по таблицам для scrape ``/metrics``
+с кэшем на ``METRICS_DB_STATS_CACHE_SECONDS``. При недоступной БД коллектор
+молча отдаёт пустой набор, чтобы не ломать scrape.
 
 ``_DBPoolCollector`` — состояние SQLAlchemy QueuePool (занято / свободно /
 overflow / лимит). Регистрируется и на backend, и на llm-worker.
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from datetime import UTC, datetime
 
@@ -260,7 +261,7 @@ AUTH_EVENTS = Counter(
     labelnames=(
         "event",
         "outcome",
-    ),  # register|login × success|closed|conflict|invalid|disabled
+    ),  # register|login|change_password|logout_all × success|closed|conflict|invalid|disabled|rate_limited
 )
 
 
@@ -438,12 +439,32 @@ class _DBPoolCollector:
 
 
 class _DBStatsCollector:
-    """COUNT-запросы по таблицам на каждый scrape /metrics.
+    """COUNT-запросы по таблицам для scrape /metrics, с кэшем.
 
-    Выполняется в процессе backend; при недоступной БД возвращает пустой
-    набор — scrape не должен падать из-за postgres. ``describe()`` нужен,
-    чтобы ``REGISTRY.register`` не дёргал ``collect()`` (и БД) при импорте.
+    Выполняется в процессе backend. Результат живёт
+    ``METRICS_DB_STATS_CACHE_SECONDS``: частые или параллельные scrape не
+    повторяют ~12 COUNT'ов по всем таблицам (параллельные ждут первый под
+    lock'ом). При недоступной БД возвращает пустой набор и ничего не кэширует —
+    scrape не должен падать из-за postgres. ``describe()`` нужен, чтобы
+    ``REGISTRY.register`` не дёргал ``collect()`` (и БД) при импорте.
     """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._cached_at: float | None = None
+        self._cached: tuple | None = None
+
+    def _read_db_cached(self) -> tuple:
+        from backend.settings import get_settings
+
+        ttl = get_settings().metrics_db_stats_cache_seconds
+        with self._lock:
+            now = time.monotonic()
+            if ttl > 0 and self._cached_at is not None and now - self._cached_at < ttl:
+                return self._cached
+            data = self._read_db()
+            self._cached_at, self._cached = (now, data) if ttl > 0 else (None, None)
+            return data
 
     def describe(self):
         yield GaugeMetricFamily("db_vacancies", "Вакансии в БД", labels=["state"])
@@ -476,7 +497,7 @@ class _DBStatsCollector:
                 fx_latest_ts,
                 hh_listings,
                 llm_jobs_by_status,
-            ) = self._read_db()
+            ) = self._read_db_cached()
         except Exception as e:
             _LOG.debug("DBStatsCollector: БД недоступна: %s", e)
             return

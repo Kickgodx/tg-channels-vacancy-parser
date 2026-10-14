@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
 from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
@@ -424,8 +424,19 @@ class VacancyImportResponse(BaseModel):
 
 
 class AuthCredentials(BaseModel):
+    """Вход: email не валидируется — пользователи, заведённые до проверки формата, входят как раньше."""
+
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=6, max_length=256)
+
+
+class RegisterRequest(AuthCredentials):
+    email: EmailStr = Field(max_length=320)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=6, max_length=256)
 
 
 class UserOut(BaseModel):

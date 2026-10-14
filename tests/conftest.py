@@ -38,6 +38,14 @@ def default_test_config(tmp_path_factory):
     mp.setenv("CONFIG_PATH", str(cfg))
     # Тесты рассчитаны на dev-умолчания и не должны зависеть от APP_ENV в .env разработчика.
     mp.setenv("APP_ENV", "dev")
+    # Сервер /metrics на отдельном порту в тестах не поднимаем (TestClient на каждый тест,
+    # xdist-процессы делили бы порт) — метрики читаются из REGISTRY (metrics_text).
+    mp.setenv("API_METRICS_PORT", "0")
+    # Кэш db_* и лимиты /auth — глобальное состояние процесса: между тестами оно протекало
+    # бы. Включают их только собственные тесты (test_app_metrics, test_auth).
+    mp.setenv("METRICS_DB_STATS_CACHE_SECONDS", "0")
+    mp.setenv("AUTH_RATE_LIMIT_PER_MINUTE", "0")
+    mp.setenv("AUTH_MAX_FAILED_LOGINS", "0")
     get_settings.cache_clear()
     yield cfg
     mp.undo()
@@ -62,6 +70,13 @@ def no_real_telegram():
     mp.setattr(parse_runner, "_channel_parser", _forbidden)
     yield
     mp.undo()
+
+
+def metrics_text() -> str:
+    """Тело scrape /metrics backend'а (тот же REGISTRY, что отдаёт сервер на API_METRICS_PORT)."""
+    from prometheus_client import REGISTRY, generate_latest
+
+    return generate_latest(REGISTRY).decode("utf-8")
 
 
 def login_as_admin(client, email: str = "admin@example.com") -> str:

@@ -3,9 +3,10 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
+  # Отдельный порт метрик backend (API_METRICS_PORT), не порт API: на хост он не публикуется.
   - job_name: tg-jobs-backend
     static_configs:
-      - targets: ["backend:8000"]
+      - targets: ["backend:9100"]
     metrics_path: /metrics
 
   # Все реплики llm-worker (compose DNS отдаёт A-записи по имени сервиса).

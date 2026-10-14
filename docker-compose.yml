@@ -1,6 +1,10 @@
 # Порты публикуются на loopback: стек доступен с этой машины (localhost), но не из сети.
-# BIND_ADDR — UI и API, INFRA_BIND_ADDR — Postgres, Redis и observability (у них нет
-# своей аутентификации либо дефолтные пароли). Открыть в сеть: BIND_ADDR=0.0.0.0 в .env.
+# BIND_ADDR — UI и API, INFRA_BIND_ADDR — Postgres, Redis и observability (у Prometheus,
+# Loki, Tempo и Alloy своей аутентификации нет). Открыть в сеть: BIND_ADDR=0.0.0.0 в .env
+# (backend в APP_ENV=dev на не-loopback адресе не стартует — нужен APP_ENV=prod).
+#
+# Пароли Postgres, Redis и Grafana обязательны и задаются в .env (POSTGRES_PASSWORD,
+# REDIS_PASSWORD, GRAFANA_ADMIN_PASSWORD; см. .env.example) — дефолтных нет.
 
 # Ротация stdout-логов контейнеров (по умолчанию json-file растёт без лимита):
 # до 5 файлов по 10 МБ на контейнер, ротированные — gzip. Alloy читает логи
@@ -13,11 +17,11 @@ x-logging: &default-logging
     compress: "true"
 
 x-app-env: &app-env
-  DATABASE_URL: postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
+  DATABASE_URL: postgresql+psycopg://tgjobs:${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}@postgres:5432/tgjobs
   CONFIG_PATH: /app/config.yaml
   PYTHONUNBUFFERED: "1"
   LOG_DIR: ""
-  REDIS_URL: redis://redis:6379/0
+  REDIS_URL: redis://:${REDIS_PASSWORD:?задайте REDIS_PASSWORD в .env}@redis:6379/0
   OTEL_ENABLED: "true"
   OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
 
@@ -54,9 +58,11 @@ services:
   postgres:
     image: postgres:16-alpine
     logging: *default-logging
+    # POSTGRES_PASSWORD применяется только при инициализации пустого pgdata; сменить на
+    # существующем томе: docker compose exec postgres psql -U tgjobs -c "ALTER ROLE tgjobs PASSWORD '...'"
     environment:
       POSTGRES_USER: tgjobs
-      POSTGRES_PASSWORD: tgjobs
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}
       POSTGRES_DB: tgjobs
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -74,6 +80,10 @@ services:
     logging: *default-logging
     # Host 6379 often falls into Windows Hyper-V/WinNAT excluded ranges (≈6251–6450).
     # Containers still use redis:6379; host clients → 127.0.0.1:16379.
+    # Пароль — из REDISCLI_AUTH: его же берёт redis-cli в healthcheck (без -a в argv).
+    command: ["sh", "-c", 'exec redis-server --requirepass "$$REDISCLI_AUTH"']
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?задайте REDIS_PASSWORD в .env}
     restart: unless-stopped
     ports:
       - "${INFRA_BIND_ADDR:-127.0.0.1}:16379:6379"
@@ -89,6 +99,12 @@ services:
       - "${BIND_ADDR:-127.0.0.1}:9000:8000"
     environment:
       <<: *app-env
+      # Внутри контейнера слушаем все интерфейсы; наружу порт опубликован на BIND_ADDR —
+      # по нему backend решает, доступен ли он из сети (dev на не-loopback не стартует).
+      API_HOST: 0.0.0.0
+      API_PUBLIC_ADDR: ${BIND_ADDR:-127.0.0.1}
+      # /metrics — отдельный порт только в Docker-сети (Prometheus), на хост не публикуется.
+      API_METRICS_PORT: "9100"
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       OTEL_SERVICE_NAME: tg-jobs-parser-backend
       LLM_JOB_BACKEND: rq
@@ -189,9 +205,21 @@ services:
     logging: *default-logging
     ports:
       - "${INFRA_BIND_ADDR:-127.0.0.1}:3000:3000"
+    # Пароль admin применяется только при инициализации пустого grafana_data; сменить на
+    # существующем томе: docker compose exec grafana grafana cli admin reset-admin-password '...'
+    # Не ${...:?}: compose проверяет такие переменные и при выключенном профиле observability,
+    # а без него пароль Grafana не нужен. Пустой или admin — отказ стартовать.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        case "$$GF_SECURITY_ADMIN_PASSWORD" in
+          ""|admin) echo "задайте GRAFANA_ADMIN_PASSWORD в .env (не пустой и не admin)" >&2; exit 1 ;;
+        esac
+        exec /run.sh
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana
@@ -214,21 +242,42 @@ services:
       - loki_data:/loki
     restart: unless-stopped
 
+  # Docker API для Alloy — только чтение списка контейнеров, сетей и их логов.
+  # Полный docker.sock в Alloy (OTLP-приёмник, UI) = root на хосте; здесь сокет есть
+  # только у прокси, POST/exec/start запрещены. Docker Desktop на Windows тоже отдаёт
+  # unix-сокет внутрь WSL2-VM, поэтому путь кроссплатформенный.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.1
+    profiles: ["observability"]
+    logging: *default-logging
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-api
+    restart: unless-stopped
+
   alloy:
     image: grafana/alloy:v1.7.5
     profiles: ["observability"]
     logging: *default-logging
-    # root нужен для чтения docker.sock; Docker Desktop на Windows тоже
-    # отдаёт unix-сокет внутрь WSL2-VM, поэтому путь кроссплатформенный.
-    user: root
+    # Непривилегированный пользователь образа. Том alloy_data, созданный прежним
+    # root-Alloy, нужно один раз отдать ему:
+    # docker run --rm -v tg_jobs_parser_alloy_data:/d alpine chown -R 473:473 /d
+    user: "473:473"
     command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
     ports:
       - "${INFRA_BIND_ADDR:-127.0.0.1}:12345:12345"
     volumes:
       - ./observability/alloy-config.alloy:/etc/alloy/config.alloy:ro
-      - /var/run/docker.sock:/var/run/docker.sock
       - alloy_data:/var/lib/alloy/data
+    networks:
+      - default
+      - docker-api
     depends_on:
+      - docker-socket-proxy
       - loki
       - tempo
     restart: unless-stopped
@@ -247,6 +296,11 @@ services:
       - ./observability/tempo-config.yml:/etc/tempo/tempo.yaml:ro
       - tempo_data:/var/tempo
     restart: unless-stopped
+
+networks:
+  # Только alloy ↔ docker-socket-proxy: остальные контейнеры до Docker API не дотягиваются.
+  docker-api:
+    internal: true
 
 volumes:
   pgdata:

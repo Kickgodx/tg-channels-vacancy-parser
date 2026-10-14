@@ -5,10 +5,20 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from backend.settings import Settings
+from backend.settings import Settings, check_exposure
 
 _PROD_SECRET = "x" * 32
-_ENV_KEYS = ("APP_ENV", "JWT_SECRET", "AUTH_REGISTRATION_OPEN", "HTTP_LOG_BODIES")
+_ENV_KEYS = (
+    "APP_ENV",
+    "JWT_SECRET",
+    "AUTH_REGISTRATION_OPEN",
+    "HTTP_LOG_BODIES",
+    "API_HOST",
+    "API_PUBLIC_ADDR",
+    "ALLOW_PUBLIC_DEV",
+    "DATABASE_URL",
+    "POSTGRES_PASSWORD",
+)
 
 
 @pytest.fixture
@@ -92,3 +102,42 @@ def test_unknown_app_env_is_rejected(make_settings):
     # Опечатка не должна молча включать dev-умолчания.
     with pytest.raises(ValidationError):
         make_settings(APP_ENV="staging", JWT_SECRET=_PROD_SECRET)
+
+
+def test_dev_on_loopback_starts(make_settings):
+    assert check_exposure(make_settings()) is None  # API_HOST по умолчанию 127.0.0.1
+    assert check_exposure(make_settings(API_HOST="0.0.0.0", API_PUBLIC_ADDR="127.0.0.1")) is None
+    assert check_exposure(make_settings(API_HOST="localhost")) is None
+    assert check_exposure(make_settings(API_HOST="::1")) is None
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"API_HOST": "0.0.0.0"},
+        {"API_HOST": "::"},
+        {"API_HOST": "192.168.1.10"},
+        {"API_HOST": "0.0.0.0", "API_PUBLIC_ADDR": "0.0.0.0"},  # compose с BIND_ADDR=0.0.0.0
+        {"API_PUBLIC_ADDR": "my-host.example"},
+    ],
+)
+def test_dev_on_public_addr_refuses_to_start(make_settings, env):
+    with pytest.raises(RuntimeError, match="APP_ENV=prod"):
+        check_exposure(make_settings(**env))
+
+
+def test_dev_on_public_addr_allowed_explicitly(make_settings):
+    warning = check_exposure(make_settings(API_HOST="0.0.0.0", ALLOW_PUBLIC_DEV="true"))
+    assert warning is not None and "ALLOW_PUBLIC_DEV" in warning
+
+
+def test_prod_on_public_addr_starts(make_settings):
+    assert check_exposure(make_settings(APP_ENV="prod", JWT_SECRET=_PROD_SECRET, API_HOST="0.0.0.0")) is None
+
+
+def test_database_url_defaults_to_compose_postgres_password(make_settings):
+    assert make_settings().database_url == "postgresql+psycopg://tgjobs:tgjobs@127.0.0.1:5432/tgjobs"
+    s = make_settings(POSTGRES_PASSWORD="p@ss/word")
+    assert s.database_url == "postgresql+psycopg://tgjobs:p%40ss%2Fword@127.0.0.1:5432/tgjobs"
+    explicit = "postgresql+psycopg://u:x@db:5432/other"
+    assert make_settings(POSTGRES_PASSWORD="ignored", DATABASE_URL=explicit).database_url == explicit

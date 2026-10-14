@@ -30,7 +30,7 @@ docker compose up --build
 | **Web UI** | http://localhost:5173 |
 | **API** (OpenAPI) | http://localhost:9000/docs |
 | **Prometheus** | http://localhost:9090 |
-| **Grafana** | http://localhost:3000 (login: `admin` / `admin`) |
+| **Grafana** | http://localhost:3000 (login: `admin` / `GRAFANA_ADMIN_PASSWORD` из `.env`) |
 | **Loki** | http://localhost:3100 (API; логи смотрятся в Grafana → Explore) |
 | **Alloy** | http://localhost:12345 (UI пайплайна сбора логов и трасс) |
 | **Tempo** | http://localhost:3200 (API; трассы смотрятся в Grafana → Explore → Tempo) |
@@ -47,7 +47,7 @@ docker compose up --build
 Если `.env` создан раньше — добавьте строку `COMPOSE_PROFILES=observability`,
 иначе Grafana/Prometheus не стартуют.
 
-Backend отдаёт метрики HTTP на `http://localhost:9000/metrics` (для scrape из Docker-сети; в проде лучше не публиковать наружу).
+Метрики backend — на отдельном порту `API_METRICS_PORT` (контейнерный `:9100`), а не на порту API: на хост он не публикуется, Prometheus ходит на `backend:9100` по Docker-сети. `http://localhost:9000/metrics` отвечает 404.
 
 ```powershell
 # Только ядро (без observability):
@@ -77,8 +77,14 @@ OPENROUTER_API_KEY=...          # если ai.enabled в config.yaml
 HH_API_TOKEN=...                # Bearer-токен HH (admin sync); без client_credentials
 HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 
+# Пароли инфраструктуры compose — обязательны, без них `docker compose` не стартует.
+# Только [A-Za-z0-9_-]: python -c "import secrets; print(secrets.token_urlsafe(24))"
+POSTGRES_PASSWORD=...
+REDIS_PASSWORD=...
+GRAFANA_ADMIN_PASSWORD=...      # только с профилем observability; пустой или admin — Grafana не стартует
+
 # Опционально (для docker compose уже задано в compose-файле):
-# DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@postgres:5432/tgjobs
+# DATABASE_URL=...                # без него — tgjobs:<POSTGRES_PASSWORD>@127.0.0.1:5432/tgjobs (backend/CLI с хоста)
 # CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 # APP_ENV=dev                     # dev (локально) или prod — см. «Режимы dev и prod» ниже
 # BIND_ADDR=127.0.0.1             # адрес публикации портов UI/API в compose; 0.0.0.0 — открыть в сеть
@@ -103,7 +109,7 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 # VITE_API_KEY=                   # если API_KEY задан — тот же ключ для SSE/export во frontend
 # HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе; умолчание: dev — true, prod — false
 # HTTP_LOG_BODY_LIMIT=4096        # макс. символов тела в логе, дальше — «…[truncated, N bytes]»
-# HTTP_LOG_EXCLUDE_PATHS=/metrics,/api/v1/health,/api/v1/vacancies/metrics,/api/v1/analytics/salaries,/api/v1/analytics/sources,/api/v1/analytics/companies,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico
+# HTTP_LOG_EXCLUDE_PATHS=/api/v1/health,/api/v1/vacancies/metrics,/api/v1/analytics/salaries,/api/v1/analytics/sources,/api/v1/analytics/companies,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico
 #                                  (те же пути не трассируются)
 # OTEL_ENABLED=false              # OpenTelemetry-трассировка (в compose — true)
 # OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # куда слать OTLP (в compose — http://alloy:4318)
@@ -124,6 +130,7 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 | Регистрация новых пользователей | открыта | закрыта после первого (админа) |
 | Тела запросов/ответов в HTTP-логе | пишутся | не пишутся (резюме и email не уходят в Loki) |
 | `JWT_SECRET` | необязателен, эфемерный секрет | обязателен, 32+ символа — иначе backend и воркеры не стартуют |
+| API на не-loopback адресе | backend не стартует (`ALLOW_PUBLIC_DEV=true` — только warning) | разрешено |
 
 `AUTH_REGISTRATION_OPEN` и `HTTP_LOG_BODIES`, заданные явно, действуют в любом
 режиме — например, `APP_ENV=prod` + `AUTH_REGISTRATION_OPEN=true`, чтобы
@@ -134,9 +141,22 @@ HH_CONTACT_EMAIL=you@example.com  # для User-Agent HH API
 по `127.0.0.1`, а не `localhost`: порт слушает только IPv4, а `localhost`
 сначала пробует `::1` — psycopg на Windows ждёт там весь connect timeout на
 каждое новое соединение (браузера это не касается). `BIND_ADDR=0.0.0.0` открывает UI и API
-(доступ с телефона, сервер без reverse proxy); `INFRA_BIND_ADDR` — то же для
-Postgres, Redis и observability, но у них дефолтные пароли или нет
-аутентификации, наружу их открывать не стоит.
+(доступ с телефона, сервер без reverse proxy) — только вместе с `APP_ENV=prod`:
+dev-умолчания (открытая регистрация, резюме в логах) безопасны лишь на loopback, и
+backend в dev на не-loopback адресе отказывается стартовать. Адрес он узнаёт из
+`API_PUBLIC_ADDR` (compose передаёт туда `BIND_ADDR`), без него — из `API_HOST`
+(по умолчанию `127.0.0.1`); `uvicorn --host` в обход `API_HOST` проверка не видит.
+`INFRA_BIND_ADDR` — то же для Postgres, Redis и observability; у Prometheus, Loki,
+Tempo и Alloy аутентификации нет, наружу их открывать не стоит.
+
+Пароли Postgres, Redis и Grafana задаются в `.env` (`POSTGRES_PASSWORD`,
+`REDIS_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`), дефолтных нет. Пароли Postgres и
+Grafana применяются только при создании пустого тома; сменить на существующем:
+
+```powershell
+docker compose exec postgres sh -c 'psql -U tgjobs -c "ALTER ROLE tgjobs PASSWORD ''$POSTGRES_PASSWORD''"'
+docker compose exec grafana sh -c 'grafana cli admin reset-admin-password "$GF_SECURITY_ADMIN_PASSWORD"'
+```
 
 Минимальный `.env` для сервера:
 
@@ -281,6 +301,18 @@ LLM пишет черновик отклика под конкретную ва�
 - Токен хранится в `localStorage`, уходит в `Authorization: Bearer …`;
   401 → редирект на `/login`. Для SSE (EventSource не умеет заголовки)
   токен передаётся параметром `access_token`.
+- Отзыв токенов: в JWT — версия `users.token_version`; `POST /auth/change-password`
+  и `POST /auth/logout-all` увеличивают её, и все ранее выданные токены
+  (включая SSE) перестают приниматься. `is_active=false` отключает пользователя целиком.
+- Перебор паролей: не больше `AUTH_RATE_LIMIT_PER_MINUTE` (20) попыток входа и
+  регистрации с одного IP в минуту и `AUTH_MAX_FAILED_LOGINS` (5) неудачных входов
+  на email за `AUTH_FAILED_LOGIN_WINDOW_SECONDS` (15 мин); дальше — 429 с
+  `Retry-After`, пароль (argon2) не проверяется. С `REDIS_URL` счётчики общие для
+  процессов. За NAT/Docker все клиенты могут приходить с одного IP — лимит по IP
+  тогда общий.
+- Регистрации сериализуются advisory-lock'ом Postgres: два параллельных «первых»
+  пользователя не станут оба админами; повтор email → 409 `EMAIL_TAKEN`, формат
+  email проверяется (`email-validator`).
 
 Локальная разработка frontend без Docker:
 
@@ -298,7 +330,7 @@ Backend отдельно (без compose порт обычно `8000`; без Re
 
 ```powershell
 poetry install
-# DATABASE_URL=postgresql+psycopg://tgjobs:tgjobs@127.0.0.1:5432/tgjobs
+# DATABASE_URL не нужен для Postgres из compose: собирается из POSTGRES_PASSWORD в .env
 # PARSE_JOB_BACKEND=inprocess
 # LLM_JOB_BACKEND=inprocess
 uvicorn backend.main:app --reload --port 8000
@@ -333,6 +365,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`): один подписчик 
 | `GET` | `/health` | Статус API и подключения к БД |
 | `POST` | `/auth/register` / `/auth/login` | Регистрация / вход → JWT access-токен |
 | `GET` | `/auth/me` | Текущий пользователь |
+| `POST` | `/auth/change-password` | Смена пароля → новый токен; прежние токены отозваны |
+| `POST` | `/auth/logout-all` | Отозвать все токены пользователя (204) |
 | `GET` | `/config/defaults` | Значения по умолчанию для формы |
 | `GET` | `/config/llm-models` | Каталог моделей из `llm_models.yaml` |
 | `POST` | `/runs` | Постановка прогона в очередь (admin; `queued` → parse-worker / inprocess) |
@@ -671,15 +705,15 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | Компонент | Назначение |
 |-----------|------------|
 | **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
-| **`GET /metrics`** | Эндпоинт Prometheus (не путать с `/api/v1/vacancies/metrics`) |
+| **`GET /metrics`** | Эндпоинт Prometheus на отдельном порту `API_METRICS_PORT` (`backend:9100`, только Docker-сеть; не путать с `/api/v1/vacancies/metrics`) |
 | **Prometheus** | Scrape backend, llm-worker и parse-worker каждые 15 с (`observability/prometheus.yml`) |
 | **Grafana** | Дашборды **API**, **LLM**, **LLM jobs / queue**, **Pipeline**, **HH.ru sync**, **DB pool** |
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment |
 | **Доменные метрики** | прогоны, UPSERT/TTL, импорт, матчинг, письма, LLM-джобы (`llm_job_enqueue_*`, `llm_worker_*`, `llm_rq_queue_jobs`, `llm_jobs_by_status`, recover), parse recover (`parse_jobs_recover_total`), auth, ЦБ |
-| **`db_*` gauges** | COUNT-агрегаты по таблицам на каждый scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |
+| **`db_*` gauges** | COUNT-агрегаты по таблицам с кэшем `METRICS_DB_STATS_CACHE_SECONDS` (30 с) между scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ) |
 | **`db_pool_*` gauges** | SQLAlchemy QueuePool: занято / свободно / overflow / лимит (`pool_size` + `max_overflow`); на backend, llm-worker и parse-worker |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
-| **Alloy** | Собирает stdout контейнеров compose-проекта через docker.sock, парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и отправляет в Tempo (`observability/alloy-config.alloy`) |
+| **Alloy** | Собирает stdout контейнеров compose-проекта через `docker-socket-proxy` (только чтение контейнеров, сетей и логов; сам `docker.sock` в Alloy не монтируется, Alloy работает не под root), парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и отправляет в Tempo (`observability/alloy-config.alloy`) |
 | **Tempo** | Хранение трасс (local, retention 7 дней — `observability/tempo-config.yml`) |
 
 **Затор очереди LLM:** смотреть дашборд **LLM jobs / queue** — растут `llm_rq_queue_jobs` и `llm_jobs_by_status{status="queued"}`; worker latency в `llm_worker_job_duration_seconds`. TraceQL: `{ name = "llm_job.run" }`, `{ name = "llm_job.enqueue" }`.
@@ -693,7 +727,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 - `REQUEST METHOD path {json}` — до обработки: клиент, заголовки, тело;
 - `RESPONSE METHOD path status Nms {json}` — после ответа: статус, длительность, заголовки, тело.
 
-Тела пишутся для JSON / form / `text/*` / XML (SSE, бинарные ответы и `Content-Disposition: attachment` — без тела). Маскируются `Authorization` (остаётся схема: `Bearer ***`), `Cookie`/`Set-Cookie`, `X-API-Key`, query-параметры и ключи тела вида `password`/`token`/`access_token`/`secret`/`api_key`. Уровень `RESPONSE`: 4xx — `WARNING`, 5xx — `ERROR`. Не логируются шумные эндпоинты из `HTTP_LOG_EXCLUDE_PATHS` (по умолчанию Prometheus `/metrics`, health-check, агрегаты `/vacancies/metrics` и `/analytics/*`, Swagger/ReDoc/OpenAPI, favicon) и CORS preflight (`OPTIONS` с `Access-Control-Request-Method`).
+Тела пишутся для JSON / form / `text/*` / XML (SSE, бинарные ответы и `Content-Disposition: attachment` — без тела). Маскируются `Authorization` (остаётся схема: `Bearer ***`), `Cookie`/`Set-Cookie`, `X-API-Key`, query-параметры и ключи тела вида `password`/`token`/`access_token`/`secret`/`api_key`. Уровень `RESPONSE`: 4xx — `WARNING`, 5xx — `ERROR`. Не логируются шумные эндпоинты из `HTTP_LOG_EXCLUDE_PATHS` (по умолчанию health-check, агрегаты `/vacancies/metrics` и `/analytics/*`, Swagger/ReDoc/OpenAPI, favicon) и CORS preflight (`OPTIONS` с `Access-Control-Request-Method`).
 
 Alloy кладёт `request_id` в **structured metadata** Loki (не label — уникален на запрос). В Grafana Explore:
 
@@ -718,7 +752,7 @@ Alloy кладёт `request_id` в **structured metadata** Loki (не label — 
 | Прогон парсинга | Отдельная трасса `parse_run` (со ссылкой на `POST /runs`): `parse.fetch_posts` (Telethon) → `parse.process_posts` → LLM-вызовы из пула потоков (контекст пробрасывается в воркеры) |
 | Матчинг / письма / курсы ЦБ | `vacancy.match`, `cover_letter.generate`, `fx.sync_on_startup` |
 
-Sampling: доля трасс — `OTEL_TRACES_SAMPLE_RATIO`. Sampler отбрасывает SQL/HTTP-span'ы без родителя: COUNT'ы `db_*`-коллектора на каждый scrape `/metrics` и фоновые запросы иначе дали бы тысячи трасс из одного span'а. Без `OTEL_ENABLED` (CLI, тесты) API OpenTelemetry работает как no-op.
+Sampling: доля трасс — `OTEL_TRACES_SAMPLE_RATIO`. Sampler отбрасывает SQL/HTTP-span'ы без родителя: COUNT'ы `db_*`-коллектора при scrape `/metrics` и фоновые запросы иначе дали бы тысячи трасс из одного span'а. Без `OTEL_ENABLED` (CLI, тесты) API OpenTelemetry работает как no-op.
 
 **Связь логов и трасс.** Внутри span'а каждая строка лога получает `trace_id`: `... | request_id=<uuid> trace_id=<32 hex> | ...`. Alloy кладёт его в structured metadata. В Grafana:
 
@@ -726,7 +760,7 @@ Sampling: доля трасс — `OTEL_TRACES_SAMPLE_RATIO`. Sampler отбра
 - в Tempo у span'а есть **«Logs for this span»**: это логи с тем же `trace_id`;
 - поиск в Tempo (TraceQL): `{ span.request_id = "<uuid>" }`, `{ name = "parse_run" }`, `{ span.llm.task = "match" && duration > 10s }`.
 
-Из health-check, OpenAPI и `/metrics` HTTP-метрики не собираются (шум от probes и документации). LLM-метрики пишутся при парсинге с `ai.enabled: true` в том же процессе backend. При недоступной БД `db_*` gauges отдают пустой набор — scrape не падает.
+Из health-check и OpenAPI HTTP-метрики не собираются (шум от probes и документации). LLM-метрики пишутся при парсинге с `ai.enabled: true` в том же процессе backend. При недоступной БД `db_*` gauges отдают пустой набор — scrape не падает.
 
 ---
 

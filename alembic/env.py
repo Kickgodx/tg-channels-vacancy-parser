@@ -19,10 +19,10 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return os.environ.get(
-        "DATABASE_URL",
-        "postgresql+psycopg://tgjobs:tgjobs@127.0.0.1:5432/tgjobs",
-    )
+    # Без DATABASE_URL — тот же URL, что у backend (собирается из POSTGRES_PASSWORD).
+    from backend.settings import get_settings
+
+    return os.environ.get("DATABASE_URL") or get_settings().database_url
 
 
 def run_migrations_offline() -> None:

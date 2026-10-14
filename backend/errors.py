@@ -20,6 +20,7 @@ CODE_UPSTREAM_UNAVAILABLE = "UPSTREAM_UNAVAILABLE"
 CODE_INTERNAL = "INTERNAL"
 CODE_IDEMPOTENCY_IN_PROGRESS = "IDEMPOTENCY_IN_PROGRESS"
 CODE_LLM_QUOTA_EXCEEDED = "LLM_QUOTA_EXCEEDED"
+CODE_EMAIL_TAKEN = "EMAIL_TAKEN"
 
 _LOG = logging.getLogger(__name__)
 
@@ -52,10 +53,12 @@ def http_error(
     message: str,
     *,
     retryable: bool = False,
+    headers: dict[str, str] | None = None,
 ) -> HTTPException:
     return HTTPException(
         status_code=status_code,
         detail=error_detail(code, message, retryable=retryable),
+        headers=headers,
     )
 
 

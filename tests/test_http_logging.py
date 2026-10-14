@@ -151,7 +151,6 @@ def test_route_logs_carry_request_id_prefix(mini_client):
 def test_noisy_endpoints_and_preflight_are_not_logged(admin_client, caplog):
     caplog.set_level(logging.INFO, logger="backend.http")
     assert admin_client.get("/api/v1/health").status_code == 200
-    assert admin_client.get("/metrics").status_code == 200
     assert admin_client.get("/openapi.json").status_code == 200
     # Агрегаты с крупным JSON: под ab/UI polling иначе заливают Loki (ingestion 4MB/s).
     assert admin_client.get("/api/v1/vacancies/metrics").status_code == 200
