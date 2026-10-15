@@ -167,6 +167,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const LLM_JOB_POLL_MS = 1000;
+/**
+ * Потолок ожидания LLM-джобы на клиенте — страховка от вечного ожидания. До error
+ * джобу доводит backend (LLM_RQ_JOB_TIMEOUT_SECONDS × LLM_JOB_MAX_ATTEMPTS + recover);
+ * сама джоба по таймауту клиента не отменяется, матч/письмо попадут в кэш.
+ */
+const LLM_JOB_WAIT_MS = 30 * 60 * 1000;
 const HH_SYNC_POLL_MS = 1500;
 const HH_SYNC_TERMINAL: ReadonlySet<HhSyncJob["status"]> = new Set(["completed", "failed"]);
 const RUN_POLL_MS = 2000;
@@ -194,24 +200,71 @@ async function pollRunUntilTerminal(
   throw new ApiError("Подписка на прогон отменена", { status: 499, code: "CANCELLED" });
 }
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise((r) => setTimeout(r, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** Промежуточные статусы джобы (у импорта — растущий `import_result`). */
 type LlmJobListener = (job: LlmJob) => void;
 
-async function pollLlmJob(jobId: string, onUpdate?: LlmJobListener): Promise<LlmJob> {
+/** Сигнал ожидания джобы: отмена вызывающим (`signal`) или таймаут LLM_JOB_WAIT_MS. */
+function llmJobWaitSignal(signal?: AbortSignal): { signal: AbortSignal; dispose: () => void } {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => {
+    ctrl.abort(
+      new ApiError("LLM: задача выполняется слишком долго — откройте результат позже", {
+        status: 408,
+        code: "TIMEOUT",
+        retryable: true,
+      }),
+    );
+  }, LLM_JOB_WAIT_MS);
+  const onAbort = () => ctrl.abort(signal?.reason);
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener("abort", onAbort, { once: true });
+  return {
+    signal: ctrl.signal,
+    dispose: () => {
+      window.clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
+async function pollLlmJob(
+  jobId: string,
+  onUpdate: LlmJobListener | undefined,
+  signal: AbortSignal,
+): Promise<LlmJob> {
   for (;;) {
-    const job = await request<LlmJob>(`/llm-jobs/${jobId}`);
+    signal.throwIfAborted();
+    const job = await request<LlmJob>(`/llm-jobs/${jobId}`, { signal });
     if (job.status === "done" || job.status === "error") return job;
     onUpdate?.(job);
-    await sleep(LLM_JOB_POLL_MS);
+    await sleep(LLM_JOB_POLL_MS, signal);
   }
 }
 
-/** Ждать завершения через SSE; при обрыве — poll до terminal (без hard timeout). */
-function waitLlmJobSse(jobId: string, onUpdate?: LlmJobListener): Promise<LlmJob> {
+/** Ждать завершения через SSE; при обрыве — poll до terminal или до `signal`. */
+function waitLlmJobSse(
+  jobId: string,
+  onUpdate: LlmJobListener | undefined,
+  signal: AbortSignal,
+): Promise<LlmJob> {
   const url = `${API_BASE}/llm-jobs/${jobId}/events${sseAuthQuery()}`;
 
   return new Promise((resolve, reject) => {
@@ -224,20 +277,30 @@ function waitLlmJobSse(jobId: string, onUpdate?: LlmJobListener): Promise<LlmJob
 
     const es = new EventSource(url);
 
-    const finish = (job: LlmJob) => {
-      if (settled) return;
+    const close = () => {
       settled = true;
       window.clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
       es.close();
+    };
+
+    const onAbort = () => {
+      if (settled) return;
+      close();
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    const finish = (job: LlmJob) => {
+      if (settled) return;
+      close();
       resolve(job);
     };
 
     const startFallbackPoll = () => {
       if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      es.close();
-      void pollLlmJob(jobId, onUpdate).then(resolve, reject);
+      close();
+      void pollLlmJob(jobId, onUpdate, signal).then(resolve, reject);
     };
 
     es.addEventListener("status", (ev) => {
@@ -271,23 +334,36 @@ function waitLlmJobSse(jobId: string, onUpdate?: LlmJobListener): Promise<LlmJob
   });
 }
 
-async function awaitLlmJob(jobId: string, onUpdate?: LlmJobListener): Promise<LlmJob> {
+async function awaitLlmJob(
+  jobId: string,
+  onUpdate?: LlmJobListener,
+  signal?: AbortSignal,
+): Promise<LlmJob> {
+  const wait = llmJobWaitSignal(signal);
   try {
-    return await waitLlmJobSse(jobId, onUpdate);
-  } catch {
-    return pollLlmJob(jobId, onUpdate);
+    return await waitLlmJobSse(jobId, onUpdate, wait.signal);
+  } catch (err) {
+    if (wait.signal.aborted) throw err;
+    return await pollLlmJob(jobId, onUpdate, wait.signal);
+  } finally {
+    wait.dispose();
   }
 }
 
-/** POST мэтч/письмо/импорт: 200 готовый результат или 202 job → SSE (fallback poll). */
+/**
+ * POST мэтч/письмо/импорт: 200 готовый результат или 202 job → SSE (fallback poll).
+ * `signal` отменяет и запрос, и ожидание джобы (закрыли модалку, ушли со страницы).
+ */
 async function postInteractiveLlm<T>(
   path: string,
   init: RequestInit,
   pick: (job: LlmJob) => T | null | undefined,
   onUpdate?: LlmJobListener,
+  signal?: AbortSignal,
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
+    signal,
     headers: {
       "Content-Type": "application/json",
       ...authHeaders(),
@@ -298,7 +374,7 @@ async function postInteractiveLlm<T>(
   if (res.status === 200) return (await res.json()) as T;
   if (res.status === 202) {
     const accepted = (await res.json()) as LlmJobAccepted;
-    const job = await awaitLlmJob(accepted.job_id, onUpdate);
+    const job = await awaitLlmJob(accepted.job_id, onUpdate, signal);
     if (job.status === "error") {
       throw new ApiError(job.error_message || "LLM: ошибка задачи", {
         status: 500,
@@ -505,6 +581,7 @@ export const api = {
     texts: string[],
     sourceUrl?: string,
     onProgress?: (partial: VacancyImportResponse) => void,
+    signal?: AbortSignal,
   ) =>
     postInteractiveLlm<VacancyImportResponse>(
       "/vacancies/import",
@@ -513,6 +590,7 @@ export const api = {
       (job) => {
         if (job.import_result) onProgress?.(job.import_result);
       },
+      signal,
     ),
 
   hhStatus: () => request<HhStatus>("/hh/status"),
@@ -598,11 +676,13 @@ export const api = {
   },
 
   /** Матчинг: кэш → сразу; иначе 202 job + poll. */
-  matchVacancy: (resumeId: number, vacancyId: string, force = false) =>
+  matchVacancy: (resumeId: number, vacancyId: string, force = false, signal?: AbortSignal) =>
     postInteractiveLlm<VacancyMatch>(
       `/resumes/${resumeId}/match/${vacancyId}${force ? "?force=true" : ""}`,
       { method: "POST" },
       (job) => job.match,
+      undefined,
+      signal,
     ),
 
   getVacancyMatch: (resumeId: number, vacancyId: string) =>
@@ -614,11 +694,14 @@ export const api = {
     vacancyId: string,
     tone: CoverLetterTone,
     force = false,
+    signal?: AbortSignal,
   ) =>
     postInteractiveLlm<CoverLetter>(
       `/resumes/${resumeId}/cover-letter/${vacancyId}${force ? "?force=true" : ""}`,
       { method: "POST", body: JSON.stringify({ tone }) },
       (job) => job.cover_letter,
+      undefined,
+      signal,
     ),
 
   getCoverLetter: (resumeId: number, vacancyId: string) =>

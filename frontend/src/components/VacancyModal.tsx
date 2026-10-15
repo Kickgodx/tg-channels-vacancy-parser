@@ -11,6 +11,7 @@ import type {
   VacancyMatch,
 } from "../types/api";
 import { cleanPostUrl } from "../utils/cleanPostUrl";
+import { useUnmountSignal } from "../utils/useUnmountSignal";
 import { toVacancyListItem } from "../utils/vacancyListItem";
 
 interface Props {
@@ -75,6 +76,7 @@ const TONE_OPTIONS: { value: CoverLetterTone; label: string }[] = [
 
 export default function VacancyModal({ vacancy: incoming, index, onClose, resumeId }: Props) {
   const queryClient = useQueryClient();
+  const unmountSignal = useUnmountSignal();
   const hasFullText = "cleaned_text" in incoming;
   const listItem = toVacancyListItem(incoming);
   const detailQ = useQuery({
@@ -115,7 +117,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
 
   const matchM = useMutation({
     mutationFn: ({ force }: { force: boolean }) =>
-      api.matchVacancy(resumeId as number, listItem.id, force),
+      api.matchVacancy(resumeId as number, listItem.id, force, unmountSignal()),
     onSuccess: (data) => {
       setMatch(data);
       setMatchExpanded(true);
@@ -162,7 +164,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
 
   const letterM = useMutation({
     mutationFn: ({ force }: { force: boolean }) =>
-      api.generateCoverLetter(resumeId as number, listItem.id, letterTone, force),
+      api.generateCoverLetter(resumeId as number, listItem.id, letterTone, force, unmountSignal()),
     onSuccess: (data) => {
       setGeneratedLetter(data);
       setDraftOverride(null);
