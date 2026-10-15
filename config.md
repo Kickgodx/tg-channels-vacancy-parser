@@ -104,7 +104,7 @@ Liveness RQ-воркеров (не yaml): `WORKER_HEARTBEAT_MAX_AGE_SECONDS` (п
 
 **Overrides прогона:** `POST /runs` принимает только whitelist полей (каналы, даты, фильтры, пороги score, `ai.enabled|model|fallback_models|use_cache`); остальное — включая `ai.base_url`, лимиты и `telegram.telethon_session_file` — меняется только в этом файле. Неизвестное поле → 422.
 
-**Frontend при `API_KEY`:** задайте `VITE_API_KEY` (тот же секрет) — SSE (`?api_key=`) и export (`X-API-Key`). Ключ попадает в JS-бандл, поэтому это дополнительный слой поверх JWT, а не защита сам по себе.
+**Frontend при `API_KEY`:** задайте `VITE_API_KEY` (тот же секрет) — UI шлёт его заголовком `X-API-Key`; SSE ключ не нужен — он проверяется при выдаче тикета (`POST /auth/sse-ticket`). Ключ попадает в JS-бандл, поэтому это дополнительный слой поверх JWT, а не защита сам по себе.
 
 ---
 

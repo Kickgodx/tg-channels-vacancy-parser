@@ -7,12 +7,19 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_current_user, get_db
+from backend.api.deps import get_current_user, get_db, verify_api_key
 from backend.db import user_content_repository as users_repo
 from backend.db.models import UserRow
 from backend.errors import CODE_EMAIL_TAKEN, CODE_NOT_AUTHENTICATED, CODE_VALIDATION, http_error
 from backend.observability import record_auth_event
-from backend.schemas import AuthCredentials, ChangePasswordRequest, RegisterRequest, TokenResponse, UserOut
+from backend.schemas import (
+    AuthCredentials,
+    ChangePasswordRequest,
+    RegisterRequest,
+    SseTicketResponse,
+    TokenResponse,
+    UserOut,
+)
 from backend.services import auth_rate_limit, auth_service
 from backend.settings import get_settings
 
@@ -202,6 +209,19 @@ def logout(refresh_token: str | None = _REFRESH_COOKIE, db: Session = Depends(ge
     response = Response(status_code=204)
     _clear_refresh_cookie(response)
     return response
+
+
+@router.post("/sse-ticket", response_model=SseTicketResponse, dependencies=[Depends(verify_api_key)])
+def sse_ticket(user: UserRow = Depends(get_current_user)) -> SseTicketResponse:
+    """Одноразовый короткоживущий тикет для ``?ticket=`` SSE-эндпоинта.
+
+    EventSource не шлёт заголовки; JWT в query оседал бы в логах прокси, тикет
+    из лога бесполезен — он истекает через секунды и принимается один раз.
+    """
+    return SseTicketResponse(
+        ticket=auth_service.create_sse_ticket(user.id, user.token_version),
+        expires_in=int(auth_service.SSE_TICKET_TTL.total_seconds()),
+    )
 
 
 @router.get("/me", response_model=UserOut)

@@ -75,7 +75,7 @@ flowchart TB
 
 ### Auth и данные
 
-- **JWT** — login/register; API Bearer, SSE через `access_token`
+- **JWT** — login/register; API Bearer + refresh-сессия в httpOnly cookie, SSE через одноразовый `?ticket=`
 - **Per-user** — resumes, saved_filters, matches, cover_letters, llm_jobs
 - **Shared** — vacancies, parse_runs, analytics, FX, AI cache
 - **Interactive LLM** — Task Queue (RQ) + Competing Consumers (`llm-worker`); Postgres = статус, Redis = очередь + pub/sub для SSE. Fallback `LLM_JOB_BACKEND=inprocess` для тестов. Scale: `--scale llm-worker=N`. Shared OpenRouter RPM across workers — follow-up (Redis token-bucket).

@@ -456,3 +456,8 @@ class TokenResponse(BaseModel):
     token_type: Literal["bearer"] = "bearer"
     expires_in: int = Field(description="TTL access-токена в секундах")
     user: UserOut
+
+
+class SseTicketResponse(BaseModel):
+    ticket: str = Field(description="Одноразовый тикет для ?ticket= SSE-эндпоинта")
+    expires_in: int = Field(description="Сколько секунд тикет можно предъявить")

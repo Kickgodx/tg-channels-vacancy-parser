@@ -14,7 +14,7 @@
 буферизации. Тела пишутся только для текстовых типов (JSON, form, text/*,
 XML), кроме ``text/event-stream`` и ``Content-Disposition: attachment``.
 Секреты маскируются: заголовки авторизации и cookies, query-параметры и
-JSON/form-ключи вида password/token/secret/api_key.
+JSON/form-ключи вида password/token/ticket/secret/api_key.
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ _SENSITIVE_KEYS_EXACT = frozenset(
         "authorization",
         "cookie",
         "sessionstring",
+        "ticket",
     }
 )
 _SENSITIVE_KEYS_SUBSTR = ("password", "secret", "apikey", "apihash")

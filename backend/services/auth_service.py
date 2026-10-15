@@ -20,6 +20,9 @@ from backend.settings import get_settings
 _LOG = logging.getLogger(__name__)
 
 _ALGO = "HS256"
+# Claim ``typ``: access-токен и SSE-тикет подписаны одним секретом и не взаимозаменяемы.
+_TYP_ACCESS = "access"
+_TYP_SSE = "sse"
 _password_hash = PasswordHash.recommended()
 
 _ephemeral_secret: str | None = None
@@ -57,6 +60,7 @@ def create_access_token(user_id: int, token_version: int = 0) -> str:
     payload = {
         "sub": str(user_id),
         "ver": token_version,
+        "typ": _TYP_ACCESS,
         "iat": now,
         "exp": now + timedelta(minutes=get_settings().jwt_ttl_minutes),
     }
@@ -66,14 +70,62 @@ def create_access_token(user_id: int, token_version: int = 0) -> str:
 def decode_access_token(token: str) -> tuple[int, int] | None:
     """``(user_id, token_version)`` из токена или None (невалиден/истёк).
 
-    Токен без ``ver`` (выпущен до появления отзыва) считается версией 0.
+    Токен без ``ver`` (выпущен до появления отзыва) считается версией 0, без
+    ``typ`` — access. SSE-тикет за access-токен не сходит.
     """
     try:
         payload = jwt.decode(token, _jwt_secret(), algorithms=[_ALGO])
     except jwt.PyJWTError:
         return None
+    if payload.get("typ", _TYP_ACCESS) != _TYP_ACCESS:
+        return None
     try:
         return int(payload["sub"]), int(payload.get("ver", 0))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+# SSE-тикет: EventSource не шлёт заголовки, а JWT в query оседал бы в логах прокси.
+# Короткий и одноразовый (см. backend/services/sse_tickets.py) — из лога его не применить.
+SSE_TICKET_TTL = timedelta(seconds=30)
+
+
+@dataclass(frozen=True)
+class SseTicketClaims:
+    user_id: int
+    token_version: int
+    jti: str
+    expires_at: datetime
+
+
+def create_sse_ticket(user_id: int, token_version: int) -> str:
+    now = datetime.now(UTC)
+    payload = {
+        "sub": str(user_id),
+        "ver": token_version,
+        "typ": _TYP_SSE,
+        "jti": secrets.token_urlsafe(16),
+        "iat": now,
+        "exp": now + SSE_TICKET_TTL,
+    }
+    return jwt.encode(payload, _jwt_secret(), algorithm=_ALGO)
+
+
+def decode_sse_ticket(ticket: str) -> SseTicketClaims | None:
+    """Подпись, срок и ``typ`` тикета; одноразовость проверяет ``sse_tickets.claim_once``."""
+    try:
+        payload = jwt.decode(ticket, _jwt_secret(), algorithms=[_ALGO])
+    except jwt.PyJWTError:
+        return None
+    if payload.get("typ") != _TYP_SSE:
+        return None
+    try:
+        return SseTicketClaims(
+            user_id=int(payload["sub"]),
+            token_version=int(payload["ver"]),
+            jti=str(payload["jti"]),
+            expires_at=datetime.fromtimestamp(int(payload["exp"]), UTC),
+        )
     except (KeyError, TypeError, ValueError):
         return None
 

@@ -14,13 +14,12 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from backend.api.deps import (
-    _extract_token,
-    _user_from_token,
-    bearer_token,
+    SseCredentials,
+    authenticate_sse,
     get_db,
     require_admin,
+    sse_credentials,
     verify_api_key,
-    verify_api_key_sse,
 )
 from backend.api.params import Page, PageSize, check_list_depth
 from backend.api.sse import (
@@ -42,7 +41,6 @@ from backend.db.session import session_scope
 from backend.errors import (
     CODE_FORBIDDEN,
     CODE_IDEMPOTENCY_IN_PROGRESS,
-    CODE_NOT_AUTHENTICATED,
     CODE_VALIDATION,
     AppError,
     http_error,
@@ -73,7 +71,7 @@ router = APIRouter(
     tags=["runs"],
     dependencies=[Depends(verify_api_key), Depends(require_admin)],
 )
-# SSE отдельно: ``?api_key=`` / ``?access_token=`` только здесь, не на всём /runs.
+# SSE отдельно: EventSource не шлёт заголовки — auth по ``?ticket=`` (authenticate_sse).
 sse_router = APIRouter(prefix="/runs", tags=["runs"])
 
 
@@ -297,25 +295,15 @@ async def _sse_done_only() -> AsyncIterator[str]:
     yield SSE_DONE
 
 
-@sse_router.get("/{run_id}/events", dependencies=[Depends(verify_api_key_sse)])
-def run_events(
-    run_id: uuid.UUID,
-    authorization: str | None = Depends(bearer_token),
-    access_token: str | None = Query(
-        default=None,
-        description="JWT для SSE-эндпоинтов (EventSource не шлёт заголовки)",
-        include_in_schema=False,
-    ),
-) -> StreamingResponse:
-    """SSE прогресса прогона. Auth: Bearer или ``?access_token=``; только admin.
+@sse_router.get("/{run_id}/events")
+def run_events(run_id: uuid.UUID, creds: SseCredentials = Depends(sse_credentials)) -> StreamingResponse:
+    """SSE прогресса прогона. Auth: ``?ticket=`` или Bearer; только admin.
 
     Обработчик синхронный (auth в threadpool, не в event loop); стрим не держит
     ``get_db`` — читает БД короткими сессиями.
     """
     with session_scope() as session:
-        user = _user_from_token(session, _extract_token(authorization, access_token))
-        if user is None:
-            raise http_error(401, CODE_NOT_AUTHENTICATED, "Not authenticated")
+        user = authenticate_sse(session, creds)
         if not user.is_admin:
             raise http_error(403, CODE_FORBIDDEN, "Admin only")
         row = repo.get_parse_run(session, run_id)

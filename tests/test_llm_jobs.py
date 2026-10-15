@@ -149,9 +149,7 @@ def test_sse_events_no_long_lived_get_db(api_client, monkeypatch):
     # сигнатура эндпоинта не тянет get_db / get_current_user (долгая сессия)
     sig = inspect.signature(llm_jobs_route.llm_job_events)
     assert "db" not in sig.parameters
-    params = sig.parameters
-    assert "authorization" in params
-    assert "access_token" in params
+    assert set(sig.parameters) == {"job_id", "creds"}
 
     with api_client.stream(
         "GET",
@@ -164,9 +162,10 @@ def test_sse_events_no_long_lived_get_db(api_client, monkeypatch):
     assert "event: status" in body
     assert "done" in body
 
+    ticket = api_client.post("/api/v1/auth/sse-ticket", headers=_auth(token)).json()["ticket"]
     with api_client.stream(
         "GET",
-        f"/api/v1/llm-jobs/{job_id}/events?access_token={token}",
+        f"/api/v1/llm-jobs/{job_id}/events?ticket={ticket}",
     ) as resp2:
         assert resp2.status_code == 200
         body2 = b"".join(resp2.iter_bytes()).decode("utf-8", errors="replace")

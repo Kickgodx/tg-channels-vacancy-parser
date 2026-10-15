@@ -323,6 +323,11 @@ export interface TokenResponse {
   user: AuthUser;
 }
 
+export interface SseTicketResponse {
+  ticket: string;
+  expires_in: number;
+}
+
 export type MatchImportance = "critical" | "important" | "secondary";
 
 export interface SkillMatch {

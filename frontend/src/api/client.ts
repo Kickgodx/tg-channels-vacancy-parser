@@ -21,6 +21,7 @@ import type {
   SavedFilter,
   SavedFilterParams,
   SourceStats,
+  SseTicketResponse,
   TokenResponse,
   Vacancy,
   VacancyImportResponse,
@@ -80,15 +81,6 @@ function authHeaders(): Record<string, string> {
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
-}
-
-/** Query только для EventSource — не для обычного REST (логи/Referer). */
-function sseAuthQuery(): string {
-  const parts: string[] = [];
-  const token = getToken();
-  if (token) parts.push(`access_token=${encodeURIComponent(token)}`);
-  if (VITE_API_KEY) parts.push(`api_key=${encodeURIComponent(VITE_API_KEY)}`);
-  return parts.length ? `?${parts.join("&")}` : "";
 }
 
 let refreshing: Promise<boolean> | null = null;
@@ -224,6 +216,46 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/**
+ * URL SSE с одноразовым тикетом (POST /auth/sse-ticket): EventSource не шлёт
+ * заголовки, а JWT в query оседал бы в логах прокси. Тикет живёт секунды и
+ * принимается один раз — автопереподключение EventSource с ним получит 401,
+ * поэтому обрыв везде ведёт в fallback-poll.
+ */
+async function sseUrl(path: string, signal?: AbortSignal): Promise<string> {
+  const { ticket } = await request<SseTicketResponse>("/auth/sse-ticket", { method: "POST", signal });
+  return `${API_BASE}${path}?ticket=${encodeURIComponent(ticket)}`;
+}
+
+/**
+ * EventSource по тикету. Тикет запрашивается асинхронно: `setup` вызывается, когда
+ * источник открыт, `onFail` — если тикет не получен; `close()` можно звать в любой момент.
+ */
+function openSse(
+  path: string,
+  setup: (es: EventSource) => void,
+  onFail: () => void,
+): { close: () => void } {
+  let es: EventSource | null = null;
+  let closed = false;
+  void sseUrl(path).then(
+    (url) => {
+      if (closed) return;
+      es = new EventSource(url);
+      setup(es);
+    },
+    () => {
+      if (!closed) onFail();
+    },
+  );
+  return {
+    close: () => {
+      closed = true;
+      es?.close();
+    },
+  };
+}
+
 const LLM_JOB_POLL_MS = 1000;
 /**
  * Потолок ожидания LLM-джобы на клиенте — страховка от вечного ожидания. До error
@@ -318,12 +350,13 @@ async function pollLlmJob(
 }
 
 /** Ждать завершения через SSE; при обрыве — poll до terminal или до `signal`. */
-function waitLlmJobSse(
+async function waitLlmJobSse(
   jobId: string,
   onUpdate: LlmJobListener | undefined,
   signal: AbortSignal,
 ): Promise<LlmJob> {
-  const url = `${API_BASE}/llm-jobs/${jobId}/events${sseAuthQuery()}`;
+  const url = await sseUrl(`/llm-jobs/${jobId}/events`, signal);
+  signal.throwIfAborted();
 
   return new Promise((resolve, reject) => {
     let last: LlmJob | null = null;
@@ -671,7 +704,6 @@ export const api = {
   ): () => void {
     let cancelled = false;
     let polling = false;
-    const es = new EventSource(`${API_BASE}/hh/sync-jobs/${jobId}/events${sseAuthQuery()}`);
 
     const startFallbackPoll = () => {
       if (cancelled || polling) return;
@@ -690,18 +722,22 @@ export const api = {
       });
     };
 
-    es.addEventListener("status", (ev) => {
-      try {
-        onUpdate(JSON.parse((ev as MessageEvent).data) as HhSyncJob);
-      } catch {
-        /* ignore parse */
-      }
-    });
-    es.addEventListener("done", () => es.close());
-    es.onerror = () => {
-      // EventSource сам переподключается; надёжнее дочитать статус опросом.
-      if (es.readyState !== EventSource.CLOSED) startFallbackPoll();
-    };
+    const es = openSse(
+      `/hh/sync-jobs/${jobId}/events`,
+      (source) => {
+        source.addEventListener("status", (ev) => {
+          try {
+            onUpdate(JSON.parse((ev as MessageEvent).data) as HhSyncJob);
+          } catch {
+            /* ignore parse */
+          }
+        });
+        source.addEventListener("done", () => source.close());
+        // Обрыв или отказ (тикет одноразовый — переподключение не пройдёт): дочитать опросом.
+        source.onerror = startFallbackPoll;
+      },
+      startFallbackPoll,
+    );
 
     return () => {
       cancelled = true;
@@ -771,8 +807,6 @@ export const api = {
     let cancelled = false;
     const cancelFlag = { cancelled: false };
 
-    const es = new EventSource(`${API_BASE}/runs/${runId}/events${sseAuthQuery()}`);
-
     const finishDone = () => {
       if (settled || cancelled) return;
       settled = true;
@@ -803,36 +837,42 @@ export const api = {
       startFallbackPoll();
     }, SSE_FALLBACK_IDLE_MS);
 
-    es.addEventListener("progress", (ev) => {
-      try {
-        gotProgress = true;
-        onProgress(JSON.parse((ev as MessageEvent).data) as ProgressEvent);
-      } catch (e) {
-        if (!settled && !cancelled) {
-          settled = true;
-          window.clearTimeout(timer);
-          es.close();
-          onError(e instanceof Error ? e : new Error(String(e)));
-        }
-      }
-    });
+    const es = openSse(
+      `/runs/${runId}/events`,
+      (source) => {
+        source.addEventListener("progress", (ev) => {
+          try {
+            gotProgress = true;
+            onProgress(JSON.parse((ev as MessageEvent).data) as ProgressEvent);
+          } catch (e) {
+            if (!settled && !cancelled) {
+              settled = true;
+              window.clearTimeout(timer);
+              es.close();
+              onError(e instanceof Error ? e : new Error(String(e)));
+            }
+          }
+        });
 
-    es.addEventListener("done", () => {
-      finishDone();
-    });
+        source.addEventListener("done", () => {
+          finishDone();
+        });
 
-    es.onerror = () => {
-      if (settled || cancelled) return;
-      // Первый error часто при connect — ждём progress; иначе fallback poll
-      if (gotProgress) {
-        startFallbackPoll();
-        return;
-      }
-      window.setTimeout(() => {
-        if (settled || cancelled || gotProgress) return;
-        startFallbackPoll();
-      }, 1500);
-    };
+        source.onerror = () => {
+          if (settled || cancelled) return;
+          // Первый error часто при connect — ждём progress; иначе fallback poll
+          if (gotProgress) {
+            startFallbackPoll();
+            return;
+          }
+          window.setTimeout(() => {
+            if (settled || cancelled || gotProgress) return;
+            startFallbackPoll();
+          }, 1500);
+        };
+      },
+      startFallbackPoll,
+    );
 
     return () => {
       cancelled = true;

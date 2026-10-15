@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from fastapi import Depends, Query, Security
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
@@ -9,17 +10,18 @@ from sqlalchemy.orm import Session
 from backend.db.models import UserRow
 from backend.db.session import get_db
 from backend.errors import CODE_FORBIDDEN, CODE_NOT_AUTHENTICATED, http_error
-from backend.services import auth_service
+from backend.services import auth_service, sse_tickets
 from backend.settings import get_settings
 
 __all__ = [
+    "SseCredentials",
+    "authenticate_sse",
     "bearer_token",
     "get_current_user",
     "get_db",
-    "get_sse_user",
     "require_admin",
+    "sse_credentials",
     "verify_api_key",
-    "verify_api_key_sse",
 ]
 
 _LOG = logging.getLogger(__name__)
@@ -54,18 +56,6 @@ def verify_api_key(
     _check_api_key(x_api_key)
 
 
-def verify_api_key_sse(
-    x_api_key: str | None = Security(_api_key_scheme),
-    api_key: str | None = Query(
-        default=None,
-        description="API key для SSE/EventSource (заголовки недоступны)",
-        include_in_schema=False,
-    ),
-) -> None:
-    """X-API-Key или ``?api_key=`` — только для SSE/EventSource."""
-    _check_api_key(x_api_key or api_key)
-
-
 def bearer_token(
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
     _oauth2_token: str | None = Security(_oauth2_scheme),
@@ -79,8 +69,12 @@ def bearer_token(
     return credentials.credentials.strip()
 
 
-def _extract_token(bearer: str | None, access_token: str | None) -> str | None:
-    return bearer or access_token
+def _active_user(db: Session, user_id: int, token_version: int) -> UserRow | None:
+    user = db.get(UserRow, user_id)
+    # Версия меняется при смене пароля и «выйти везде» — старые токены отозваны.
+    if user is None or not user.is_active or token_version != user.token_version:
+        return None
+    return user
 
 
 def _user_from_token(db: Session, token: str | None) -> UserRow | None:
@@ -89,12 +83,7 @@ def _user_from_token(db: Session, token: str | None) -> UserRow | None:
     claims = auth_service.decode_access_token(token)
     if claims is None:
         return None
-    user_id, token_version = claims
-    user = db.get(UserRow, user_id)
-    # Версия меняется при смене пароля и «выйти везде» — старые токены отозваны.
-    if user is None or not user.is_active or token_version != user.token_version:
-        return None
-    return user
+    return _active_user(db, *claims)
 
 
 def get_current_user(
@@ -108,17 +97,40 @@ def get_current_user(
     return user
 
 
-def get_sse_user(
-    authorization: str | None = Depends(bearer_token),
-    access_token: str | None = Query(
+@dataclass(frozen=True)
+class SseCredentials:
+    bearer: str | None
+    api_key: str | None
+    ticket: str | None
+
+
+def sse_credentials(
+    bearer: str | None = Depends(bearer_token),
+    x_api_key: str | None = Security(_api_key_scheme),
+    ticket: str | None = Query(
         default=None,
-        description="JWT для SSE-эндпоинтов (EventSource не шлёт заголовки)",
-        include_in_schema=False,
+        description="Одноразовый тикет из POST /auth/sse-ticket (EventSource не шлёт заголовки)",
     ),
-    db: Session = Depends(get_db),
-) -> UserRow:
-    """JWT из Bearer или ``?access_token=`` — только для SSE."""
-    user = _user_from_token(db, _extract_token(authorization, access_token))
+) -> SseCredentials:
+    """Сырые креды SSE-запроса. Проверка — ``authenticate_sse`` в коротком
+    ``session_scope`` обработчика: стрим не держит соединение ``get_db``."""
+    return SseCredentials(bearer=bearer, api_key=x_api_key, ticket=ticket)
+
+
+def authenticate_sse(db: Session, creds: SseCredentials) -> UserRow:
+    """Пользователь SSE: одноразовый ``?ticket=`` или ``Authorization: Bearer`` + X-API-Key.
+
+    Тикет выдаётся только запросу, прошедшему JWT и X-API-Key, поэтому ключ с ним
+    не нужен. JWT и API key в query не принимаются — они оседали бы в логах прокси.
+    """
+    user = None
+    if creds.ticket:
+        claims = auth_service.decode_sse_ticket(creds.ticket)
+        if claims is not None and sse_tickets.claim_once(claims.jti, claims.expires_at):
+            user = _active_user(db, claims.user_id, claims.token_version)
+    else:
+        _check_api_key(creds.api_key)
+        user = _user_from_token(db, creds.bearer)
     if user is None:
         raise http_error(401, CODE_NOT_AUTHENTICATED, "Not authenticated")
     return user

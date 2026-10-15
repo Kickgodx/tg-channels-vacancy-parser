@@ -106,15 +106,17 @@ def test_run_reads_forbidden_for_non_admin(api_client, path):
     assert r.json()["detail"]["code"] == "FORBIDDEN"
 
 
-def test_run_events_accept_access_token_query_rest_does_not(api_client):
-    """EventSource не шлёт заголовки: ``?access_token=`` — только на SSE."""
+def test_jwt_in_query_is_not_accepted_anywhere(api_client):
+    """JWT в query оседает в логах прокси: ни REST, ни SSE его не принимают (SSE — ``?ticket=``)."""
     token = _register(api_client, "admin@example.com")["access_token"]
     with session_scope() as session:
         rid = pr.create_parse_run(session, config_snapshot={}, status="completed").id
 
     assert api_client.get(f"/api/v1/runs/{rid}?access_token={token}").status_code == 401
+    assert api_client.get(f"/api/v1/runs/{rid}/events?access_token={token}").status_code == 401
 
-    with api_client.stream("GET", f"/api/v1/runs/{rid}/events?access_token={token}") as resp:
+    ticket = api_client.post("/api/v1/auth/sse-ticket", headers=_auth(token)).json()["ticket"]
+    with api_client.stream("GET", f"/api/v1/runs/{rid}/events?ticket={ticket}") as resp:
         assert resp.status_code == 200
         body = b"".join(resp.iter_bytes()).decode("utf-8", errors="replace")
     assert "event: done" in body
