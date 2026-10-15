@@ -95,7 +95,9 @@ GRAFANA_ADMIN_PASSWORD=...      # только с профилем observability
 # BACKUP_HOST_DIR=./backup/pg     # pg-backup: каталог дампов на хосте
 # API_KEY=                        # если задан — заголовок X-API-Key для API (дополнительно к JWT)
 # JWT_SECRET=                     # подпись access-токенов; в dev без него — эфемерный (сессии сгорают при рестарте), в prod обязателен (32+ символа)
-# JWT_TTL_MINUTES=60              # TTL access-токена
+# JWT_TTL_MINUTES=15              # TTL access-токена (UI продлевает его по refresh-cookie)
+# REFRESH_TTL_DAYS=30             # срок refresh-сессии, скользящий
+# REFRESH_COOKIE_SECURE=          # Secure у refresh-cookie; по умолчанию dev — false, prod — true
 # AUTH_REGISTRATION_OPEN=true     # false — регистрация закрыта после первого пользователя; умолчание: dev — true, prod — false
 # LLM_JOB_BACKEND=rq              # rq (Docker) или inprocess (локально без Redis)
 # PARSE_JOB_BACKEND=rq            # rq (Docker + parse-worker) или inprocess (ThreadPool в API)
@@ -134,6 +136,7 @@ GRAFANA_ADMIN_PASSWORD=...      # только с профилем observability
 | Регистрация новых пользователей | открыта | закрыта после первого (админа) |
 | Тела запросов/ответов в HTTP-логе | пишутся | не пишутся (резюме и email не уходят в Loki) |
 | `JWT_SECRET` | необязателен, эфемерный секрет | обязателен, 32+ символа — иначе backend и воркеры не стартуют |
+| refresh-cookie `Secure` | нет (UI по `http://localhost`) | да — нужен HTTPS (`REFRESH_COOKIE_SECURE`) |
 | API на не-loopback адресе | backend не стартует (`ALLOW_PUBLIC_DEV=true` — только warning) | разрешено |
 
 `AUTH_REGISTRATION_OPEN` и `HTTP_LOG_BODIES`, заданные явно, действуют в любом
@@ -309,16 +312,30 @@ LLM пишет черновик отклика под конкретную ва�
 - Только админ: прогоны целиком (запуск, отмена, история, экспорт, SSE), ручной
   импорт и HH sync. Вкладки «Парсинг», «Импорт» и «HH» не-админу не показываются,
   прямой переход по URL уводит на «Вакансии».
-- Токен хранится в `localStorage`, уходит в `Authorization: Bearer …`;
-  401 → редирект на `/login`. Для SSE (EventSource не умеет заголовки)
-  токен передаётся параметром `access_token`.
+- Сессия = короткий access JWT (`JWT_TTL_MINUTES`, 15 мин) + refresh-токен
+  (`REFRESH_TTL_DAYS`, 30 дней, скользящий). Access хранится только в памяти
+  вкладки и уходит в `Authorization: Bearer …`. Refresh — случайная строка в
+  httpOnly cookie `tgjp_refresh` (`SameSite=Strict`, `Path=/api/v1/auth`, в prod
+  `Secure`), в БД — только её sha256 (`refresh_tokens`). При загрузке страницы и
+  на 401 UI молча вызывает `POST /auth/refresh`, повторяет запрос и на `/login`
+  уходит, только если сессии нет — несохранённый ввод не теряется раз в час.
+- Каждый refresh ротирует cookie. Повтор уже ротированного значения дольше
+  30 с спустя (параллельные вкладки укладываются в это окно) считается кражей:
+  отзывается вся сессия (все токены этого входа). `POST /auth/logout` отзывает
+  сессию на сервере и стирает cookie; просроченные и отозванные строки чистит
+  hourly-очистка служебных таблиц.
+- Cookie `SameSite=Strict`: UI и API должны быть same-site. Открывайте UI по тому
+  же хосту, что в `VITE_API_BASE_URL` (`localhost:5173` ↔ `localhost:9000`; порт
+  роли не играет). UI на `127.0.0.1`, а API на `localhost` — разные сайты:
+  cookie не уйдёт, и после перезагрузки страницы придётся входить заново.
+- Для SSE (EventSource не умеет заголовки) токен передаётся параметром `access_token`.
 - Swagger (`/docs`) → кнопка «Authorize»: либо вставить готовый JWT в `HTTPBearer`
   (без слова `Bearer`), либо войти в `OAuth2PasswordBearer` — email в поле
   `username`, `client_id`/`secret` пустые (form-эндпоинт `POST /auth/token`, те же
   лимиты, что у `/auth/login`). `X-API-Key` — там же, если задан `API_KEY`.
 - Отзыв токенов: в JWT — версия `users.token_version`; `POST /auth/change-password`
   и `POST /auth/logout-all` увеличивают её, и все ранее выданные токены
-  (включая SSE) перестают приниматься. `is_active=false` отключает пользователя целиком.
+  (включая SSE и refresh-сессии) перестают приниматься. `is_active=false` отключает пользователя целиком.
 - Перебор паролей: не больше `AUTH_RATE_LIMIT_PER_MINUTE` (20) попыток входа и
   регистрации с одного IP в минуту и `AUTH_MAX_FAILED_LOGINS` (5) неудачных входов
   на email за `AUTH_FAILED_LOGIN_WINDOW_SECONDS` (15 мин); дальше — 429 с
@@ -385,10 +402,12 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | Метод | Путь | Назначение |
 |-------|------|------------|
 | `GET` | `/health` | Статус API и подключения к БД |
-| `POST` | `/auth/register` / `/auth/login` | Регистрация / вход → JWT access-токен |
+| `POST` | `/auth/register` / `/auth/login` | Регистрация / вход → JWT access-токен + refresh-cookie |
+| `POST` | `/auth/refresh` | Новый access-токен по refresh-cookie; cookie ротируется (401 — сессии нет) |
+| `POST` | `/auth/logout` | Отозвать текущую refresh-сессию, стереть cookie (204) |
 | `GET` | `/auth/me` | Текущий пользователь |
-| `POST` | `/auth/change-password` | Смена пароля → новый токен; прежние токены отозваны |
-| `POST` | `/auth/logout-all` | Отозвать все токены пользователя (204) |
+| `POST` | `/auth/change-password` | Смена пароля → новый токен и сессия; прежние токены и сессии отозваны |
+| `POST` | `/auth/logout-all` | Отозвать все токены и сессии пользователя (204) |
 | `GET` | `/config/defaults` | Значения по умолчанию для формы |
 | `GET` | `/config/llm-models` | Каталог моделей из `llm_models.yaml` |
 | `POST` | `/runs` | Постановка прогона в очередь (admin; `queued` → parse-worker / inprocess) |

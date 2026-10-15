@@ -58,7 +58,12 @@ class Settings(BaseSettings):
     )
     api_key: str | None = Field(default=None, alias="API_KEY")
     jwt_secret: str | None = Field(default=None, alias="JWT_SECRET")
-    jwt_ttl_minutes: int = Field(default=60, alias="JWT_TTL_MINUTES")
+    # Access-токен короткий: сессию держит refresh-cookie, UI продлевает access молча.
+    jwt_ttl_minutes: int = Field(default=15, ge=1, alias="JWT_TTL_MINUTES")
+    # Срок refresh-сессии; скользящий — каждое обновление access продлевает его заново.
+    refresh_ttl_days: int = Field(default=30, ge=1, alias="REFRESH_TTL_DAYS")
+    # None → по APP_ENV: prod — true (cookie только по HTTPS), dev — false (http://localhost).
+    refresh_cookie_secure: bool | None = Field(default=None, alias="REFRESH_COOKIE_SECURE")
     # Лимиты /auth (0 — выключить): попыток входа/регистрации с одного IP в минуту и
     # неудачных входов на один email за окно — дальше 429 до конца окна, без argon2.
     auth_rate_limit_per_minute: int = Field(default=20, ge=0, alias="AUTH_RATE_LIMIT_PER_MINUTE")
@@ -141,6 +146,8 @@ class Settings(BaseSettings):
             self.auth_registration_open = not self.is_production
         if self.http_log_bodies is None:
             self.http_log_bodies = not self.is_production
+        if self.refresh_cookie_secure is None:
+            self.refresh_cookie_secure = self.is_production
         if self.is_production and len((self.jwt_secret or "").strip()) < _MIN_JWT_SECRET_LENGTH:
             # Эфемерный секрет допустим только в dev: в prod он сбрасывает сессии при
             # каждом рестарте и расходится между процессами.

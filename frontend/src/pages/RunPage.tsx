@@ -337,7 +337,7 @@ export default function RunPage() {
                       setExportError(null);
                       setExportNote(null);
                       void api
-                        .downloadExport(api.exportRunUrl(runId, "xlsx"), `run-${runId.slice(0, 8)}.xlsx`)
+                        .downloadExport(api.exportRunPath(runId, "xlsx"), `run-${runId.slice(0, 8)}.xlsx`)
                         .then(setExportNote)
                         .catch((e: Error) => setExportError(e.message));
                     }}
@@ -351,7 +351,7 @@ export default function RunPage() {
                       setExportError(null);
                       setExportNote(null);
                       void api
-                        .downloadExport(api.exportRunUrl(runId, "json"), `run-${runId.slice(0, 8)}.json`)
+                        .downloadExport(api.exportRunPath(runId, "json"), `run-${runId.slice(0, 8)}.json`)
                         .then(setExportNote)
                         .catch((e: Error) => setExportError(e.message));
                     }}

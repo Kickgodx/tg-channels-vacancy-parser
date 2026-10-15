@@ -31,16 +31,27 @@ import type {
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8000/api/v1";
 
-const TOKEN_KEY = "tgjp_token";
 const VITE_API_KEY = (import.meta.env.VITE_API_KEY as string | undefined)?.trim() || "";
 
+/**
+ * Access-токен живёт только в памяти вкладки (не в localStorage — XSS не унесёт его
+ * между сессиями). Сессию держит httpOnly refresh-cookie: на старте и при 401
+ * access берётся заново через POST /auth/refresh.
+ */
+let accessToken: string | null = null;
+
+try {
+  localStorage.removeItem("tgjp_token"); // прежнее хранилище access-токена
+} catch {
+  /* storage недоступен */
+}
+
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  return accessToken;
 }
 
 export function setToken(token: string | null) {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+  accessToken = token;
 }
 
 export class ApiError extends Error {
@@ -60,11 +71,14 @@ export class ApiError extends Error {
   }
 }
 
+function apiKeyHeaders(): Record<string, string> {
+  return VITE_API_KEY ? { "X-API-Key": VITE_API_KEY } : {};
+}
+
 function authHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
+  const headers = apiKeyHeaders();
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (VITE_API_KEY) headers["X-API-Key"] = VITE_API_KEY;
   return headers;
 }
 
@@ -77,11 +91,60 @@ function sseAuthQuery(): string {
   return parts.length ? `?${parts.join("&")}` : "";
 }
 
-function handleUnauthorized(path: string) {
-  // 401 на самом логине — это «неверные креды», не редирект
-  if (path.startsWith("/auth/")) return;
+let refreshing: Promise<boolean> | null = null;
+
+/**
+ * Обновить access-токен по refresh-cookie. Параллельные вызовы делят один запрос:
+ * cookie ротируется, второй обмен того же значения был бы лишним.
+ */
+export function refreshSession(): Promise<boolean> {
+  refreshing ??= (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+        headers: apiKeyHeaders(),
+      });
+      if (!res.ok) {
+        setToken(null);
+        return false;
+      }
+      setToken(((await res.json()) as TokenResponse).access_token);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      refreshing = null;
+    }
+  })();
+  return refreshing;
+}
+
+/** 401 здесь — «неверные креды» / «нет сессии», а не протухший access: без refresh и редиректа. */
+const NO_REFRESH_PATHS = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout"];
+
+function handleUnauthorized() {
   setToken(null);
-  window.location.assign("/login");
+  if (window.location.pathname !== "/login") window.location.assign("/login");
+}
+
+/**
+ * fetch к API с access-токеном. На 401 — один тихий refresh и повтор запроса
+ * (401 отдаётся до побочных эффектов, повтор POST безопасен); не вышло — на /login.
+ * credentials: "include" — чтобы браузер принял и отправил refresh-cookie (path /auth).
+ */
+async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const send = () =>
+    fetch(`${API_BASE}${path}`, {
+      credentials: "include",
+      ...init,
+      headers: { ...authHeaders(), ...init.headers },
+    });
+  let res = await send();
+  if (res.status !== 401 || NO_REFRESH_PATHS.some((p) => path.startsWith(p))) return res;
+  if (await refreshSession()) res = await send();
+  if (res.status === 401) handleUnauthorized();
+  return res;
 }
 
 function parseErrorDetail(
@@ -144,15 +207,10 @@ function appendSearchParams(q: URLSearchParams, params?: VacancyQueryParams) {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await authFetch(path, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-      ...init?.headers,
-    },
+    headers: { "Content-Type": "application/json", ...init?.headers },
   });
-  if (res.status === 401) handleUnauthorized(path);
   if (!res.ok) {
     let detail: unknown = res.statusText;
     try {
@@ -361,16 +419,11 @@ async function postInteractiveLlm<T>(
   onUpdate?: LlmJobListener,
   signal?: AbortSignal,
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await authFetch(path, {
     ...init,
     signal,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-      ...init.headers,
-    },
+    headers: { "Content-Type": "application/json", ...init.headers },
   });
-  if (res.status === 401) handleUnauthorized(path);
   if (res.status === 200) return (await res.json()) as T;
   if (res.status === 202) {
     const accepted = (await res.json()) as LlmJobAccepted;
@@ -415,7 +468,17 @@ export const api = {
 
   me: () => request<AuthUser>("/auth/me"),
 
-  logout: () => {
+  /** Отозвать refresh-сессию на сервере (cookie стирается) и уйти на /login. */
+  logout: async () => {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+        headers: apiKeyHeaders(),
+      });
+    } catch {
+      /* сеть недоступна — локально всё равно выходим */
+    }
     setToken(null);
     window.location.assign("/login");
   },
@@ -512,28 +575,23 @@ export const api = {
     }),
 
   deleteFilter: async (id: number) => {
-    const res = await fetch(`${API_BASE}/filters/${id}`, {
-      method: "DELETE",
-      headers: authHeaders(),
-    });
-    if (res.status === 401) handleUnauthorized(`/filters/${id}`);
+    const res = await authFetch(`/filters/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`Удаление пресета: ${res.status} ${res.statusText}`);
   },
 
-  exportVacanciesUrl: (params?: VacancyQueryParams) => {
+  exportVacanciesPath: (params?: VacancyQueryParams) => {
     const q = new URLSearchParams();
     appendSearchParams(q, params);
     const qs = q.toString();
-    return `${API_BASE}/vacancies/export.xlsx${qs ? `?${qs}` : ""}`;
+    return `/vacancies/export.xlsx${qs ? `?${qs}` : ""}`;
   },
 
   /**
    * Скачать export с Authorization / X-API-Key (вместо голого &lt;a href&gt;).
    * Возвращает пометку об обрезке («выгружено N из M»), если backend упёрся в EXPORT_MAX_ROWS.
    */
-  downloadExport: async (url: string, filename: string): Promise<string | null> => {
-    const res = await fetch(url, { headers: authHeaders() });
-    if (res.status === 401) handleUnauthorized(url);
+  downloadExport: async (path: string, filename: string): Promise<string | null> => {
+    const res = await authFetch(path);
     if (!res.ok) {
       let detail: unknown = res.statusText;
       try {
@@ -572,8 +630,7 @@ export const api = {
     return request<VacancyListResponse>(`/runs/${runId}/vacancies?${q}`);
   },
 
-  exportRunUrl: (runId: string, kind: "xlsx" | "json") =>
-    `${API_BASE}/runs/${runId}/export.${kind}`,
+  exportRunPath: (runId: string, kind: "xlsx" | "json") => `/runs/${runId}/export.${kind}`,
 
   /** Ручной импорт: тексты вакансий → rules + LLM → запись в БД. */
   /** Без LLM — сразу 200; с LLM — 202 и джоба, `onProgress` получает частичный итог. */
@@ -667,11 +724,7 @@ export const api = {
     }),
 
   deleteResume: async (id: number) => {
-    const res = await fetch(`${API_BASE}/resumes/${id}`, {
-      method: "DELETE",
-      headers: authHeaders(),
-    });
-    if (res.status === 401) handleUnauthorized(`/resumes/${id}`);
+    const res = await authFetch(`/resumes/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`Удаление резюме: ${res.status} ${res.statusText}`);
   },
 
