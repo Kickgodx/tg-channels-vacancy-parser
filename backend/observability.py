@@ -285,7 +285,7 @@ AUTH_EVENTS = Counter(
     labelnames=(
         "event",
         "outcome",
-    ),  # register|login|change_password|logout_all × success|closed|conflict|invalid|disabled|rate_limited
+    ),  # register|login|refresh|change_password|logout_all × success|closed|conflict|invalid|disabled|rate_limited
 )
 
 

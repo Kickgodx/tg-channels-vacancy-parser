@@ -30,7 +30,7 @@ function UserBadge() {
   return (
     <span className="nav-user">
       <span className="muted">{meQ.data?.email ?? "…"}</span>
-      <button type="button" className="btn-link secondary" onClick={() => api.logout()}>
+      <button type="button" className="btn-link secondary" onClick={() => void api.logout()}>
         Выйти
       </button>
     </span>

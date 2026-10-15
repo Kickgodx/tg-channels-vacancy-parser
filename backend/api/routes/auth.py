@@ -3,14 +3,14 @@ from __future__ import annotations
 import logging
 from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db
 from backend.db import user_content_repository as users_repo
 from backend.db.models import UserRow
-from backend.errors import CODE_EMAIL_TAKEN, CODE_VALIDATION, http_error
+from backend.errors import CODE_EMAIL_TAKEN, CODE_NOT_AUTHENTICATED, CODE_VALIDATION, http_error
 from backend.observability import record_auth_event
 from backend.schemas import AuthCredentials, ChangePasswordRequest, RegisterRequest, TokenResponse, UserOut
 from backend.services import auth_rate_limit, auth_service
@@ -38,6 +38,31 @@ def _token_response(user: UserRow) -> TokenResponse:
     )
 
 
+def _set_refresh_cookie(response: Response, raw: str) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        auth_service.REFRESH_COOKIE,
+        raw,
+        max_age=settings.refresh_ttl_days * 86400,
+        path=auth_service.REFRESH_COOKIE_PATH,
+        httponly=True,
+        secure=bool(settings.refresh_cookie_secure),
+        # Strict: cookie не уходит с чужих сайтов — CSRF на /auth/refresh закрыт.
+        # Поэтому UI и API должны быть same-site (localhost:5173 и localhost:9000 — да).
+        samesite="strict",
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(auth_service.REFRESH_COOKIE, path=auth_service.REFRESH_COOKIE_PATH)
+
+
+def _start_session(user: UserRow, response: Response, db: Session) -> TokenResponse:
+    """Вход: access-токен в ответе + новая refresh-сессия в httpOnly cookie."""
+    _set_refresh_cookie(response, auth_service.issue_refresh_token(db, user))
+    return _token_response(user)
+
+
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
@@ -61,7 +86,9 @@ def _email_taken(email: str) -> HTTPException:
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)
-def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
+def register(
+    body: RegisterRequest, request: Request, response: Response, db: Session = Depends(get_db)
+) -> TokenResponse:
     """Регистрация. Первый пользователь → admin и наследует legacy-строки (user_id IS NULL)."""
     _enforce_limits("register", request)
     email = body.email.strip().lower()
@@ -89,10 +116,10 @@ def register(body: RegisterRequest, request: Request, db: Session = Depends(get_
         users_repo.claim_legacy_rows(db, user.id)
     record_auth_event("register", "success")
     _LOG.info("Зарегистрирован пользователь %s (id=%s, admin=%s)", email, user.id, is_first)
-    return _token_response(user)
+    return _start_session(user, response, db)
 
 
-def _authenticate(email: str, password: str, request: Request, db: Session) -> TokenResponse:
+def _authenticate(email: str, password: str, request: Request, response: Response, db: Session) -> TokenResponse:
     email = email.strip().lower()
     _enforce_limits("login", request, email)
     user = users_repo.get_user_by_email(db, email)
@@ -108,12 +135,12 @@ def _authenticate(email: str, password: str, request: Request, db: Session) -> T
     auth_rate_limit.reset_login_failures(email)
     record_auth_event("login", "success")
     _LOG.info("Вход выполнен: %s (id=%s)", user.email, user.id)
-    return _token_response(user)
+    return _start_session(user, response, db)
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: AuthCredentials, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
-    return _authenticate(body.email, body.password, request, db)
+def login(body: AuthCredentials, request: Request, response: Response, db: Session = Depends(get_db)) -> TokenResponse:
+    return _authenticate(body.email, body.password, request, response, db)
 
 
 async def _password_form(request: Request) -> tuple[str, str]:
@@ -133,6 +160,7 @@ async def _password_form(request: Request) -> tuple[str, str]:
 @router.post("/token", response_model=TokenResponse, include_in_schema=False)
 def token(
     request: Request,
+    response: Response,
     form: tuple[str, str] = Depends(_password_form),
     db: Session = Depends(get_db),
 ) -> TokenResponse:
@@ -140,7 +168,40 @@ def token(
 
     Те же лимиты и проверки, что у ``/login``; клиентам — JSON ``/login``.
     """
-    return _authenticate(form[0], form[1], request, db)
+    return _authenticate(form[0], form[1], request, response, db)
+
+
+_REFRESH_COOKIE = Cookie(default=None, alias=auth_service.REFRESH_COOKIE, include_in_schema=False)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh(
+    response: Response,
+    refresh_token: str | None = _REFRESH_COOKIE,
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    """Новый access-токен по refresh-cookie; cookie ротируется. Нет живой сессии — 401."""
+    outcome = auth_service.rotate_refresh_token(db, refresh_token) if refresh_token else None
+    if outcome is None:
+        record_auth_event("refresh", "invalid")
+        raise http_error(401, CODE_NOT_AUTHENTICATED, "Session expired")
+    if outcome.refresh_token is not None:
+        _set_refresh_cookie(response, outcome.refresh_token)
+    record_auth_event("refresh", "success")
+    return _token_response(outcome.user)
+
+
+@router.post("/logout", status_code=204)
+def logout(refresh_token: str | None = _REFRESH_COOKIE, db: Session = Depends(get_db)) -> Response:
+    """Выход из этой сессии: refresh отзывается на сервере, cookie стирается.
+
+    Без access-токена — выйти можно и с истёкшим. Уже выданный access доживает свой TTL.
+    """
+    if refresh_token:
+        auth_service.revoke_refresh_session(db, refresh_token)
+    response = Response(status_code=204)
+    _clear_refresh_cookie(response)
+    return response
 
 
 @router.get("/me", response_model=UserOut)
@@ -152,10 +213,11 @@ def me(user: UserRow = Depends(get_current_user)) -> UserOut:
 def change_password(
     body: ChangePasswordRequest,
     request: Request,
+    response: Response,
     user: UserRow = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TokenResponse:
-    """Смена пароля отзывает все выданные токены; в ответе — новый токен этой сессии."""
+    """Смена пароля отзывает все выданные токены и сессии; эта получает новые."""
     _enforce_limits("change_password", request, user.email)
     if not auth_service.verify_password(body.current_password, user.password_hash):
         # Неверный текущий пароль — тот же перебор, что и на /login.
@@ -169,14 +231,16 @@ def change_password(
     auth_rate_limit.reset_login_failures(user.email)
     record_auth_event("change_password", "success")
     _LOG.info("Пароль изменён, выданные токены отозваны: %s (id=%s)", user.email, user.id)
-    return _token_response(user)
+    return _start_session(user, response, db)
 
 
 @router.post("/logout-all", status_code=204)
 def logout_all(user: UserRow = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
-    """Отозвать все выданные токены пользователя, включая текущий."""
+    """Отозвать все выданные токены и refresh-сессии пользователя, включая текущие."""
     user.token_version += 1
     db.flush()
     record_auth_event("logout_all", "success")
     _LOG.info("Все сессии отозваны: %s (id=%s)", user.email, user.id)
-    return Response(status_code=204)
+    response = Response(status_code=204)
+    _clear_refresh_cookie(response)
+    return response

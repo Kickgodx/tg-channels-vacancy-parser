@@ -19,6 +19,7 @@ from backend.db import hh_sync_job_repository as hh_sync_repo
 from backend.db import idempotency_repository as idem_repo
 from backend.db import llm_job_repository as llm_repo
 from backend.db import parse_run_repository as run_repo
+from backend.db import refresh_token_repository as refresh_repo
 from backend.db.session import session_scope
 from tg_jobs_parser.config.schema import RetentionConfig
 
@@ -36,10 +37,18 @@ class CleanupStats:
     idempotency_keys: int = 0
     parse_runs: int = 0
     hh_sync_jobs: int = 0
+    refresh_tokens: int = 0
 
     @property
     def total(self) -> int:
-        return self.ai_cache + self.llm_jobs + self.idempotency_keys + self.parse_runs + self.hh_sync_jobs
+        return (
+            self.ai_cache
+            + self.llm_jobs
+            + self.idempotency_keys
+            + self.parse_runs
+            + self.hh_sync_jobs
+            + self.refresh_tokens
+        )
 
 
 def _purge_in_batches(purge: Callable[[Session, int], int], *, batch: int = _BATCH) -> int:
@@ -61,6 +70,7 @@ def purge_service_tables(retention: RetentionConfig, *, now: datetime | None = N
     steps: list[tuple[str, Callable[[Session, int], int]]] = [
         ("ai_cache", lambda s, n: ai_cache_repo.purge_expired_cache(s, limit=n)),
         ("idempotency_keys", lambda s, n: idem_repo.purge_expired_idempotency(s, limit=n)),
+        ("refresh_tokens", lambda s, n: refresh_repo.purge_refresh_tokens(s, now=now, limit=n)),
     ]
     if retention.llm_jobs_ttl_days > 0:
         llm_cutoff = now - timedelta(days=retention.llm_jobs_ttl_days)

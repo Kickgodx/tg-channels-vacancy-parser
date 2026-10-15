@@ -366,7 +366,7 @@ export default function VacanciesPage() {
             setExportError(null);
             setExportNote(null);
             void api
-              .downloadExport(api.exportVacanciesUrl(filterParams), "vacancies.xlsx")
+              .downloadExport(api.exportVacanciesPath(filterParams), "vacancies.xlsx")
               .then(setExportNote)
               .catch((e: Error) => setExportError(e.message));
           }}

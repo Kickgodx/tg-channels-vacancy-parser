@@ -161,6 +161,30 @@ class UserRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 
+class RefreshTokenRow(Base):
+    """Refresh-токен сессии (httpOnly cookie): хранится только sha256 значения.
+
+    Каждый ``/auth/refresh`` ротирует токен: строка помечается ``rotated_at``, в той же
+    семье (``family_id`` — один вход) выдаётся новая. Повтор ротированного токена после
+    grace-окна — признак кражи: отзывается вся семья.
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    family_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    # users.token_version на момент выдачи: смена пароля и «выйти везде» отзывают и refresh.
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class SavedFilterRow(Base):
     """Именованный набор фильтров списка вакансий (JSON — поля VacancyQuery)."""
 
