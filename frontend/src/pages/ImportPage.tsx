@@ -9,6 +9,7 @@ import type {
   VacancyImportResponse,
   VacancyImportStatus,
 } from "../types/api";
+import { useUnmountSignal } from "../utils/useUnmountSignal";
 
 const STATUS_LABEL: Record<VacancyImportStatus, string> = {
   created: "Сохранена",
@@ -48,6 +49,7 @@ function vacancyBrief(v: Vacancy): string {
 
 export default function ImportPage() {
   const queryClient = useQueryClient();
+  const unmountSignal = useUnmountSignal();
   const [text, setText] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [selected, setSelected] = useState<{ v: Vacancy; idx: number } | null>(null);
@@ -68,7 +70,12 @@ export default function ImportPage() {
   const importM = useMutation({
     mutationFn: () => {
       setProgress(null);
-      return api.importVacancies(splitTexts(text), sourceUrl.trim() || undefined, setProgress);
+      return api.importVacancies(
+        splitTexts(text),
+        sourceUrl.trim() || undefined,
+        setProgress,
+        unmountSignal(),
+      );
     },
     onSuccess: () => {
       setText("");
