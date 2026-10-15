@@ -29,8 +29,9 @@ import type {
   VacancyMatch,
 } from "../types/api";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8000/api/v1";
+// По умолчанию — тот же origin, что у UI (dev: прокси Vite, prod: nginx): refresh-cookie
+// SameSite=Strict работает только когда UI и API — один сайт.
+const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "/api/v1";
 
 const VITE_API_KEY = (import.meta.env.VITE_API_KEY as string | undefined)?.trim() || "";
 

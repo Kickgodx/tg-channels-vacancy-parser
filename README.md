@@ -324,10 +324,11 @@ LLM пишет черновик отклика под конкретную ва�
   отзывается вся сессия (все токены этого входа). `POST /auth/logout` отзывает
   сессию на сервере и стирает cookie; просроченные и отозванные строки чистит
   hourly-очистка служебных таблиц.
-- Cookie `SameSite=Strict`: UI и API должны быть same-site. Открывайте UI по тому
-  же хосту, что в `VITE_API_BASE_URL` (`localhost:5173` ↔ `localhost:9000`; порт
-  роли не играет). UI на `127.0.0.1`, а API на `localhost` — разные сайты:
-  cookie не уйдёт, и после перезагрузки страницы придётся входить заново.
+- Cookie `SameSite=Strict`, поэтому UI ходит в API того же origin: dev-сервер Vite
+  проксирует `/api` на backend (`VITE_API_PROXY_TARGET`), в prod то же делает
+  reverse proxy. Если задать `VITE_API_BASE_URL` абсолютным URL, UI и API должны
+  остаться same-site: UI на `127.0.0.1`, а API на `localhost` — разные сайты, браузер
+  отбросит cookie (`SchemefulSameSiteStrict`), и после перезагрузки придётся входить заново.
 - SSE: EventSource не умеет заголовки, а JWT в query оседал бы в логах прокси.
   Поэтому UI перед подключением берёт `POST /auth/sse-ticket` (Bearer + `X-API-Key`)
   и открывает стрим с `?ticket=…`. Тикет — JWT с `typ=sse`: живёт 30 с,
@@ -358,10 +359,10 @@ LLM пишет черновик отклика под конкретную ва�
 ```powershell
 cd frontend
 npm install
+# UI ходит в /api того же origin, Vite проксирует его на backend.
 # API в Docker Compose (порт на хосте):
-# VITE_API_BASE_URL=http://localhost:9000/api/v1
-# или локальный uvicorn:
-# VITE_API_BASE_URL=http://localhost:8000/api/v1
+# $env:VITE_API_PROXY_TARGET="http://localhost:9000"
+# или локальный uvicorn — по умолчанию http://localhost:8000
 npm run dev
 ```
 

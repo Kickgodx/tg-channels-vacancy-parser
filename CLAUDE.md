@@ -27,7 +27,8 @@ docker compose up --build                 # UI :5173, API :9000/docs
 # (127.0.0.1, не localhost: порт опубликован только на IPv4, через ::1 psycopg на Windows ждёт connect timeout)
 .venv/Scripts/python.exe -m uvicorn backend.main:app --reload --port 8000
 
-# frontend локально (VITE_API_BASE_URL=http://localhost:9000/api/v1 для compose-backend, :8000 для uvicorn)
+# frontend локально: /api проксируется Vite (VITE_API_PROXY_TARGET=http://localhost:9000 для
+# compose-backend, по умолчанию :8000 — uvicorn); same-origin нужен refresh-cookie SameSite=Strict
 cd frontend && npm run dev
 
 # CLI: первая авторизация Telethon, дамп/импорт БД

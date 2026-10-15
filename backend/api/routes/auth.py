@@ -61,7 +61,14 @@ def _set_refresh_cookie(response: Response, raw: str) -> None:
 
 
 def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(auth_service.REFRESH_COOKIE, path=auth_service.REFRESH_COOKIE_PATH)
+    # Те же атрибуты, что при установке: браузер стирает cookie только с совпадающими.
+    response.delete_cookie(
+        auth_service.REFRESH_COOKIE,
+        path=auth_service.REFRESH_COOKIE_PATH,
+        httponly=True,
+        secure=bool(get_settings().refresh_cookie_secure),
+        samesite="strict",
+    )
 
 
 def _start_session(user: UserRow, response: Response, db: Session) -> TokenResponse:
