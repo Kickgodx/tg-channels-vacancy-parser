@@ -189,8 +189,8 @@ def test_vacancies_preview_dedupes_by_id():
     assert len(ids) == len(set(ids))
 
 
-def test_run_events_accepts_api_key_query(admin_client, monkeypatch):
-    """EventSource не шлёт заголовки — api_key в query при API_KEY."""
+def test_run_events_api_key_via_ticket_not_query(admin_client, monkeypatch):
+    """При API_KEY: ключ проверяется при выдаче тикета, ``?api_key=`` не принимается."""
     from backend.settings import get_settings
 
     monkeypatch.setenv("API_KEY", "sse-secret")
@@ -199,14 +199,16 @@ def test_run_events_accepts_api_key_query(admin_client, monkeypatch):
         with session_scope() as session:
             rid = pr.create_parse_run(session, config_snapshot={}, status="completed").id
 
-        bad = admin_client.get(f"/api/v1/runs/{rid}/events")
-        assert bad.status_code == 401
+        # Bearer без X-API-Key и ключ в query — 401.
+        assert admin_client.get(f"/api/v1/runs/{rid}/events").status_code == 401
+        assert admin_client.get(f"/api/v1/runs/{rid}/events?api_key=sse-secret").status_code == 401
+        assert admin_client.post("/api/v1/auth/sse-ticket").status_code == 401
 
-        # Обычный REST не принимает ?api_key= (только X-API-Key).
-        rest = admin_client.get(f"/api/v1/runs/{rid}?api_key=sse-secret")
-        assert rest.status_code == 401
-
-        with admin_client.stream("GET", f"/api/v1/runs/{rid}/events?api_key=sse-secret") as resp:
+        r = admin_client.post("/api/v1/auth/sse-ticket", headers={"X-API-Key": "sse-secret"})
+        assert r.status_code == 200
+        ticket = r.json()["ticket"]
+        # С тикетом ключ не нужен: тикет выдан только запросу с X-API-Key.
+        with admin_client.stream("GET", f"/api/v1/runs/{rid}/events?ticket={ticket}") as resp:
             assert resp.status_code == 200
             body = b"".join(resp.iter_bytes()).decode("utf-8", errors="replace")
         assert "event: done" in body

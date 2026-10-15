@@ -23,12 +23,11 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from backend.api.deps import (
-    _extract_token,
-    _user_from_token,
-    bearer_token,
+    SseCredentials,
+    authenticate_sse,
     require_admin,
+    sse_credentials,
     verify_api_key,
-    verify_api_key_sse,
 )
 from backend.api.sse import (
     DB_POLL_INTERVAL_S,
@@ -48,7 +47,6 @@ from backend.db.session import get_db, session_scope
 from backend.errors import (
     CODE_FORBIDDEN,
     CODE_IDEMPOTENCY_IN_PROGRESS,
-    CODE_NOT_AUTHENTICATED,
     CODE_UPSTREAM_UNAVAILABLE,
     CODE_VALIDATION,
     AppError,
@@ -352,21 +350,14 @@ async def _sse_hh_sync_redis(job_id: uuid.UUID) -> AsyncIterator[str]:
                 return
 
 
-@sse_router.get("/sync-jobs/{job_id}/events", dependencies=[Depends(verify_api_key_sse)])
-def hh_sync_job_events(
-    job_id: uuid.UUID,
-    authorization: str | None = Depends(bearer_token),
-    access_token: str | None = Query(
-        default=None,
-        description="JWT для SSE-эндпоинтов (EventSource не шлёт заголовки)",
-        include_in_schema=False,
-    ),
-) -> StreamingResponse:
-    """SSE: события ``status`` (джоба целиком: статус, прогресс, итог) до ``done``. Только admin."""
+@sse_router.get("/sync-jobs/{job_id}/events")
+def hh_sync_job_events(job_id: uuid.UUID, creds: SseCredentials = Depends(sse_credentials)) -> StreamingResponse:
+    """SSE: события ``status`` (джоба целиком: статус, прогресс, итог) до ``done``. Только admin.
+
+    Auth: ``?ticket=`` или Bearer.
+    """
     with session_scope() as session:
-        user = _user_from_token(session, _extract_token(authorization, access_token))
-        if user is None:
-            raise http_error(401, CODE_NOT_AUTHENTICATED, "Not authenticated")
+        user = authenticate_sse(session, creds)
         if not user.is_admin:
             raise http_error(403, CODE_FORBIDDEN, "Admin only")
         if hh_jobs.get_hh_sync_job(session, job_id) is None:

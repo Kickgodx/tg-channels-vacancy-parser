@@ -120,8 +120,11 @@ pub/sub для SSE). Оба типа джоб устроены одинаков�
   залогиненному (`get_current_user` на роутере), мутации — `require_admin`.
   Прогоны (`/runs/*`, включая чтение и SSE), ручной импорт и HH — целиком admin;
   на UI вкладки «Парсинг»/«Импорт»/«HH» закрыты `RequireAdmin` в `App.tsx`.
-  Анонимно доступны только `/health` и `/auth/register|login`. SSE получает токен
-  параметром `?access_token=` (`get_sse_user` в `backend/api/deps.py`).
+  Анонимно доступны только `/health` и `/auth/register|login` (`/auth/refresh|logout` —
+  по refresh-cookie). Сессия — короткий access JWT в памяти UI + refresh-токен в
+  httpOnly cookie (`POST /auth/refresh`, ротация). SSE получает доступ одноразовым
+  `?ticket=` из `POST /auth/sse-ticket` (`authenticate_sse` в `backend/api/deps.py`);
+  JWT в query не принимается.
 - Ошибки API — `AppError` / `http_error` из `backend/errors.py` с
   `detail = {code, message, retryable}`; frontend разбирает это в `ApiError`.
 - Итоговый `overall_score` матчинга считает backend детерминированно из

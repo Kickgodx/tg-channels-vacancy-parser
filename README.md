@@ -112,7 +112,7 @@ GRAFANA_ADMIN_PASSWORD=...      # только с профилем observability
 # PARSE_RQ_JOB_TIMEOUT_SECONDS=43200  # таймаут RQ-джобы parse (сек; по умолчанию 12 ч)
 # PARSE_WORKER_METRICS_PORT=9102  # контейнерный порт метрик parse-worker
 # REDIS_URL=redis://redis:6379/0  # очереди RQ (parse + LLM); локально — redis://127.0.0.1:16379/0
-# VITE_API_KEY=                   # если API_KEY задан — тот же ключ для SSE/export во frontend
+# VITE_API_KEY=                   # если API_KEY задан — тот же ключ во frontend (заголовок X-API-Key)
 # HTTP_LOG_BODIES=true            # тела запросов/ответов (JSON, form, text) в HTTP-логе; умолчание: dev — true, prod — false
 # HTTP_LOG_BODY_LIMIT=4096        # макс. символов тела в логе, дальше — «…[truncated, N bytes]»
 # HTTP_LOG_EXCLUDE_PATHS=/api/v1/health,/api/v1/vacancies/metrics,/api/v1/analytics/salaries,/api/v1/analytics/sources,/api/v1/analytics/companies,/docs,/docs/oauth2-redirect,/redoc,/openapi.json,/favicon.ico
@@ -328,7 +328,14 @@ LLM пишет черновик отклика под конкретную ва�
   же хосту, что в `VITE_API_BASE_URL` (`localhost:5173` ↔ `localhost:9000`; порт
   роли не играет). UI на `127.0.0.1`, а API на `localhost` — разные сайты:
   cookie не уйдёт, и после перезагрузки страницы придётся входить заново.
-- Для SSE (EventSource не умеет заголовки) токен передаётся параметром `access_token`.
+- SSE: EventSource не умеет заголовки, а JWT в query оседал бы в логах прокси.
+  Поэтому UI перед подключением берёт `POST /auth/sse-ticket` (Bearer + `X-API-Key`)
+  и открывает стрим с `?ticket=…`. Тикет — JWT с `typ=sse`: живёт 30 с,
+  принимается один раз (использованный `jti` — в Redis `SET NX`, без `REDIS_URL` — в
+  памяти процесса) и не годится как access-токен. Автопереподключение EventSource
+  с тем же тикетом получит 401 — UI в этом случае дочитывает статус опросом.
+  `?access_token=` и `?api_key=` больше не принимаются; curl и Swagger могут слать
+  `Authorization: Bearer` (+ `X-API-Key`) прямо в SSE-запрос.
 - Swagger (`/docs`) → кнопка «Authorize»: либо вставить готовый JWT в `HTTPBearer`
   (без слова `Bearer`), либо войти в `OAuth2PasswordBearer` — email в поле
   `username`, `client_id`/`secret` пустые (form-эндпоинт `POST /auth/token`, те же
@@ -405,6 +412,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `POST` | `/auth/register` / `/auth/login` | Регистрация / вход → JWT access-токен + refresh-cookie |
 | `POST` | `/auth/refresh` | Новый access-токен по refresh-cookie; cookie ротируется (401 — сессии нет) |
 | `POST` | `/auth/logout` | Отозвать текущую refresh-сессию, стереть cookie (204) |
+| `POST` | `/auth/sse-ticket` | Одноразовый тикет (30 с) для `?ticket=` SSE-эндпоинтов |
 | `GET` | `/auth/me` | Текущий пользователь |
 | `POST` | `/auth/change-password` | Смена пароля → новый токен и сессия; прежние токены и сессии отозваны |
 | `POST` | `/auth/logout-all` | Отозвать все токены и сессии пользователя (204) |
@@ -412,7 +420,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `GET` | `/config/llm-models` | Каталог моделей из `llm_models.yaml` |
 | `POST` | `/runs` | Постановка прогона в очередь (admin; `queued` → parse-worker / inprocess) |
 | `GET` | `/runs` \| `/runs/{id}` | История прогонов / статус, метрики и durable `progress` (admin) |
-| `GET` | `/runs/{id}/events` | SSE: прогресс (admin; Redis pub/sub или DB poll); после F5 — resume; Bearer или `?access_token=` |
+| `GET` | `/runs/{id}/events` | SSE: прогресс (admin; Redis pub/sub или DB poll); после F5 — resume; `?ticket=` или Bearer |
 | `POST` | `/runs/{id}/cancel` | Отмена (admin; флаг в БД; работает после рестарта API) |
 | `GET` | `/runs/{id}/vacancies` | Вакансии прогона (admin; `sort_by`, `sort_order`) |
 | `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта (admin) |
@@ -422,7 +430,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `GET` | `/hh/status` | Статус HH sync (admin): токен задан?, TTL listings, счётчики кэша |
 | `POST` | `/hh/sync` | HH sync в фоне (admin): 202 `{job_id}`; 409, если sync уже идёт. Поиск → dedup → detail только для новых → БД |
 | `GET` | `/hh/sync-jobs` \| `/hh/sync-jobs/{id}` | Последние sync / один sync (admin): статус, прогресс, итог (у `failed` — частичный) |
-| `GET` | `/hh/sync-jobs/{id}/events` | SSE статуса HH sync (admin; Bearer или `?access_token=`) |
+| `GET` | `/hh/sync-jobs/{id}/events` | SSE статуса HH sync (admin; `?ticket=` или Bearer) |
 | `GET` | `/vacancies/metrics` | Агрегаты для графиков по текущим фильтрам |
 | `GET` | `/vacancies/export.xlsx` | Excel всех вакансий в БД (те же фильтры, что у списка) |
 | `GET` | `/analytics/salaries` \| `/sources` \| `/companies` | Зарплатные квантили, качество каналов, топ компаний |
@@ -431,7 +439,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Оценка: кэш → 200; иначе фоновая джоба → 202 `{job_id}` (`force=true` — пересчёт) |
 | `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Письмо: кэш → 200; иначе 202 `{job_id}` (`force`, `tone`/`extra_notes`) |
 | `GET` | `/llm-jobs/{job_id}` | Статус LLM-задачи; при `done` — payload match/letter |
-| `GET` | `/llm-jobs/{job_id}/events` | SSE статусов (Bearer или `?access_token=`); poll остаётся fallback |
+| `GET` | `/llm-jobs/{job_id}/events` | SSE статусов (`?ticket=` или Bearer); poll остаётся fallback |
 | `GET` | `/fx/rates`, `POST` `/fx/refresh` \| `/fx/recalculate-rub` | Курсы ЦБ и пересчёт зарплат в ₽ (`POST` — admin) |
 | `GET` | `/ai-cache/stats` | Число записей в кэше LLM |
 | `POST` | `/ai-cache/clear` | Полная очистка кэша LLM (admin) |
@@ -834,7 +842,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 - `REQUEST METHOD path {json}` — до обработки: клиент, заголовки, тело;
 - `RESPONSE METHOD path status Nms {json}` — после ответа: статус, длительность, заголовки, тело.
 
-Тела пишутся для JSON / form / `text/*` / XML (SSE, бинарные ответы и `Content-Disposition: attachment` — без тела). Маскируются `Authorization` (остаётся схема: `Bearer ***`), `Cookie`/`Set-Cookie`, `X-API-Key`, query-параметры и ключи тела вида `password`/`token`/`access_token`/`secret`/`api_key`. Уровень `RESPONSE`: 4xx — `WARNING`, 5xx — `ERROR`. Не логируются шумные эндпоинты из `HTTP_LOG_EXCLUDE_PATHS` (по умолчанию health-check, агрегаты `/vacancies/metrics` и `/analytics/*`, Swagger/ReDoc/OpenAPI, favicon) и CORS preflight (`OPTIONS` с `Access-Control-Request-Method`).
+Тела пишутся для JSON / form / `text/*` / XML (SSE, бинарные ответы и `Content-Disposition: attachment` — без тела). Маскируются `Authorization` (остаётся схема: `Bearer ***`), `Cookie`/`Set-Cookie`, `X-API-Key`, query-параметры и ключи тела вида `password`/`token`/`access_token`/`ticket`/`secret`/`api_key`. Уровень `RESPONSE`: 4xx — `WARNING`, 5xx — `ERROR`. Не логируются шумные эндпоинты из `HTTP_LOG_EXCLUDE_PATHS` (по умолчанию health-check, агрегаты `/vacancies/metrics` и `/analytics/*`, Swagger/ReDoc/OpenAPI, favicon) и CORS preflight (`OPTIONS` с `Access-Control-Request-Method`).
 
 Alloy кладёт `request_id` в **structured metadata** Loki (не label — уникален на запрос). В Grafana Explore:
 
@@ -852,7 +860,7 @@ Alloy кладёт `request_id` в **structured metadata** Loki (не label — 
 
 | Что трассируется | Как |
 |---|---|
-| Входящие HTTP | FastAPI-инструментация; span'ы `send`/`receive` отключены, пути из `HTTP_LOG_EXCLUDE_PATHS` не трассируются, `?access_token=` маскируется в атрибутах. Атрибут `request_id` — тот же, что в логах и `X-Request-ID` |
+| Входящие HTTP | FastAPI-инструментация; span'ы `send`/`receive` отключены, пути из `HTTP_LOG_EXCLUDE_PATHS` не трассируются, секреты в query (`?ticket=` и т.п.) маскируются в атрибутах. Атрибут `request_id` — тот же, что в логах и `X-Request-ID` |
 | SQL | SQLAlchemy-инструментация (текст запроса с плейсхолдерами, без значений параметров) |
 | Исходящие HTTP | httpx-инструментация: OpenRouter (через openai SDK), ЦБ |
 | LLM | `chat <model>`: `gen_ai.request.model`, `gen_ai.usage.input_tokens`/`output_tokens`, `llm.task` (`extract`/`match`/`cover_letter`), `llm.outcome`. Промпты и ответы в span не пишутся |

@@ -322,7 +322,8 @@ def test_hh_sync_jobs_are_admin_only(client: TestClient, monkeypatch):
 
     assert client.get("/api/v1/hh/sync-jobs", headers=_auth(user)).status_code == 403
     assert client.get(f"/api/v1/hh/sync-jobs/{job['id']}", headers=_auth(user)).status_code == 403
-    assert client.get(f"/api/v1/hh/sync-jobs/{job['id']}/events?access_token={user}").status_code == 403
+    ticket = client.post("/api/v1/auth/sse-ticket", headers=_auth(user)).json()["ticket"]
+    assert client.get(f"/api/v1/hh/sync-jobs/{job['id']}/events?ticket={ticket}").status_code == 403
     assert client.post("/api/v1/hh/sync", headers=_auth(user)).status_code == 403
 
 
@@ -332,7 +333,8 @@ def test_hh_sync_job_events_stream_status_then_done(client: TestClient, monkeypa
     admin = _register(client, "admin10@example.com")
     job = _sync(client, admin)
 
-    with client.stream("GET", f"/api/v1/hh/sync-jobs/{job['id']}/events?access_token={admin}") as r:
+    ticket = client.post("/api/v1/auth/sse-ticket", headers=_auth(admin)).json()["ticket"]
+    with client.stream("GET", f"/api/v1/hh/sync-jobs/{job['id']}/events?ticket={ticket}") as r:
         assert r.status_code == 200
         text = "".join(r.iter_text())
 

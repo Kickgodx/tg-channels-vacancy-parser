@@ -8,12 +8,12 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from backend.api.deps import _extract_token, _user_from_token, bearer_token, get_current_user, get_db
+from backend.api.deps import SseCredentials, authenticate_sse, get_current_user, get_db, sse_credentials
 from backend.api.routes.resumes import _letter_to_out, _match_to_out
 from backend.api.sse import (
     DB_POLL_INTERVAL_S,
@@ -29,7 +29,6 @@ from backend.api.sse import (
 from backend.db import repository as repo
 from backend.db.models import UserRow
 from backend.db.session import session_scope
-from backend.errors import CODE_NOT_AUTHENTICATED, http_error
 from backend.observability import LLM_JOB_SSE_CONNECTIONS
 from backend.schemas import LlmJobOut
 from backend.services import import_service
@@ -178,25 +177,14 @@ async def _sse_llm_job_redis(job_id: uuid.UUID, user_id: int) -> AsyncIterator[s
 
 
 @router.get("/{job_id}/events")
-def llm_job_events(
-    job_id: uuid.UUID,
-    authorization: str | None = Depends(bearer_token),
-    access_token: str | None = Query(
-        default=None,
-        description="JWT для SSE-эндпоинтов (EventSource не шлёт заголовки)",
-        include_in_schema=False,
-    ),
-) -> StreamingResponse:
-    """SSE: статусы queued→running→done/error. Auth: Bearer или ``?access_token=``.
+def llm_job_events(job_id: uuid.UUID, creds: SseCredentials = Depends(sse_credentials)) -> StreamingResponse:
+    """SSE: статусы queued→running→done/error. Auth: ``?ticket=`` или Bearer.
 
     Обработчик синхронный (auth/ownership в threadpool, не в event loop); стрим не
     держит ``get_db`` — читает БД короткими сессиями.
     """
     with session_scope() as session:
-        user = _user_from_token(session, _extract_token(authorization, access_token))
-        if user is None:
-            raise http_error(401, CODE_NOT_AUTHENTICATED, "Not authenticated")
-        user_id = user.id
+        user_id = authenticate_sse(session, creds).id
         row = repo.get_llm_job(session, job_id)
         if row is None or row.user_id != user_id:
             raise HTTPException(status_code=404, detail="Job not found")
