@@ -10,8 +10,10 @@ flowchart LR
 
   subgraph App
     BE["backend<br/>:9000→8000 · FastAPI"]
+    PW["parse-worker<br/>RQ · :9102/metrics"]
     W["llm-worker<br/>RQ · :9101/metrics"]
-    CLI["CLI Typer<br/>auth / parse"]
+    HW["hh-worker<br/>RQ · :9103/metrics"]
+    CLI["CLI Typer<br/>login / db dump·import"]
   end
 
   subgraph Data
@@ -35,20 +37,29 @@ flowchart LR
   end
 
   FE -->|"REST / SSE"| BE
-  CLI --> BE
+  CLI --> PG
+  CLI --> TG
   BE --> PG
   BE -->|enqueue job_id| RD
+  RD --> PW
   RD --> W
+  RD --> HW
+  PW --> PG
   W --> PG
+  HW --> PG
+  PW --> TG
+  PW --> OR
   W --> OR
-  BE --> TG
-  BE --> OR
-  BE --> HH
+  HW --> HH
   BE --> CBR
   BE -->|"/metrics :9100"| PROM
+  PW -->|"/metrics :9102"| PROM
   W -->|"/metrics :9101"| PROM
+  HW -->|"/metrics :9103"| PROM
   BE -->|"OTLP :4318"| ALLOY
+  PW -->|"OTLP"| ALLOY
   W -->|"OTLP"| ALLOY
+  HW -->|"OTLP"| ALLOY
   ALLOY --> LOKI
   ALLOY --> TEMPO
   PROM --> GRAF
@@ -59,8 +70,9 @@ flowchart LR
 | Сервис | Порт | Роль |
 |--------|------|------|
 | frontend | 5173 | Web UI |
-| backend | 9000→8000; 9100 (только Docker-сеть) | API, парсинг, JWT, enqueue LLM jobs; `/metrics` — на :9100 |
-| llm-worker | 9101 (только Docker-сеть) | RQ `SimpleWorker`: мэтч/письма; `/metrics` без DB COUNT-collector, с `db_pool_*` |
+| backend | 9000→8000; 9100 (только Docker-сеть) | API, JWT, постановка джоб в очереди, курсы ЦБ; `/metrics` — на :9100 |
+| parse-worker | 9102 (только Docker-сеть) | RQ `SimpleWorker`: прогоны парсинга (Telethon, LLM-разбор), очередь `parse`, concurrency=1 |
+| llm-worker | 9101 (только Docker-сеть) | RQ `SimpleWorker`: мэтч/письма/ручной импорт с LLM; `/metrics` без DB COUNT-collector, с `db_pool_*` |
 | hh-worker | 9103 (только Docker-сеть) | RQ `SimpleWorker`: фоновый HH sync (очередь `hh`) |
 | redis | 6379 | Очереди RQ `llm` / `parse` / `hh` (AOF на томе `redis_data`) + pub/sub статуса SSE |
 | postgres | 5432 | Вакансии, runs, users, FX, cache, `llm_jobs` |

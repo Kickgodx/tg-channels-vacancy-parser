@@ -12,14 +12,14 @@
 
 | # | Ветка | Фича | Изменение схемы БД |
 |---|-------|------|--------------------|
-| 1 | `feature/application-tracker` | Трекер откликов | да (миграция 014+) |
+| 1 | `feature/application-tracker` | Трекер откликов | да (новая миграция) |
 | 2 | `feature/external-export` | Экспорт в Google Sheets / Notion | нет |
 | 3 | `feature/admin-vacancies` | CMS-админка: редактирование/удаление вакансий | нет |
 | 4 | `feature/webauthn` | Вход по passkey (WebAuthn/FIDO2) поверх пароля | да (таблица `webauthn_credentials`) |
 | 5 | `feature/llm-evals-match` | Golden/evals для match + cover letter | нет |
 
 **Про миграции:** цепочка инкрементальная — head сейчас
-`020_llm_user_usage`. Новые фичи просто продолжают её
+`029_parse_runs_drop_pending`. Новые фичи просто продолжают её
 (`alembic revision` → `upgrade head` на старте backend, без `down -v`).
 БД — только Postgres; constraint'ы (FK, индексы) — с явными именами.
 
@@ -30,7 +30,7 @@
 Мини-ATS поверх вакансий: статус (new → applied → interview → offer /
 rejected / skipped) + заметки.
 
-**БД (миграция 014+)**
+**БД (новая миграция)**
 
 - Таблица `vacancy_applications`: `vacancy_id` (FK → vacancies), `user_id`
   (FK → users — отклики приватные), `status`, `applied_at`, `notes`,

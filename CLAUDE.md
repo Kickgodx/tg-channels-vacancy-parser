@@ -55,10 +55,14 @@ cd frontend && npm run dev
 
 Зависимость односторонняя: `backend` импортирует `tg_jobs_parser`, обратно — нет
 (единственное исключение — `tg_jobs_parser/cli/db.py`, дамп/импорт БД).
-Там, где ядру нужна инфраструктура, используется порт: Postgres-кэш LLM —
-`AIExtractionCacheBackend` в `tg_jobs_parser/ai/cache.py`, адаптер
-`DbAIExtractionCache` регистрируется вызовом `register_db_ai_cache()` при старте
-(FastAPI lifespan, CLI, `tests/conftest.py`). Новый entrypoint обязан сделать то же.
+Там, где ядру нужна инфраструктура, используется порт: Postgres-кэш LLM
+(`AIExtractionCacheBackend` в `tg_jobs_parser/ai/cache.py`, адаптер `DbAIExtractionCache`)
+и общий лимит запросов к LLM (`GlobalRateGate` в `tg_jobs_parser/ai/rate_limit.py`,
+адаптер на Redis). Оба регистрирует `backend.core_ports.register_core_ports()` при старте
+каждого процесса с LLM: FastAPI lifespan, `parse-worker`, `llm-worker`. Новый entrypoint с
+LLM обязан вызвать её — без кэша `AIEnrichmentService` не создаётся, и LLM-разбор молча
+уходит в правила. `tests/conftest.py` регистрирует кэш на всю сессию, поэтому тест
+entrypoint'а сбрасывает регистрацию сам (см. `tests/test_rq_worker_entrypoints.py`).
 
 ### Parse pipeline
 
@@ -81,10 +85,10 @@ dedup → FX в ₽ → UPSERT в `vacancies` → метрики.
 - `id` вакансии — content-hash очищенного текста (`utils/hashing.vacancy_content_id`),
   для HH — `sha256(hh:{id})`; UPSERT по нему и есть межпрогонный дедуп.
 
-### Durable-джобы (parse и LLM)
+### Durable-джобы (parse, LLM, HH sync)
 
 Источник истины по статусу — Postgres, Redis — только транспорт (очередь RQ +
-pub/sub для SSE). Оба типа джоб устроены одинаково:
+pub/sub для SSE). Все три типа джоб устроены одинаково:
 
 - claim с lease (`lease_owner`, heartbeat) → `running`; истёкший lease или
   `queued` без живой RQ-джобы поднимает recover-цикл (`backend/workers/recover*.py`):

@@ -247,7 +247,7 @@ JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(4
 просмотр, редактирование, удаление); на странице «Вакансии» резюме только
 выбирается в панели над таблицей. Дальше оценка идёт
 **по одной вакансии**: открываете карточку → кнопка «Оценить резюме» рядом с
-«Открыть пост» / «Канал» → синхронный вызов LLM. В карточке появляются
+«Открыть пост» / «Канал» → фоновая LLM-джоба (см. ниже). В карточке появляются
 overall score, разбивка по измерениям (роль, навыки, грейд, домен, формат),
 confidence оценки, пояснение и списки совпадающих / недостающих навыков
 с приоритетом (critical/important/secondary) и evidence, а также сильные
@@ -509,8 +509,8 @@ lease и recover как у прогонов; в Docker — `hh-worker`, без R
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…022`, head —
-`022_hh_sync_jobs`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…029`, номера 005 нет; head —
+`029_parse_runs_drop_pending`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -523,17 +523,21 @@ lease и recover как у прогонов; в Docker — `hh-worker`, без R
 | `saved_filters` | Пресеты фильтров (`user_id`) |
 | `resumes` | Резюме пользователя (`user_id`) |
 | `vacancy_matches` | Оценки соответствия, PK `(resume_id, vacancy_id)` — он же кэш матчинга |
-| `llm_jobs` | Фоновые LLM-задачи мэтчинга/писем (`queued`/`running`/`done`/`error`) |
+| `llm_jobs` | Фоновые LLM-задачи: мэтчинг, письма, ручной импорт (`queued`/`running`/`done`/`error`) |
 | `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 | `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
 | `llm_user_usage` | Вызовы LLM пользователя за сутки — квота `LLM_USER_DAILY_CALLS` |
+| `refresh_tokens` | Refresh-сессии: sha256 токена, семья (один вход), ротация и отзыв |
+| `idempotency_keys` | Сохранённые ответы мутаций по `Idempotency-Key` (TTL) |
+| `parse_run_vacancies` | Какие вакансии встретил прогон (история и экспорт прогона) |
+| `vacancy_sightings` | Каждое появление поста Telegram: оригинал или дубль со ссылкой на вакансию |
 
 Служебные таблицы чистятся сами (при старте и раз в час): просроченный кэш LLM и ключи идемпотентности, завершённые LLM-джобы старше `retention.llm_jobs_ttl_days` (30) и прогоны старше `retention.parse_runs_ttl_days` (180) — см. [config.md](config.md). Вакансии только архивируются, не удаляются.
 
 **Если меняете колонки/таблицы** — добавьте новую миграцию (`alembic revision`) и обновите модели в `backend/db/models.py`; при следующем `docker compose up` она применится автоматически, данные сохранятся.
 
-Ядро парсинга (`tg_jobs_parser.parse_runner` + общий `tg_jobs_parser.ingestion`) вызывается из `backend/services/run_service.py`; результаты пишутся в PostgreSQL (UPSERT по `id` вакансии). Ручной импорт использует тот же ingestion с `MANUAL_POLICY`.
+Ядро парсинга (`tg_jobs_parser.parse_runner` + общий `tg_jobs_parser.ingestion`) вызывается из `backend/workers/parse_tasks.py` (`run_service` только ставит прогон в очередь); результаты пишутся в PostgreSQL (UPSERT по `id` вакансии). Ручной импорт использует тот же ingestion с `MANUAL_POLICY`.
 
 ---
 
@@ -560,7 +564,7 @@ tg_jobs_parser/
     workers/               — parse/llm/hh_worker (RQ, общий runner), *_tasks, recover*,
                              liveness (heartbeat + watchdog), healthcheck
     queue/                 — RQ Redis connection (очереди parse, llm, hh)
-  alembic/                 — миграции SQL (001…022)
+  alembic/                 — миграции SQL (001…029)
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes
@@ -583,8 +587,7 @@ tg_jobs_parser/
   evals/golden/            — golden JSONL (extraction; match/cover — см. ROADMAP)
   evals/fixtures/          — offline ответы для pytest
   sessions/                — Telethon session (не в git)
-  .cache/ai_extractions/   — дисковый кэш LLM (если cache_backend=disk)
-  output/                  — Excel/JSON при экспорте
+  .cache/ai_extractions/   — файловый кэш LLM (если ai.cache_backend=file)
   tests/
 ```
 
@@ -677,7 +680,8 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 | Поле | Назначение |
 |------|------------|
 | `enabled` | Включить LLM |
-| `mode` | `assist` / `primary` |
+| `mode` | `assist` — LLM уточняет поля правил; `primary` — LLM основной источник, без LLM пост не разбирается. Какие поля откуда берутся — [config.md](config.md#как-llm-и-правила-делят-поля-mode) |
+| `merge.prefer_ai_for`, `merge.min_confidence` | `assist`: в каких полях и с какой уверенностью LLM перекрывает правила |
 | `model` | Id из `llm_models.yaml` — модель парсинга вакансий |
 | `match_model` | Модель матчинга резюме ↔ вакансия (обычно reasoning). Пусто — берётся `model` |
 | `match_reasoning_enabled` | `true`, если `match_model` — reasoning-модель (OpenRouter `reasoning` вместо `json_object`) |
@@ -685,7 +689,7 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 | `cover_letter_model` | Модель генерации сопроводительных писем. Пусто — `match_model`, затем `model` |
 | `fallback_models` | Запасные модели |
 | `concurrency`, `requests_per_minute` | Темп и параллелизм парсинга |
-| `interactive_concurrency`, `interactive_per_user_limit` | Пул и лимит на пользователя для фоновых мэтч/письмо (in-process; несколько реплик backend → нужна внешняя очередь) |
+| `interactive_concurrency`, `interactive_per_user_limit` | Пул потоков фоновых мэтч/письмо/импорт — только при `LLM_JOB_BACKEND=inprocess` (при `rq` параллелизм = число реплик `llm-worker`); лимит активных LLM-джоб на пользователя — в обоих режимах |
 | `stop_llm_when_rate_limited` | Отключить LLM при 429 до конца прогона. В `mode: primary` оставшиеся посты не разбираются, и прогон завершается `partial` (см. «Самовосстановление джоб») |
 | `circuit_breaker_errors` | Столько постов подряд с ошибкой LLM — и LLM отключается до конца прогона (по умолчанию 5, `0` — выключен) |
 | `max_error_ratio` | `mode: primary`: доля ошибок LLM, выше которой прогон — `partial` (по умолчанию 0.1) |
@@ -920,7 +924,8 @@ CREATEDB; тесты создают и удаляют свои базы `tgjobs_
                          PostgreSQL (SoT: status/progress)   │     ├── Telethon
                               ▲                              │     ├── extraction/ / ai/
                          UPSERT vacancies                    │     └── filters → dedup → metrics
-                              │                              └── llm-worker (match / cover letter)
+                              │                              ├── llm-worker (match / cover letter / import)
+                              │                              └── hh-worker → HH.ru API
 ```
 
 - **`extraction/`** — быстрые эвристики (всегда).
