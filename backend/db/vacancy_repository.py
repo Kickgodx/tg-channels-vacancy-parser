@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, defer
 
 from backend.db.aggregate_cache import invalidate_aggregate_cache
 from backend.db.models import (
+    ParseRunVacancyRow,
     VacancyMatchRow,
     VacancyRow,
 )
@@ -164,6 +165,8 @@ def upsert_vacancies(
     и AI-метаданные; извлечённые поля не трогаются. Если пост новее сохранённого
     (канал повторно опубликовал тот же текст), ``post_date`` сдвигается вперёд, а
     вакансия возвращается из архива — иначе TTL по первой публикации прятал бы её навсегда.
+    Каждая вакансия пачки (новая и уже известная) записывается в ``parse_run_vacancies``
+    этого прогона — по этой связке строятся список и экспорт прогона.
     ``parse_run_id=None`` — ручной импорт без прогона: существующая привязка
     к прогону при update не затирается. Повтор ``id`` внутри пачки — берётся последний.
     """
@@ -212,6 +215,10 @@ def upsert_vacancies(
         if parse_run_id is not None:
             conflict_set["last_parse_run_id"] = parse_run_id
         session.execute(stmt.on_conflict_do_update(index_elements=["id"], set_=conflict_set))
+    if parse_run_id is not None:
+        links = [{"parse_run_id": parse_run_id, "vacancy_id": vid} for vid in by_id]
+        for chunk in _chunks(links):
+            session.execute(insert(ParseRunVacancyRow).values(chunk).on_conflict_do_nothing())
 
     inserted, updated_existing = len(new_rows), len(existing_rows)
     _LOG.info(
@@ -319,10 +326,12 @@ def get_vacancy(session: Session, vacancy_id: str) -> Vacancy | None:
 
 
 def _run_conditions(run_id: uuid.UUID) -> list:
+    # Связка, а не last_parse_run_id: тот перезаписывается следующим прогоном.
+    # Архивные не скрываются: прогон показывает всё, что нашёл, а не то, что ещё актуально.
+    run_vacancy_ids = select(ParseRunVacancyRow.vacancy_id).where(ParseRunVacancyRow.parse_run_id == run_id)
     return [
-        VacancyRow.last_parse_run_id == run_id,
+        VacancyRow.id.in_(run_vacancy_ids),
         VacancyRow.is_duplicate.is_(False),
-        VacancyRow.archived_at.is_(None),
     ]
 
 

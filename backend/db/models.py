@@ -145,6 +145,23 @@ class VacancyRow(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
 
+class ParseRunVacancyRow(Base):
+    """Какие вакансии встретил прогон.
+
+    ``vacancies.last_parse_run_id`` хранит только последний прогон и перезаписывается,
+    а по этой связке история и экспорт прогона не пустеют после следующих прогонов.
+    """
+
+    __tablename__ = "parse_run_vacancies"
+
+    parse_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("parse_runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    vacancy_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+
+
 class UserRow(Base):
     """Пользователь: владелец резюме, пресетов фильтров и (косвенно) матчей."""
 
