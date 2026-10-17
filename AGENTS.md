@@ -73,5 +73,9 @@ Constraint'ы (FK, индексы) — с **явными именами**. Ош�
 - Окончания строк — LF везде, закреплено в `.gitattributes` (`* text=auto eol=lf`):
   `core.autocrlf` машины на checkout / merge / stash больше не влияет. CRLF в
   рабочей копии — признак того, что файл записан мимо git (см. про PowerShell выше).
-- Спеки и планы (`docs/superpowers/`, `docs/specs/`, `.superpowers/`) — только
-  локально, **не коммитить**. В git они в `.gitignore`.
+- Спеки и планы SDD — через OpenSpec: `openspec/` (`specs/` — текущее поведение,
+  `changes/` — предложения и архив) **коммитится** вместе с кодом изменения.
+  Команды/скиллы агентов (`.claude/`, `.agents/`, `.cursor/`) сгенерированы
+  `openspec init` — обновлять через `openspec update`, а не руками.
+- Артефакты плагина superpowers (`docs/superpowers/`, `docs/specs/`, `.superpowers/`) —
+  только локально, **не коммитить**. В git они в `.gitignore`.
