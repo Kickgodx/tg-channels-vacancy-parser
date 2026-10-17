@@ -58,10 +58,20 @@ def test_import_ai_cache_does_not_load_backend():
     assert "import backend" not in src
 
 
-def test_parse_worker_entrypoint_registers_postgres_cache():
-    """Parse идёт в RQ-воркере — без registry AI с cache_backend=postgres отключается."""
-    src = (Path(__file__).resolve().parents[1] / "backend" / "workers" / "parse_worker.py").read_text(encoding="utf-8")
-    assert "register_db_ai_cache()" in src
+@pytest.mark.parametrize("worker", ["parse_worker", "llm_worker"])
+def test_llm_worker_setup_registers_postgres_cache(worker, monkeypatch):
+    """LLM-разбор идёт в RQ-воркерах — без адаптера AI с cache_backend=postgres не создаётся."""
+    import importlib
+
+    from tg_jobs_parser.ai import cache_registry, rate_limit
+
+    monkeypatch.setattr(rate_limit, "_global_gate", rate_limit._global_gate)
+    module = importlib.import_module(f"backend.workers.{worker}")
+
+    module._setup()
+
+    assert cache_registry.get_postgres_cache_factory() is not None
+    build_extraction_cache(AiConfig(enabled=True, use_cache=True, cache_backend="postgres"))
 
 
 def test_null_cache_when_use_cache_false():

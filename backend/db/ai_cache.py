@@ -14,7 +14,7 @@ _LOG = get_logger(__name__)
 
 
 def register_db_ai_cache() -> None:
-    """Зарегистрировать Postgres-адаптер в core registry (вызывать при старте app/CLI)."""
+    """Зарегистрировать Postgres-адаптер в core registry (при старте — через ``register_core_ports``)."""
     register_postgres_cache_factory(lambda ai: DbAIExtractionCache(ai))
 
 

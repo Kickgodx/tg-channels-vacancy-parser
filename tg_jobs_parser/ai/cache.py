@@ -164,8 +164,8 @@ def build_extraction_cache(ai: AiConfig) -> AIExtractionCacheBackend:
         if factory is None:
             raise ValueError(
                 "ai.cache_backend='postgres', но Postgres-адаптер не зарегистрирован. "
-                "Вызовите register_postgres_cache_factory() при старте backend/CLI "
-                "(например backend.db.ai_cache.register_db_ai_cache)."
+                "Вызовите register_postgres_cache_factory() при старте процесса "
+                "(в backend — backend.core_ports.register_core_ports)."
             )
         return factory(ai)
     raise ValueError(f"ai.cache_backend must be 'postgres' or 'file', got {ai.cache_backend!r}")

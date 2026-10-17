@@ -1,7 +1,8 @@
 """Регистрация infra-адаптера Postgres-кэша AI (Ports & Adapters).
 
 Core (`build_extraction_cache`) не импортирует ``backend``: фабрику регистрирует
-приложение при старте (FastAPI lifespan / CLI).
+приложение при старте каждого процесса с LLM (``backend.core_ports.register_core_ports``:
+FastAPI lifespan, parse-worker, llm-worker).
 """
 
 from __future__ import annotations

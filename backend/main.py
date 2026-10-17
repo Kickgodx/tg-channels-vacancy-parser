@@ -162,13 +162,10 @@ async def lifespan(_app: FastAPI):
     warning = check_exposure(get_settings())
     if warning:
         log.warning(warning)
-    from backend.db.ai_cache import register_db_ai_cache
+    from backend.core_ports import register_core_ports
 
-    register_db_ai_cache()
-    from backend.services.llm_rate_gate import register_redis_rate_gate
-
-    # Интерактивный LLM (inprocess) и парсинг в API делят RPM с воркерами.
-    register_redis_rate_gate()
+    # LLM в inprocess-режиме идёт в этом процессе; RPM общий с воркерами.
+    register_core_ports()
     from backend.observability import init_llm_model_series
 
     init_llm_model_series()
