@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -109,12 +109,17 @@ def cache_clear_all(session: Session) -> int:
     return int(result.rowcount or 0)
 
 
-def purge_expired_cache(session: Session, *, limit: int = 1000) -> int:
-    """Удалить до ``limit`` просроченных записей (иначе они уходят только при чтении того же ключа)."""
-    expired = (
+def purge_stale_cache(session: Session, *, current_prompt_version: str, limit: int = 1000) -> int:
+    """Удалить до ``limit`` записей, которые больше не прочитаются.
+
+    Это просроченные (иначе уходят только при чтении того же ключа) и записи от
+    другой версии промпта: версия входит в ключ, после bump старые ключи не ищутся.
+    """
+    expired = and_(AIExtractionCacheRow.expires_at.isnot(None), AIExtractionCacheRow.expires_at <= _utcnow())
+    stale = (
         select(AIExtractionCacheRow.cache_key)
-        .where(AIExtractionCacheRow.expires_at.isnot(None), AIExtractionCacheRow.expires_at <= _utcnow())
+        .where(or_(expired, AIExtractionCacheRow.prompt_version != current_prompt_version))
         .limit(limit)
     )
-    result = session.execute(delete(AIExtractionCacheRow).where(AIExtractionCacheRow.cache_key.in_(expired)))
+    result = session.execute(delete(AIExtractionCacheRow).where(AIExtractionCacheRow.cache_key.in_(stale)))
     return int(result.rowcount or 0)

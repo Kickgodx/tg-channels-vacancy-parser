@@ -20,6 +20,7 @@ from backend.db.session import init_db, reset_engine, session_scope
 from backend.services import db_cleanup
 from backend.services.db_cleanup import purge_service_tables
 from backend.settings import get_settings
+from tg_jobs_parser.ai.prompts import EXTRACT_PROMPT_VERSION
 from tg_jobs_parser.config.schema import RetentionConfig
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
@@ -36,9 +37,9 @@ def _sqlite_db(monkeypatch, tmp_path):
     get_settings.cache_clear()
 
 
-def _cache(key: str, expires_at: datetime | None) -> AIExtractionCacheRow:
+def _cache(key: str, expires_at: datetime | None, prompt_version: str = EXTRACT_PROMPT_VERSION) -> AIExtractionCacheRow:
     return AIExtractionCacheRow(
-        cache_key=key, model="m", prompt_version="v", mode="primary", payload={}, expires_at=expires_at
+        cache_key=key, model="m", prompt_version=prompt_version, mode="primary", payload={}, expires_at=expires_at
     )
 
 
@@ -76,6 +77,7 @@ def test_purges_only_expired_and_finished_rows():
                 _cache("expired", real_now - timedelta(days=1)),
                 _cache("fresh", real_now + timedelta(days=1)),
                 _cache("forever", None),
+                _cache("old-prompt", real_now + timedelta(days=1), prompt_version="extract-v0"),
                 _job("done", finished_days_ago=40),
                 _job("error", finished_days_ago=None, created_days_ago=40),  # без finished_at — по created_at
                 _job("done", finished_days_ago=5),
@@ -95,7 +97,7 @@ def test_purges_only_expired_and_finished_rows():
 
     stats = purge_service_tables(RetentionConfig(llm_jobs_ttl_days=30, parse_runs_ttl_days=180), now=NOW)
 
-    assert (stats.ai_cache, stats.llm_jobs, stats.idempotency_keys, stats.parse_runs) == (1, 2, 1, 2)
+    assert (stats.ai_cache, stats.llm_jobs, stats.idempotency_keys, stats.parse_runs) == (2, 2, 1, 2)
     with session_scope() as session:
         assert set(session.scalars(select(AIExtractionCacheRow.cache_key))) == {"fresh", "forever"}
         assert sorted(session.scalars(select(LlmJobRow.status))) == ["done", "running"]
@@ -129,7 +131,7 @@ def test_failing_table_does_not_stop_others(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(db_cleanup.ai_cache_repo, "purge_expired_cache", boom)
+    monkeypatch.setattr(db_cleanup.ai_cache_repo, "purge_stale_cache", boom)
     with session_scope() as session:
         session.add(_run("completed", finished_days_ago=365))
 

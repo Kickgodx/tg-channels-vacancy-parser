@@ -1,6 +1,7 @@
 """Периодическая очистка служебных таблиц (вызывается из hourly-потока backend).
 
-Без неё растут: просроченный кэш LLM (уходил только при чтении того же ключа),
+Без неё растут: просроченный кэш LLM (уходил только при чтении того же ключа) и кэш
+от прежних версий промпта,
 завершённые LLM-джобы, ключи идемпотентности и журнал прогонов. Удаление — пачками
 в отдельных транзакциях, чтобы не держать длинные блокировки.
 """
@@ -21,6 +22,7 @@ from backend.db import llm_job_repository as llm_repo
 from backend.db import parse_run_repository as run_repo
 from backend.db import refresh_token_repository as refresh_repo
 from backend.db.session import session_scope
+from tg_jobs_parser.ai.prompts import EXTRACT_PROMPT_VERSION
 from tg_jobs_parser.config.schema import RetentionConfig
 
 _LOG = logging.getLogger(__name__)
@@ -68,7 +70,10 @@ def purge_service_tables(retention: RetentionConfig, *, now: datetime | None = N
     stats = CleanupStats()
 
     steps: list[tuple[str, Callable[[Session, int], int]]] = [
-        ("ai_cache", lambda s, n: ai_cache_repo.purge_expired_cache(s, limit=n)),
+        (
+            "ai_cache",
+            lambda s, n: ai_cache_repo.purge_stale_cache(s, current_prompt_version=EXTRACT_PROMPT_VERSION, limit=n),
+        ),
         ("idempotency_keys", lambda s, n: idem_repo.purge_expired_idempotency(s, limit=n)),
         ("refresh_tokens", lambda s, n: refresh_repo.purge_refresh_tokens(s, now=now, limit=n)),
     ]

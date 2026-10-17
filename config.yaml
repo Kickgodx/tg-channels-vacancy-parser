@@ -109,7 +109,9 @@ ai:
   stop_llm_when_rate_limited: true
   use_cache: true
   cache_backend: postgres
-  cache_ttl_days: 90
+  # Срок жизни кэша LLM: чуть больше retention.vacancy_ttl_days, чтобы ответ пережил архивацию
+  # на случай повторной публикации того же текста. 0 — без срока.
+  cache_ttl_days: 45
   reasoning_enabled: false
   max_completion_tokens: 8192
   allow_unknown_specializations: true

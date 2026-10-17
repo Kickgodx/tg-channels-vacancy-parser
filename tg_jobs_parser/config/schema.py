@@ -288,9 +288,12 @@ class AiConfig(BaseModel):
         description="postgres — таблица ai_extraction_cache; file — локальные JSON.",
     )
     cache_ttl_days: int = Field(
-        default=90,
+        default=45,
         ge=0,
-        description="Срок жизни записи кэша в днях; 0 — без срока (только ручная очистка).",
+        description=(
+            "Срок жизни записи кэша в днях (по умолчанию чуть больше retention.vacancy_ttl_days); "
+            "0 — без срока. Записи от прежних версий промпта удаляются фоновой очисткой независимо от срока."
+        ),
     )
     cache_path: str = ".cache/ai_extractions"
     request_timeout_seconds: float = 90.0
