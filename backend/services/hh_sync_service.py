@@ -34,7 +34,7 @@ from tg_jobs_parser.models.vacancy import Vacancy
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)
-# In-process lock (SQLite/тесты + доп. защита в одном worker).
+# In-process lock: второй sync в том же процессе отказывает сразу, без похода в БД.
 _SYNC_LOCK = threading.Lock()
 
 

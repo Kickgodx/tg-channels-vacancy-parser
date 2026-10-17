@@ -6,7 +6,6 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from backend.db.models import LlmUserUsageRow
@@ -33,10 +32,8 @@ def try_reserve_llm_calls(
         return True
     if calls > daily_limit:
         return False
-    dialect = session.get_bind().dialect.name
-    insert = pg_insert if dialect == "postgresql" else sqlite_insert
     stmt = (
-        insert(LlmUserUsageRow)
+        pg_insert(LlmUserUsageRow)
         .values(user_id=user_id, day=day or _today(), calls=calls)
         .on_conflict_do_update(
             index_elements=[LlmUserUsageRow.user_id, LlmUserUsageRow.day],

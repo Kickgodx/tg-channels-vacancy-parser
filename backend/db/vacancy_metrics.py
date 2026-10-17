@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import cast, func, lateral, select, true
+from sqlalchemy import func, lateral, select, true
 from sqlalchemy.orm import Session
 
 from backend.db import fx_repository as fx_repo
@@ -23,11 +23,6 @@ from tg_jobs_parser.models.metrics import (
 _TOP_SPECS = 50
 _TOP_SALARY_SPECS = 25
 _MAX_DAILY_BUCKETS = 400
-
-
-def _dialect_name(session: Session) -> str:
-    bind = session.get_bind()
-    return bind.dialect.name if bind is not None else "postgresql"
 
 
 def _salary_rub_expr(column=VacancyRow):
@@ -62,7 +57,7 @@ def _prepare_fx(session: Session) -> SalaryDisplayMeta:
     )
 
 
-def _salary_by_grade(session: Session, query: VacancyQuery, *, dialect: str) -> dict[str, SalaryStats]:
+def _salary_by_grade(session: Session, query: VacancyQuery) -> dict[str, SalaryStats]:
     sal = _salary_rub_expr()
     stmt = apply_vacancy_filters(
         select(
@@ -73,7 +68,6 @@ def _salary_by_grade(session: Session, query: VacancyQuery, *, dialect: str) -> 
         .where(sal.isnot(None))
         .group_by(VacancyRow.detected_grade),
         query,
-        dialect=dialect,
     )
     out: dict[str, SalaryStats] = {}
     for grade, avg_val, cnt in session.execute(stmt).all():
@@ -87,20 +81,15 @@ def _count_by_column(
     query: VacancyQuery,
     column,
     *,
-    dialect: str,
     null_label: str | None = None,
 ) -> dict[str, int]:
     label = func.coalesce(column, null_label) if null_label else column
-    stmt = apply_vacancy_filters(
-        select(label, func.count(VacancyRow.id)).group_by(label),
-        query,
-        dialect=dialect,
-    )
+    stmt = apply_vacancy_filters(select(label, func.count(VacancyRow.id)).group_by(label), query)
     rows = session.execute(stmt).all()
     return {str(k): int(c) for k, c in rows if k is not None}
 
 
-def _daily_buckets(session: Session, query: VacancyQuery, *, dialect: str) -> list[TimeSeriesBucket]:
+def _daily_buckets(session: Session, query: VacancyQuery) -> list[TimeSeriesBucket]:
     day = func.date(VacancyRow.post_date)
     stmt = apply_vacancy_filters(
         select(day, func.count(VacancyRow.id))
@@ -108,7 +97,6 @@ def _daily_buckets(session: Session, query: VacancyQuery, *, dialect: str) -> li
         .group_by(day)
         .order_by(day.desc()),
         query,
-        dialect=dialect,
     ).limit(_MAX_DAILY_BUCKETS)
     # Лимит оставляет самые свежие дни; наружу — по возрастанию даты.
     rows = session.execute(stmt).all()
@@ -120,19 +108,15 @@ def _vacancies_alias():
     return VacancyRow.__table__.alias("v")
 
 
-def _pg_spec_lateral(v):
+def _spec_lateral(v):
     """LATERAL unnest специализаций; v — алиас vacancies с .correlate(v)."""
-    from sqlalchemy.dialects.postgresql import JSONB
-
-    spec_q = select(func.jsonb_array_elements_text(cast(v.c.detected_specializations, JSONB)).label("spec")).correlate(
-        v
-    )
+    spec_q = select(func.jsonb_array_elements_text(v.c.detected_specializations).label("spec")).correlate(v)
     return lateral(spec_q).alias("spec_el")
 
 
-def _spec_counts_postgresql(session: Session, query: VacancyQuery, *, dialect: str) -> dict[str, int]:
+def _spec_counts(session: Session, query: VacancyQuery) -> dict[str, int]:
     v = _vacancies_alias()
-    spec_lat = _pg_spec_lateral(v)
+    spec_lat = _spec_lateral(v)
     stmt = apply_vacancy_filters(
         select(spec_lat.c.spec, func.count(v.c.id))
         .select_from(v.join(spec_lat, true()))
@@ -141,29 +125,13 @@ def _spec_counts_postgresql(session: Session, query: VacancyQuery, *, dialect: s
         .limit(_TOP_SPECS),
         query,
         table=v,
-        dialect=dialect,
     )
     return {str(s): int(c) for s, c in session.execute(stmt).all() if s}
 
 
-def _spec_counts_sqlite(session: Session, query: VacancyQuery, *, dialect: str) -> dict[str, int]:
-    je = func.json_each(VacancyRow.detected_specializations).table_valued("value", with_ordinality=False)
-    stmt = apply_vacancy_filters(
-        select(je.c.value, func.count(VacancyRow.id))
-        .select_from(VacancyRow)
-        .join(je, true())
-        .group_by(je.c.value)
-        .order_by(func.count(VacancyRow.id).desc())
-        .limit(_TOP_SPECS),
-        query,
-        dialect=dialect,
-    )
-    return {str(s): int(c) for s, c in session.execute(stmt).all() if s}
-
-
-def _salary_by_spec_postgresql(session: Session, query: VacancyQuery, *, dialect: str) -> dict[str, SalaryStats]:
+def _salary_by_spec(session: Session, query: VacancyQuery) -> dict[str, SalaryStats]:
     v = _vacancies_alias()
-    spec_lat = _pg_spec_lateral(v)
+    spec_lat = _spec_lateral(v)
     sal = _salary_rub_expr_table(v)
     stmt = apply_vacancy_filters(
         select(
@@ -178,28 +146,6 @@ def _salary_by_spec_postgresql(session: Session, query: VacancyQuery, *, dialect
         .limit(_TOP_SALARY_SPECS),
         query,
         table=v,
-        dialect=dialect,
-    )
-    out: dict[str, SalaryStats] = {}
-    for s, avg_val, cnt in session.execute(stmt).all():
-        if s and cnt and avg_val is not None:
-            out[str(s)] = SalaryStats(mean=float(avg_val), count_with_salary=int(cnt))
-    return out
-
-
-def _salary_by_spec_sqlite(session: Session, query: VacancyQuery, *, dialect: str) -> dict[str, SalaryStats]:
-    je = func.json_each(VacancyRow.detected_specializations).table_valued("value", with_ordinality=False)
-    sal = _salary_rub_expr()
-    stmt = apply_vacancy_filters(
-        select(je.c.value, func.avg(sal), func.count(VacancyRow.id))
-        .select_from(VacancyRow)
-        .join(je, true())
-        .where(sal.isnot(None))
-        .group_by(je.c.value)
-        .order_by(func.count(VacancyRow.id).desc())
-        .limit(_TOP_SALARY_SPECS),
-        query,
-        dialect=dialect,
     )
     out: dict[str, SalaryStats] = {}
     for s, avg_val, cnt in session.execute(stmt).all():
@@ -210,35 +156,19 @@ def _salary_by_spec_sqlite(session: Session, query: VacancyQuery, *, dialect: st
 
 def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsSummary:
     """Сводка для графиков; те же фильтры, что у GET /vacancies."""
-    dialect = _dialect_name(session)
     salary_display = _prepare_fx(session)
-    total = int(session.scalar(vacancy_count_stmt(query, dialect=dialect)) or 0)
+    total = int(session.scalar(vacancy_count_stmt(query)) or 0)
     if total == 0:
         return MetricsSummary(unique_vacancies=0, total_vacancies=0, salary_display=salary_display)
 
-    by_spec = (
-        _spec_counts_postgresql(session, query, dialect=dialect)
-        if dialect == "postgresql"
-        else _spec_counts_sqlite(session, query, dialect=dialect)
-    )
-    salary_spec = (
-        _salary_by_spec_postgresql(session, query, dialect=dialect)
-        if dialect == "postgresql"
-        else _salary_by_spec_sqlite(session, query, dialect=dialect)
-    )
+    by_spec = _spec_counts(session, query)
+    salary_spec = _salary_by_spec(session, query)
 
     sal_rub = _salary_rub_expr()
     with_salary = int(
-        session.scalar(
-            apply_vacancy_filters(
-                select(func.count(VacancyRow.id)).where(sal_rub.isnot(None)),
-                query,
-                dialect=dialect,
-            )
-        )
-        or 0
+        session.scalar(apply_vacancy_filters(select(func.count(VacancyRow.id)).where(sal_rub.isnot(None)), query)) or 0
     )
-    by_grade = _count_by_column(session, query, VacancyRow.detected_grade, dialect=dialect)
+    by_grade = _count_by_column(session, query, VacancyRow.detected_grade)
 
     return MetricsSummary(
         unique_vacancies=total,
@@ -246,18 +176,12 @@ def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsS
         duplicate_count=0,
         vacancies_by_specialization=by_spec,
         vacancies_by_grade=by_grade,
-        vacancies_by_work_format=_count_by_column(
-            session,
-            query,
-            VacancyRow.work_format,
-            null_label="unknown",
-            dialect=dialect,
-        ),
-        daily=_daily_buckets(session, query, dialect=dialect),
+        vacancies_by_work_format=_count_by_column(session, query, VacancyRow.work_format, null_label="unknown"),
+        daily=_daily_buckets(session, query),
         vacancies_with_salary=with_salary,
         vacancies_without_salary=total - with_salary,
         salary_by_specialization=salary_spec,
-        salary_by_grade=_salary_by_grade(session, query, dialect=dialect),
+        salary_by_grade=_salary_by_grade(session, query),
         grade_distribution=by_grade,
         salary_display=salary_display,
     )

@@ -6,11 +6,12 @@ from datetime import date
 
 import fakeredis
 import pytest
+from tests.conftest import new_user
 from tests.llm_job_helpers import await_llm_job
 from tests.test_llm_jobs import _add_vacancy, _auth, _register
 
 from backend.db.llm_usage_repository import llm_calls_today, try_reserve_llm_calls
-from backend.db.session import init_db, reset_engine, session_scope
+from backend.db.session import session_scope
 from backend.services import llm_rate_gate, match_service
 from backend.services.llm_rate_gate import RedisWindowRateGate
 from backend.settings import get_settings
@@ -215,14 +216,10 @@ def test_budget_applies_to_interactive_llm_only(monkeypatch, default_test_config
 
 
 @pytest.fixture
-def db(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{(tmp_path / 'quota.db').as_posix()}")
-    get_settings.cache_clear()
-    reset_engine()
-    init_db()
-    yield
-    reset_engine()
-    get_settings.cache_clear()
+def db(pg_db):
+    with session_scope() as session:
+        new_user(session, "one@example.com")
+        new_user(session, "two@example.com")
 
 
 def test_reserve_respects_daily_limit(db):

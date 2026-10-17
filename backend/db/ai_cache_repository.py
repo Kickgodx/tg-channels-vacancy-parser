@@ -16,12 +16,6 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def _as_utc(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
-
-
 def _expires_at(ttl_days: int) -> datetime | None:
     if ttl_days <= 0:
         return None
@@ -38,7 +32,7 @@ def cache_get(
     if row is None:
         return None
     now = _utcnow()
-    if row.expires_at is not None and _as_utc(row.expires_at) <= now:
+    if row.expires_at is not None and row.expires_at <= now:
         session.delete(row)
         return None
     try:
@@ -71,33 +65,19 @@ def cache_put(
         "updated_at": now,
         "expires_at": expires,
     }
-    bind = session.get_bind()
-    if bind is not None and bind.dialect.name == "postgresql":
-        stmt = pg_insert(AIExtractionCacheRow).values(**values)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["cache_key"],
-            set_={
-                "model": model,
-                "prompt_version": prompt_version,
-                "mode": mode,
-                "payload": payload,
-                "updated_at": now,
-                "expires_at": expires,
-            },
-        )
-        session.execute(stmt)
-        return
-
-    row = session.get(AIExtractionCacheRow, cache_key)
-    if row is None:
-        session.add(AIExtractionCacheRow(**values))
-    else:
-        row.model = model
-        row.prompt_version = prompt_version
-        row.mode = mode
-        row.payload = payload
-        row.updated_at = now
-        row.expires_at = expires
+    stmt = pg_insert(AIExtractionCacheRow).values(**values)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["cache_key"],
+        set_={
+            "model": model,
+            "prompt_version": prompt_version,
+            "mode": mode,
+            "payload": payload,
+            "updated_at": now,
+            "expires_at": expires,
+        },
+    )
+    session.execute(stmt)
 
 
 def cache_count(session: Session) -> int:

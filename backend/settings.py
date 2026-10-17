@@ -142,6 +142,9 @@ class Settings(BaseSettings):
             # localhost сначала резолвится в ::1 — на Windows psycopg ждёт там весь connect timeout.
             password = quote(self.postgres_password or "tgjobs", safe="")
             self.database_url = f"postgresql+psycopg://tgjobs:{password}@127.0.0.1:5432/tgjobs"
+        if not self.database_url.startswith("postgresql"):
+            # SQL, блокировки и миграции написаны только под Postgres.
+            raise ValueError("DATABASE_URL: поддерживается только PostgreSQL (postgresql+psycopg://…)")
         if self.auth_registration_open is None:
             self.auth_registration_open = not self.is_production
         if self.http_log_bodies is None:

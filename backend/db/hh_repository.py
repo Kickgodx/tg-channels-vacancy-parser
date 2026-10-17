@@ -68,12 +68,8 @@ def _clip(value: str | None, max_len: int) -> str | None:
 
 
 def _is_later(new: datetime | None, old: datetime | None) -> bool:
-    """``new`` строго позже ``old``; naive-значения (SQLite) считаются UTC."""
-    if new is None or old is None:
-        return False
-    new_utc = new if new.tzinfo else new.replace(tzinfo=UTC)
-    old_utc = old if old.tzinfo else old.replace(tzinfo=UTC)
-    return new_utc > old_utc
+    """``new`` строго позже ``old``; без одной из дат — нет."""
+    return new is not None and old is not None and new > old
 
 
 def listing_detail_fetched(session: Session, hh_id: str) -> bool:
@@ -97,7 +93,7 @@ class HhSyncDbLock:
     Lock на соединении сессии поэтому «протекал» — unlock уходил не туда, и
     следующий sync получал 409 до рестарта. Здесь lock живёт на своём соединении
     (AUTOCOMMIT — без idle-in-transaction на всё время sync) от ``try_acquire``
-    до ``release``. На SQLite — no-op (там хватает threading-lock).
+    до ``release``.
     """
 
     def __init__(self, session: Session) -> None:
@@ -105,10 +101,7 @@ class HhSyncDbLock:
         self._conn: Connection | None = None
 
     def try_acquire(self) -> bool:
-        bind = self._session.get_bind()
-        if bind.dialect.name != "postgresql":
-            return True
-        conn = bind.engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+        conn = self._session.get_bind().engine.connect().execution_options(isolation_level="AUTOCOMMIT")
         try:
             got = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": HH_SYNC_ADVISORY_LOCK_KEY}).scalar())
         except Exception:
@@ -299,32 +292,10 @@ def upsert_hh_vacancies(
             republished = _is_later(data["post_date"], existing.post_date)
             data["archived_at"] = None if republished else existing.archived_at
 
-        dialect = session.bind.dialect.name if session.bind is not None else "postgresql"
-        if dialect == "postgresql":
-            stmt = pg_insert(VacancyRow).values(**data)
-            update_cols = {
-                k: data[k]
-                for k in data
-                if k
-                not in (
-                    "id",
-                    "parsed_at",
-                    "last_parse_run_id",
-                    "created_at",
-                )
-            }
-            update_cols["updated_at"] = now
-            stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_cols)
-            session.execute(stmt)
-        else:
-            if existing is None:
-                session.add(VacancyRow(**data))
-            else:
-                for k, val in data.items():
-                    if k in ("id", "parsed_at", "last_parse_run_id"):
-                        continue
-                    setattr(existing, k, val)
-                existing.updated_at = now
+        stmt = pg_insert(VacancyRow).values(**data)
+        update_cols = {k: data[k] for k in data if k not in ("id", "parsed_at", "last_parse_run_id", "created_at")}
+        update_cols["updated_at"] = now
+        session.execute(stmt.on_conflict_do_update(index_elements=["id"], set_=update_cols))
         if is_existing:
             updated_existing += 1
         else:

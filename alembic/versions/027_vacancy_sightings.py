@@ -54,7 +54,7 @@ def upgrade() -> None:
         op.create_index("ix_vacancy_sightings_source_channel", _TABLE, ["source_channel"])
     # HH и ручной импорт — не посты Telegram. LEFT JOIN: last_parse_run_id — не FK,
     # удалённые прогоны в нём остаются. Повтор source_post_key (пост отредактирован —
-    # другой текст, другой id) гасит ON CONFLICT; WHERE нужен SQLite для разбора.
+    # другой текст, другой id) гасит ON CONFLICT.
     op.execute(
         sa.text(
             f"""

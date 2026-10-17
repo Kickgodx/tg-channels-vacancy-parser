@@ -21,8 +21,7 @@
 **Про миграции:** цепочка инкрементальная — head сейчас
 `020_llm_user_usage`. Новые фичи просто продолжают её
 (`alembic revision` → `upgrade head` на старте backend, без `down -v`).
-Колонки с FK добавлять через `op.batch_alter_table` с именованным
-constraint — SQLite (тесты) не умеет `ALTER TABLE ADD COLUMN` с FK.
+БД — только Postgres; constraint'ы (FK, индексы) — с явными именами.
 
 ---
 

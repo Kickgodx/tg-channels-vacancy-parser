@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine, func, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import func, select
+from tests.conftest import new_parse_run
 
-from backend.db.base import Base
 from backend.db.models import VacancyRow
 from backend.db.repository import (
     VACANCY_TTL_DAYS,
@@ -20,19 +18,6 @@ from backend.db.repository import (
 from backend.schemas import VacancyQuery
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.utils.hashing import vacancy_content_id
-
-
-@pytest.fixture
-def db_session(tmp_path):
-    engine = create_engine(
-        f"sqlite+pysqlite:///{(tmp_path / 't.db').as_posix()}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
 
 
 def _vac(
@@ -58,7 +43,7 @@ def _vac(
 
 
 def test_upsert_sets_updated_at(db_session):
-    run_id = uuid.uuid4()
+    run_id = new_parse_run(db_session)
     text = "Python backend remote"
     v = _vac(cleaned=text, source_post_key="chan-1")
     stats = upsert_vacancies(db_session, [v], parse_run_id=run_id)
@@ -66,7 +51,7 @@ def test_upsert_sets_updated_at(db_session):
     assert stats.inserted == 1
     assert stats.updated_existing == 0
 
-    run_id2 = uuid.uuid4()
+    run_id2 = new_parse_run(db_session)
     v2 = _vac(cleaned=text, source_post_key="chan-2", company="Acme")
     stats2 = upsert_vacancies(db_session, [v2], parse_run_id=run_id2)
     db_session.commit()
@@ -82,7 +67,7 @@ def test_upsert_sets_updated_at(db_session):
 
 def test_upsert_long_required_experience(db_session):
     """Ответ LLM может быть длиннее legacy VARCHAR(128)."""
-    run_id = uuid.uuid4()
+    run_id = new_parse_run(db_session)
     long_exp = (
         "7+ years of backend development experience in Node.js/C#/.NET "
         "(.Net is must, Node is a big advantage) 4+ years of experience in React."
@@ -106,7 +91,7 @@ def test_upsert_long_required_experience(db_session):
 
 
 def test_upsert_two_distinct_texts_two_rows(db_session):
-    run_id = uuid.uuid4()
+    run_id = new_parse_run(db_session)
     v1 = _vac(cleaned="Python dev", source_post_key="a-1")
     v2 = _vac(cleaned="Go dev", source_post_key="a-2")
     upsert_vacancies(db_session, [v1, v2], parse_run_id=run_id)
@@ -137,7 +122,7 @@ def test_archive_expired_vacancies_archives_records_beyond_ttl(db_session):
     upsert_vacancies(
         db_session,
         [expired, current, missing_post_date],
-        parse_run_id=uuid.uuid4(),
+        parse_run_id=new_parse_run(db_session),
     )
     db_session.commit()
 
@@ -162,7 +147,7 @@ def test_list_vacancies_hides_archived_unless_included(db_session):
         post_date=now - timedelta(days=VACANCY_TTL_DAYS + 1),
     )
     fresh = _vac(cleaned="fresh vacancy", source_post_key="new-1", post_date=now)
-    upsert_vacancies(db_session, [old, fresh], parse_run_id=uuid.uuid4())
+    upsert_vacancies(db_session, [old, fresh], parse_run_id=new_parse_run(db_session))
     archive_expired_vacancies(db_session, now=now)
     db_session.commit()
 
@@ -177,7 +162,7 @@ def test_list_vacancies_hides_archived_unless_included(db_session):
 def _archived_vacancy(db_session, *, text: str, first_seen: datetime) -> Vacancy:
     """Вакансия, ушедшая в архив по TTL от первой публикации."""
     original = _vac(cleaned=text, source_post_key="chan-1", post_date=first_seen)
-    upsert_vacancies(db_session, [original], parse_run_id=uuid.uuid4())
+    upsert_vacancies(db_session, [original], parse_run_id=new_parse_run(db_session))
     assert archive_expired_vacancies(db_session) == 1
     db_session.commit()
     return original
@@ -191,7 +176,7 @@ def test_repost_advances_post_date_and_unarchives(db_session):
 
     repost_date = now - timedelta(days=1)
     repost = _vac(cleaned=text, source_post_key="chan-99", post_date=repost_date)
-    stats = upsert_vacancies(db_session, [repost], parse_run_id=uuid.uuid4())
+    stats = upsert_vacancies(db_session, [repost], parse_run_id=new_parse_run(db_session))
     db_session.commit()
     db_session.expire_all()
 
@@ -218,7 +203,7 @@ def test_same_or_older_post_keeps_date_and_archive(db_session, days_before_first
         source_post_key="chan-2",
         post_date=first_seen - timedelta(days=days_before_first),
     )
-    upsert_vacancies(db_session, [again], parse_run_id=uuid.uuid4())
+    upsert_vacancies(db_session, [again], parse_run_id=new_parse_run(db_session))
     db_session.commit()
     db_session.expire_all()
 
@@ -230,12 +215,12 @@ def test_same_or_older_post_keeps_date_and_archive(db_session, days_before_first
 def test_repost_fills_missing_post_date(db_session):
     text = "QA engineer, hybrid"
     undated = _vac(cleaned=text, source_post_key="chan-1").model_copy(update={"post_date": None})
-    upsert_vacancies(db_session, [undated], parse_run_id=uuid.uuid4())
+    upsert_vacancies(db_session, [undated], parse_run_id=new_parse_run(db_session))
     db_session.commit()
 
     dated_at = datetime.now(UTC) - timedelta(days=2)
     dated = _vac(cleaned=text, source_post_key="chan-2", post_date=dated_at)
-    upsert_vacancies(db_session, [dated], parse_run_id=uuid.uuid4())
+    upsert_vacancies(db_session, [dated], parse_run_id=new_parse_run(db_session))
     db_session.commit()
     db_session.expire_all()
 

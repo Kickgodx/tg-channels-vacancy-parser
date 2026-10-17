@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
+from tests.conftest import new_parse_run
 
 from backend.db.repository import upsert_vacancies
 from backend.db.session import get_session_factory
@@ -33,7 +33,7 @@ def _seed_long_vacancy() -> str:
     factory = get_session_factory()
     session = factory()
     try:
-        upsert_vacancies(session, [v], parse_run_id=uuid.uuid4())
+        upsert_vacancies(session, [v], parse_run_id=new_parse_run(session))
         session.commit()
     finally:
         session.close()

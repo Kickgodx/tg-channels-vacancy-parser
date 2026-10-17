@@ -4,23 +4,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import select
 
 from backend.db.hh_repository import backfill_hh_grades_from_experience
-from backend.db.models import Base, VacancyRow
+from backend.db.models import VacancyRow
 from tg_jobs_parser.hh.mapper import hh_source_post_key, stable_vacancy_id
 
 
-def _session():
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine)()
-
-
-def test_backfill_hh_grades_from_experience_name():
+def test_backfill_hh_grades_from_experience_name(db_session):
     now = datetime.now(UTC)
-    with _session() as session:
+    with db_session as session:
         cases = (
             ("1", "Нет опыта", "intern"),
             ("2", "От 1 года до 3 лет", "junior"),

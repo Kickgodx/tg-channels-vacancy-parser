@@ -12,7 +12,6 @@ from alembic.config import Config
 from sqlalchemy import text
 
 from backend.db import models  # noqa: F401
-from backend.db.base import Base
 from backend.db.session import get_engine
 from backend.settings import project_root
 
@@ -25,19 +24,16 @@ def alembic_ini_path() -> Path:
 
 def _widen_alembic_version_column() -> None:
     """Alembic по умолчанию создаёт version_num VARCHAR(32); длинные revision id ломают upgrade."""
-    engine = get_engine()
-    if engine.dialect.name != "postgresql":
-        return
-    with engine.begin() as conn:
-        exists = conn.execute(
+    with get_engine().begin() as conn:
+        length = conn.execute(
             text(
-                "SELECT 1 FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_name = 'alembic_version'"
+                "SELECT character_maximum_length FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'alembic_version' AND column_name = 'version_num'"
             )
         ).scalar()
-        if not exists:
-            return
-        conn.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"))
+        # Нет таблицы (пустая база) или уже расширена — ALTER не нужен (он берёт ACCESS EXCLUSIVE).
+        if length is not None and length < 64:
+            conn.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)"))
 
 
 # Ключ pg_advisory_lock миграций (произвольная константа проекта).
@@ -46,14 +42,11 @@ MIGRATION_LOCK_KEY = 7_242_031_001
 
 @contextmanager
 def migration_lock(engine) -> Iterator[None]:
-    """Взаимоисключение ``upgrade head`` между процессами (Postgres; на SQLite — no-op).
+    """Взаимоисключение ``upgrade head`` между процессами (pg_advisory_lock).
 
     Второй процесс / реплика API ждёт, пока первый применит миграции, и затем
     получает уже актуальную схему (upgrade — no-op), а не гонку DDL.
     """
-    if engine.dialect.name != "postgresql":
-        yield
-        return
     # AUTOCOMMIT: session-level lock не держит открытую транзакцию на время DDL.
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": MIGRATION_LOCK_KEY})
@@ -72,20 +65,7 @@ def upgrade_head() -> None:
 
 
 def init_schema() -> None:
-    """Применить alembic upgrade head.
-
-    При сбое на пустой/тестовой БД — ``create_all`` и повторный raise, чтобы
-    Postgres с устаревшей схемой не поднимал API «успешно» без колонок.
-    """
+    """Применить alembic upgrade head; ошибка миграции останавливает старт."""
     logging.getLogger("alembic").setLevel(logging.WARNING)
-    try:
-        upgrade_head()
-    except Exception as e:
-        _LOG.error(
-            "Alembic upgrade failed: %s — create_all как fallback "
-            "(на уже существующем Postgres новые колонки так не появятся).",
-            e,
-        )
-        Base.metadata.create_all(bind=get_engine())
-        raise
+    upgrade_head()
     _LOG.info("Схема БД готова.")

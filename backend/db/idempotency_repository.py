@@ -28,10 +28,7 @@ def get_idempotency(
     row = session.get(IdempotencyKeyRow, (key, scope, actor))
     if row is None:
         return None
-    exp = row.expires_at
-    if exp.tzinfo is None:
-        exp = exp.replace(tzinfo=UTC)
-    if exp < now:
+    if row.expires_at < now:
         session.delete(row)
         session.flush()
         return None

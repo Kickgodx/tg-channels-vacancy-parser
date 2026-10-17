@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
+from tests.conftest import new_user
 
 from backend.db import vacancy_repository
 from backend.db.models import (
@@ -17,10 +18,9 @@ from backend.db.models import (
     LlmJobRow,
     ParseRunRow,
 )
-from backend.db.session import init_db, reset_engine, session_scope
+from backend.db.session import session_scope
 from backend.services import db_cleanup
 from backend.services.db_cleanup import purge_service_tables
-from backend.settings import get_settings
 from tg_jobs_parser.ai.prompts import EXTRACT_PROMPT_VERSION
 from tg_jobs_parser.config.schema import RetentionConfig
 
@@ -28,14 +28,9 @@ NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
-def _sqlite_db(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{(tmp_path / 'cleanup.db').as_posix()}")
-    get_settings.cache_clear()
-    reset_engine()
-    init_db()
-    yield
-    reset_engine()
-    get_settings.cache_clear()
+def _db(pg_db):
+    with session_scope() as session:
+        new_user(session)  # id=1 — владелец джоб из _job()
 
 
 def _cache(key: str, expires_at: datetime | None, prompt_version: str = EXTRACT_PROMPT_VERSION) -> AIExtractionCacheRow:
@@ -47,9 +42,7 @@ def _cache(key: str, expires_at: datetime | None, prompt_version: str = EXTRACT_
 def _job(status: str, finished_days_ago: float | None, created_days_ago: float = 100) -> LlmJobRow:
     return LlmJobRow(
         user_id=1,
-        kind="match",
-        resume_id=1,
-        vacancy_id="v",
+        kind="import",
         status=status,
         created_at=NOW - timedelta(days=created_days_ago),
         finished_at=None if finished_days_ago is None else NOW - timedelta(days=finished_days_ago),

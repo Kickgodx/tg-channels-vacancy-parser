@@ -2,31 +2,15 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime, timedelta
 
-import pytest
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import inspect, text
+from tests.conftest import new_parse_run
 
-from backend.db.base import Base
 from backend.db.repository import list_vacancies, upsert_vacancies
 from backend.schemas import VacancyQuery
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.utils.hashing import vacancy_content_id
-
-
-@pytest.fixture
-def db_session(tmp_path):
-    engine = create_engine(
-        f"sqlite+pysqlite:///{(tmp_path / 't.db').as_posix()}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
 
 
 def _vac(cleaned: str, *, days_ago: int = 0) -> Vacancy:
@@ -51,7 +35,7 @@ def test_active_post_date_partial_index_exists(db_session):
 
 def test_list_vacancies_total_past_last_page(db_session):
     items = [_vac(f"vacancy text number {i}", days_ago=i) for i in range(5)]
-    upsert_vacancies(db_session, items, parse_run_id=uuid.uuid4())
+    upsert_vacancies(db_session, items, parse_run_id=new_parse_run(db_session))
     db_session.commit()
 
     page, total = list_vacancies(db_session, VacancyQuery(page=1, page_size=2))
@@ -63,27 +47,26 @@ def test_list_vacancies_total_past_last_page(db_session):
     assert empty == []
 
 
-def test_list_default_filter_can_use_partial_index_sqlite(db_session):
-    """На SQLite EXPLAIN QUERY PLAN должен упоминать индекс (если доступен)."""
+def test_list_default_filter_can_use_partial_index(db_session):
+    """Запрос списка по умолчанию совпадает с частичным индексом (миграция 013)."""
     upsert_vacancies(
         db_session,
         [_vac(f"indexed vacancy {i}", days_ago=i) for i in range(3)],
-        parse_run_id=uuid.uuid4(),
+        parse_run_id=new_parse_run(db_session),
     )
     db_session.commit()
-    bind = db_session.get_bind()
-    if bind.dialect.name != "sqlite":
-        return
+    # На трёх строках планировщик выбрал бы seq scan — проверяем, что индекс вообще подходит.
+    db_session.execute(text("SET LOCAL enable_seqscan = off"))
     plan = db_session.execute(
         text(
-            "EXPLAIN QUERY PLAN "
-            "SELECT id FROM vacancies "
-            "WHERE is_duplicate = 0 AND archived_at IS NULL "
-            "ORDER BY post_date DESC, id ASC LIMIT 2"
+            "EXPLAIN SELECT id FROM vacancies "
+            "WHERE is_duplicate IS false AND archived_at IS NULL "
+            "ORDER BY post_date DESC NULLS LAST, id ASC LIMIT 2"
         )
-    ).fetchall()
-    plan_text = " ".join(str(r) for r in plan).lower()
-    assert "ix_vacancies_active_post_date" in plan_text or "using index" in plan_text
+    ).scalars()
+    plan_text = "\n".join(plan)
+    assert "ix_vacancies_active_post_date" in plan_text
+    assert "Sort" not in plan_text
 
 
 def test_vacancy_count_cache_reuses_total(db_session, monkeypatch):
@@ -93,7 +76,7 @@ def test_vacancy_count_cache_reuses_total(db_session, monkeypatch):
     upsert_vacancies(
         db_session,
         [_vac(f"cache me {i}", days_ago=i) for i in range(3)],
-        parse_run_id=uuid.uuid4(),
+        parse_run_id=new_parse_run(db_session),
     )
     db_session.commit()
     repo.invalidate_vacancy_count_cache()

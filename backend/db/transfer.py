@@ -12,7 +12,6 @@ from typing import Any, Literal
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from backend.db.models import (
@@ -173,13 +172,11 @@ def _clear_tables(session: Session) -> None:
 def _upsert_rows(session: Session, model: type, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
-    dialect = session.get_bind().dialect.name
-    ins = pg_insert if dialect == "postgresql" else sqlite_insert
     pk_cols = [c.name for c in model.__table__.columns if c.primary_key]  # type: ignore[attr-defined]
     count = 0
     for raw in rows:
         data = _deserialize_row(model, raw)
-        stmt = ins(model).values(**data)
+        stmt = pg_insert(model).values(**data)
         update_cols = {k: data[k] for k in data if k not in pk_cols}
         if update_cols:
             stmt = stmt.on_conflict_do_update(index_elements=pk_cols, set_=update_cols)
@@ -192,16 +189,12 @@ def _upsert_rows(session: Session, model: type, rows: list[dict[str, Any]]) -> i
 
 def _backfill_run_links(session: Session) -> int:
     """Связка прогон ↔ вакансия из ``last_parse_run_id`` — для дампов, снятых до неё."""
-    dialect = session.get_bind().dialect.name
-    ins = pg_insert if dialect == "postgresql" else sqlite_insert
-    # WHERE обязателен: без него SQLite не разбирает INSERT … SELECT … ON CONFLICT.
-    src = (
-        select(VacancyRow.last_parse_run_id, VacancyRow.id)
-        .join(ParseRunRow, ParseRunRow.id == VacancyRow.last_parse_run_id)
-        .where(VacancyRow.last_parse_run_id.is_not(None))
+    src = select(VacancyRow.last_parse_run_id, VacancyRow.id).join(
+        ParseRunRow, ParseRunRow.id == VacancyRow.last_parse_run_id
     )
-    stmt = ins(ParseRunVacancyRow).from_select(["parse_run_id", "vacancy_id"], src).on_conflict_do_nothing()
-    return int(session.execute(stmt).rowcount or 0)
+    stmt = pg_insert(ParseRunVacancyRow).from_select(["parse_run_id", "vacancy_id"], src).on_conflict_do_nothing()
+    # Для INSERT SQLAlchemy без preserve_rowcount отдаёт rowcount -1 (запоминает только UPDATE/DELETE).
+    return int(session.execute(stmt.execution_options(preserve_rowcount=True)).rowcount or 0)
 
 
 def import_database(

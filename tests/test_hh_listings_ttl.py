@@ -4,22 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 import backend.db.models  # noqa: F401
 from backend.db import hh_repository as hh_repo
-from backend.db.base import Base
 from backend.db.models import HhListingRow
 
 
-def test_purge_expired_listings():
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
+def test_purge_expired_listings(db_session):
     now = datetime.now(UTC)
 
-    with SessionLocal() as session:
+    with db_session as session:
         session.add(
             HhListingRow(
                 hh_id="old",

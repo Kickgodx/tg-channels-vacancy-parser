@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from backend.db import parse_run_repository as pr
 from backend.db.models import VacancyRow, VacancySightingRow
-from backend.db.session import init_db, reset_engine, session_scope
+from backend.db.session import reset_engine, session_scope
 from backend.settings import get_settings
 from backend.workers import parse_tasks
 from backend.workers.parse_tasks import run_parse_job
@@ -24,12 +24,9 @@ from tg_jobs_parser.utils.hashing import vacancy_content_id
 
 
 @pytest.fixture(autouse=True)
-def _sqlite_db(monkeypatch, tmp_path):
-    db_file = tmp_path / "parse_resilience.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
+def _db(monkeypatch, pg_db):
     get_settings.cache_clear()
     reset_engine()
-    init_db()
     yield
     reset_engine()
     get_settings.cache_clear()

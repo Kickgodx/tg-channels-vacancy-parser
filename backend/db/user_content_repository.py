@@ -37,10 +37,9 @@ def lock_user_registration(session: Session) -> None:
 
     Без этого две параллельные регистрации при пустой ``users`` обе видят
     ``count_users == 0``: два admin'а, а в закрытом режиме — два «первых».
-    Postgres — advisory lock до commit/rollback; SQLite (только тесты) — no-op.
+    Advisory lock держится до commit/rollback.
     """
-    if session.get_bind().dialect.name == "postgresql":
-        session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _REGISTRATION_LOCK_KEY})
+    session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _REGISTRATION_LOCK_KEY})
 
 
 def create_user(session: Session, *, email: str, password_hash: str, is_admin: bool = False) -> UserRow:

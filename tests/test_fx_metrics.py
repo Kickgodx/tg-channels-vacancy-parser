@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, date, datetime
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from tests.conftest import new_parse_run
 
 from backend.db import fx_repository as fx_repo
-from backend.db.base import Base
 from backend.db.repository import upsert_vacancies
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
 from backend.schemas import VacancyQuery
@@ -18,19 +15,6 @@ from tg_jobs_parser.config.schema import FxConfig
 from tg_jobs_parser.models.metrics import SalaryDisplayMeta
 from tg_jobs_parser.models.vacancy import Vacancy
 from tg_jobs_parser.utils.hashing import vacancy_content_id
-
-
-@pytest.fixture
-def db_session(tmp_path):
-    engine = create_engine(
-        f"sqlite+pysqlite:///{(tmp_path / 'fx.db').as_posix()}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
 
 
 def test_prepare_fx_uses_latest_rates_from_db_without_network(db_session, monkeypatch, tmp_path):
@@ -94,7 +78,7 @@ def test_metrics_avg_salary_in_rub(db_session, monkeypatch):
     fx_repo.upsert_rates(db_session, d, {"RUB": 1.0, "USD": 100.0})
     db_session.commit()
 
-    run_id = uuid.uuid4()
+    run_id = new_parse_run(db_session)
     t_rub = "Python dev 200k rub"
     t_usd = "Python dev 5k usd"
     v1 = Vacancy(

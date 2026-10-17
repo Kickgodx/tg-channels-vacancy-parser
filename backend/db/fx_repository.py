@@ -1,4 +1,4 @@
-"""Курсы валют в PostgreSQL / SQLite."""
+"""Курсы валют в Postgres."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from backend.db.models import ExchangeRateRow
@@ -47,9 +46,7 @@ def upsert_rates(
             "source": source,
             "fetched_at": now,
         }
-        dialect = session.get_bind().dialect.name
-        ins = pg_insert if dialect == "postgresql" else sqlite_insert
-        stmt = ins(ExchangeRateRow).values(**data)
+        stmt = pg_insert(ExchangeRateRow).values(**data)
         stmt = stmt.on_conflict_do_update(
             index_elements=["rate_date", "currency"],
             set_={
@@ -178,7 +175,7 @@ def sync_recent_days(session: Session, config: FxConfig, *, days: int | None = N
         after = len(get_rates(session, d))
         if after > before:
             total += after - before
-        # Коммит после каждого дня: иначе write-lock держится на все HTTP-запросы
-        # к ЦБ и на SQLite параллельные писатели падают с "database is locked".
+        # Коммит после каждого дня: иначе транзакция с блокировками строк курсов
+        # висела бы открытой на всё время HTTP-запросов к ЦБ.
         session.commit()
     return total

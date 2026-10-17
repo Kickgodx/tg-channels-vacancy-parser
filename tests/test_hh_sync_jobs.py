@@ -16,7 +16,7 @@ from backend.workers.recover_hh_sync import recover_stuck_hh_sync_jobs
 
 @pytest.fixture
 def db(api_client, monkeypatch):
-    """SQLite-схема из api_client; постановку в очередь записываем вместо запуска."""
+    """Схема из api_client; постановку в очередь записываем вместо запуска."""
     enqueued: list = []
     monkeypatch.setattr(
         hh_sync_job_service, "enqueue_hh_sync_job", lambda job_id, traceparent=None: enqueued.append(job_id)

@@ -33,14 +33,12 @@ def _utcnow() -> datetime:
 class ParseRunRow(Base):
     __tablename__ = "parse_runs"
     __table_args__ = (
-        # Один active parse: partial UNIQUE. Postgres — expression ((true));
-        # SQLite — (1). См. миграцию 015.
+        # Один active parse: partial UNIQUE по выражению ((true)). См. миграцию 015.
         Index(
             "uq_parse_runs_one_active",
             text("(true)"),
             unique=True,
             postgresql_where=text("status IN ('queued', 'running')"),
-            sqlite_where=text("status IN ('queued', 'running')"),
         ),
     )
 
@@ -82,14 +80,13 @@ class VacancyRow(Base):
 
     __tablename__ = "vacancies"
     __table_args__ = (
-        # Список по умолчанию: WHERE NOT duplicate AND archived IS NULL ORDER BY post_date DESC.
-        # На Postgres миграция 013 создаёт (post_date DESC NULLS LAST, id); здесь — portable вариант для SQLite/create_all.
+        # Список по умолчанию: WHERE NOT duplicate AND archived IS NULL
+        # ORDER BY post_date DESC NULLS LAST, id — как в миграции 013.
         Index(
             "ix_vacancies_active_post_date",
-            "post_date",
-            "id",
+            text("post_date DESC NULLS LAST"),
+            text("id"),
             postgresql_where=text("is_duplicate IS false AND archived_at IS NULL"),
-            sqlite_where=text("is_duplicate = 0 AND archived_at IS NULL"),
         ),
     )
 
@@ -102,10 +99,8 @@ class VacancyRow(Base):
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     cleaned_text: Mapped[str] = mapped_column(Text, nullable=False)
 
-    # Postgres — JSONB + GIN (миграция 019): фильтр по специализации идёт по индексу.
-    detected_specializations: Mapped[list[str]] = mapped_column(
-        JSON().with_variant(JSONB(), "postgresql"), default=list
-    )
+    # JSONB + GIN (миграция 019): фильтр по специализации идёт по индексу.
+    detected_specializations: Mapped[list[str]] = mapped_column(JSONB, default=list)
     detected_grade: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
     detected_salary_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     detected_salary_max: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -331,7 +326,6 @@ class HhSyncJobRow(Base):
             text("(true)"),
             unique=True,
             postgresql_where=text("status IN ('queued', 'running')"),
-            sqlite_where=text("status IN ('queued', 'running')"),
         ),
     )
 

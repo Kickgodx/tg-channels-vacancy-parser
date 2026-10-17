@@ -9,12 +9,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from backend.db import parse_run_repository as prr
 from backend.db import vacancy_repository as vr
-from backend.db.base import Base
 from backend.db.migrate import alembic_ini_path
 from backend.db.models import ParseRunRow, ParseRunVacancyRow, VacancyRow
 from backend.db.transfer import import_dump_file, write_dump_file
@@ -25,25 +24,9 @@ from tg_jobs_parser.models.vacancy import Vacancy
 FX_OFF = FxConfig(enabled=False)
 
 
-def _fk_engine(path):
-    engine = create_engine(f"sqlite+pysqlite:///{path.as_posix()}", connect_args={"check_same_thread": False})
-
-    # Как в Postgres: FK проверяются и каскадят.
-    @event.listens_for(engine, "connect")
-    def _fk_on(dbapi_conn, _record):
-        dbapi_conn.execute("PRAGMA foreign_keys=ON")
-
-    return engine
-
-
 @pytest.fixture
-def db(tmp_path):
-    engine = _fk_engine(tmp_path / "links.db")
-    Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
-    yield session
-    session.close()
-    engine.dispose()
+def db(db_session):
+    return db_session
 
 
 def _v(i: int) -> Vacancy:
@@ -127,14 +110,12 @@ def test_purged_run_takes_its_links_but_not_vacancies(db):
     assert db.get(VacancyRow, "v0001") is not None
 
 
-def test_migration_backfills_links_from_last_parse_run_id(tmp_path, monkeypatch):
-    path = tmp_path / "migrate.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{path.as_posix()}")
+def test_migration_backfills_links_from_last_parse_run_id(pg_empty_db):
     cfg = Config(str(alembic_ini_path()))
     cfg.attributes["configure_logger"] = False
     command.upgrade(cfg, "025_refresh_tokens")
 
-    engine = create_engine(f"sqlite+pysqlite:///{path.as_posix()}")
+    engine = create_engine(pg_empty_db)
     run_id = uuid.uuid4()
     with sessionmaker(bind=engine)() as s:
         s.add(ParseRunRow(id=run_id, status="completed", config_snapshot={}))

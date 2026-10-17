@@ -40,7 +40,6 @@ def upgrade() -> None:
     )
     op.create_index("ix_users_email", "users", ["email"], unique=True)
 
-    # batch-режим — SQLite не умеет ALTER TABLE ADD COLUMN с FK.
     with op.batch_alter_table("resumes") as batch:
         batch.add_column(sa.Column("user_id", sa.Integer(), nullable=True))
         batch.create_foreign_key("fk_resumes_user_id", "users", ["user_id"], ["id"], ondelete="CASCADE")

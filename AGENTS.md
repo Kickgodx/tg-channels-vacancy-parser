@@ -3,13 +3,21 @@
 ## Проверка изменений
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # ~10 с
-.venv/Scripts/python.exe -m pytest -n 8 -q     # параллельно (pytest-xdist), ~6 с
+.venv/Scripts/python.exe -m pytest -q          # ~3 мин; нужен Postgres (см. ниже)
+.venv/Scripts/python.exe -m pytest -n 8 -q     # параллельно (pytest-xdist), ~30 с
 .venv/Scripts/ruff.exe check .                 # lint (конфиг в pyproject.toml)
 cd frontend && npm run lint                    # oxlint (.oxlintrc.json)
 cd frontend && npm run build                   # tsc -b + vite build
 ```
 
+- Тесты идут на Postgres 16, как прод. По умолчанию `tests/conftest.py` сам поднимает
+  `postgres:16-alpine` через testcontainers (нужен запущенный Docker Desktop, `docker
+  compose up` не нужен). Альтернатива — `TEST_DATABASE_URL` на готовый сервер с правом
+  CREATEDB (например, compose-Postgres): тесты создают там свои базы `tgjobs_test_*` и
+  удаляют их после прогона. Каждый xdist-воркер получает свою базу с миграциями, перед
+  тестом — `TRUNCATE`. Фикстуры: `pg_db` (пустая схема + `DATABASE_URL`), `db_session`,
+  `api_client`, `pg_empty_db` (база без миграций — для тестов самих миграций). FK
+  проверяются: строки прогона/пользователя — через `new_parse_run` / `new_user` из conftest.
 - Виртуальное окружение — `.venv`; вызывать `.venv/Scripts/python.exe -m pip`,
   а не `.venv/Scripts/pip.exe` (последний указывает на устаревший путь).
 - Тесты офлайновые: `tests/conftest.py` подставляет `CONFIG_PATH` на конфиг с
@@ -38,10 +46,11 @@ cd frontend && npm run build                   # tsc -b + vite build
 
 Alembic-цепочка инкрементальная, `upgrade head` применяется при старте backend
 (`backend/db/migrate.py`). Новые ревизии просто продолжают цепочку — без
-`down -v`. Колонки с FK добавлять через `op.batch_alter_table` с **именованным**
-constraint: SQLite (тесты) не умеет `ALTER TABLE ADD COLUMN` с FK.
-`revision` id — **не длиннее 32 символов** (дефолт `alembic_version.version_num`);
-`migrate.py` дополнительно расширяет колонку до VARCHAR(64) на Postgres.
+`down -v`. БД — только Postgres: SQL пишется без веток под другие диалекты.
+Constraint'ы (FK, индексы) — с **явными именами**. Ошибка миграции останавливает
+старт (фолбека на `create_all` нет). `revision` id — **не длиннее 32 символов**
+(дефолт `alembic_version.version_num`); `migrate.py` дополнительно расширяет колонку
+до VARCHAR(64).
 
 ## Зависимости
 

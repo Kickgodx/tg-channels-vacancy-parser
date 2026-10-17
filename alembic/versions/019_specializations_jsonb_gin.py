@@ -24,8 +24,6 @@ _INDEX = "ix_vacancies_specializations_gin"
 
 def upgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name != "postgresql":
-        return  # SQLite (тесты): JSON как есть, фильтр идёт через json_each
     columns = {c["name"]: c["type"] for c in sa.inspect(bind).get_columns("vacancies")}
     if not isinstance(columns["detected_specializations"], JSONB):
         op.execute(
@@ -36,9 +34,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    if bind.dialect.name != "postgresql":
-        return
     op.execute(f"DROP INDEX IF EXISTS {_INDEX}")
     op.execute(
         "ALTER TABLE vacancies ALTER COLUMN detected_specializations TYPE json USING detected_specializations::json"

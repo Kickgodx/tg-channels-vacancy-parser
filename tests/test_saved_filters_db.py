@@ -4,29 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.orm import sessionmaker
 
 from backend.db import repository as repo
-from backend.db.base import Base
 from backend.db.models import VacancyRow
 from backend.db.vacancy_filters import apply_vacancy_filters
 from backend.schemas import VacancyQuery
-
-
-@pytest.fixture
-def db_session(tmp_path):
-    engine = create_engine(
-        f"sqlite+pysqlite:///{(tmp_path / 't.db').as_posix()}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
 
 
 def test_saved_filters_crud(db_session):
@@ -53,7 +37,6 @@ def test_fts_condition_compiles_for_postgresql():
     stmt = apply_vacancy_filters(
         select(VacancyRow.id),
         VacancyQuery(q="python разработчик"),
-        dialect="postgresql",
     )
     sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
     assert "to_tsvector" in sql
@@ -62,7 +45,7 @@ def test_fts_condition_compiles_for_postgresql():
     assert "russian" in sql
 
 
-def test_q_filter_falls_back_to_ilike_on_sqlite(db_session):
+def test_q_filter_uses_russian_fulltext_search(db_session):
     db_session.add_all(
         [
             VacancyRow(
@@ -83,6 +66,15 @@ def test_q_filter_falls_back_to_ilike_on_sqlite(db_session):
                 raw_text="Java backend engineer",
                 cleaned_text="Java backend engineer",
             ),
+            VacancyRow(
+                id="c",
+                source_post_key="ch-3",
+                source_channel="ch",
+                source_url="https://t.me/s/ch",
+                post_date=datetime(2026, 9, 1, tzinfo=UTC),
+                raw_text="Ищем опытных разработчиков на Go",
+                cleaned_text="Ищем опытных разработчиков на Go",
+            ),
         ]
     )
     db_session.commit()
@@ -90,3 +82,6 @@ def test_q_filter_falls_back_to_ilike_on_sqlite(db_session):
     items, total = repo.list_vacancies(db_session, VacancyQuery(q="python"))
     assert total == 1
     assert items[0].id == "a"
+    # Стемминг русской конфигурации: «разработчик» находит «разработчиков».
+    items, total = repo.list_vacancies(db_session, VacancyQuery(q="разработчик"))
+    assert [i.id for i in items] == ["c"]
