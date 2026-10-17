@@ -88,3 +88,6 @@ frontend/node_modules/
 .worktrees/
 docs/superpowers/
 docs/specs/
+
+# кэш инкрементальной сборки tsc -b, генерируется npm run build
+*.tsbuildinfo
