@@ -5,6 +5,7 @@
 ```bash
 .venv/Scripts/python.exe -m pytest -q          # ~3 мин; нужен Postgres (см. ниже)
 .venv/Scripts/python.exe -m pytest -n 8 -q     # параллельно (pytest-xdist), ~30 с
+.venv/Scripts/python.exe -m pytest -n 8 -q --cov --cov-report=term --cov-report=html  # + покрытие → htmlcov/index.html
 .venv/Scripts/ruff.exe check .                 # lint (конфиг в pyproject.toml)
 cd frontend && npm run lint                    # oxlint (.oxlintrc.json)
 cd frontend && npm run build                   # tsc -b + vite build

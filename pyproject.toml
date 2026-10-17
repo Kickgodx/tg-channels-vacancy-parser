@@ -42,7 +42,7 @@ dependencies = [
 [project.optional-dependencies]
 # Poetry: poetry install --extras telethon — опционально cryptg для ускорения Telethon на Windows
 # testcontainers: тесты сами поднимают postgres:16 в Docker, если не задан TEST_DATABASE_URL.
-dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0", "ruff>=0.14.0,<1.0.0", "fakeredis>=2.26.0", "testcontainers>=4.8.0"]
+dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0", "pytest-cov>=6.0.0", "ruff>=0.14.0,<1.0.0", "fakeredis>=2.26.0", "testcontainers>=4.8.0"]
 telethon = ["cryptg>=0.5.0"]
 
 [project.scripts]
@@ -62,6 +62,26 @@ addopts = "-m \"not llm\""
 markers = [
   "llm: live OpenRouter calls (needs OPENROUTER_API_KEY; not in default CI)",
 ]
+
+# Покрытие считается по запросу (`pytest --cov`), в addopts не включено — замедляет прогон.
+[tool.coverage.run]
+source = ["tg_jobs_parser", "backend"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+skip_empty = true
+precision = 1
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+  "^\\s*\\.\\.\\.$",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
 
 [tool.ruff]
 line-length = 120
