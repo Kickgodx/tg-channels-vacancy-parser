@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from backend.db.models import TelegramChannelCheckpointRow
 from tg_jobs_parser.parsers.base import ChannelCheckpoint
 
+CheckpointChanges = dict[str, tuple[ChannelCheckpoint | None, ChannelCheckpoint]]
+
 
 def load_channel_checkpoints(session: Session, channels: list[str]) -> dict[str, ChannelCheckpoint]:
     if not channels:
@@ -28,11 +30,15 @@ def save_channel_checkpoints(
     checkpoints: dict[str, ChannelCheckpoint],
     *,
     parse_run_id: uuid.UUID | None = None,
-) -> None:
-    """Upsert чекпоинтов. Вызывается в транзакции финализации ``completed``-прогона."""
+) -> CheckpointChanges:
+    """Upsert чекпоинтов. Вызывается в транзакции финализации ``completed``-прогона.
+
+    Возвращает изменившиеся каналы: ``канал → (прежний чекпоинт или None, новый)``.
+    """
     if not checkpoints:
-        return
+        return {}
     now = datetime.now(UTC)
+    changes: CheckpointChanges = {}
     existing = {
         r.channel: r
         for r in session.scalars(
@@ -44,8 +50,30 @@ def save_channel_checkpoints(
         if row is None:
             row = TelegramChannelCheckpointRow(channel=channel)
             session.add(row)
+            changes[channel] = (None, cp)
+        else:
+            old = ChannelCheckpoint(last_message_id=int(row.last_message_id), covered_from=row.covered_from)
+            if old != cp:
+                changes[channel] = (old, cp)
         row.last_message_id = cp.last_message_id
         row.covered_from = cp.covered_from
         row.parse_run_id = parse_run_id
         row.updated_at = now
     session.flush()
+    return changes
+
+
+def format_checkpoint_changes(changes: CheckpointChanges) -> str:
+    """``@chan 100→150 (с 2026-10-01)``; новый канал — ``@chan новый 150 (с …)``."""
+    parts = []
+    for channel, (old, new) in changes.items():
+        if old is None:
+            parts.append(f"@{channel} новый {new.last_message_id} (с {new.covered_from.isoformat()})")
+            continue
+        since = (
+            new.covered_from.isoformat()
+            if old.covered_from == new.covered_from
+            else f"{old.covered_from.isoformat()}→{new.covered_from.isoformat()}"
+        )
+        parts.append(f"@{channel} {old.last_message_id}→{new.last_message_id} (с {since})")
+    return ", ".join(parts)

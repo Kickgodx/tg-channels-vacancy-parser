@@ -9,7 +9,11 @@ from types import SimpleNamespace
 import pytest
 
 from backend.db import parse_run_repository as pr
-from backend.db.channel_checkpoint_repository import load_channel_checkpoints, save_channel_checkpoints
+from backend.db.channel_checkpoint_repository import (
+    format_checkpoint_changes,
+    load_channel_checkpoints,
+    save_channel_checkpoints,
+)
 from backend.db.session import init_db, reset_engine, session_scope
 from backend.settings import get_settings
 from backend.workers import parse_tasks
@@ -54,6 +58,21 @@ def test_repository_upserts():
     with session_scope() as session:
         save_channel_checkpoints(session, {"chan": CP_NEW, "other": CP_OLD})
     assert _stored() == {"chan": CP_NEW, "other": CP_OLD}
+
+
+def test_repository_returns_changes():
+    with session_scope() as session:
+        assert save_channel_checkpoints(session, {"chan": CP_OLD}) == {"chan": (None, CP_OLD)}
+    moved = ChannelCheckpoint(last_message_id=150, covered_from=date(2026, 10, 5))
+    with session_scope() as session:
+        changes = save_channel_checkpoints(session, {"chan": moved, "other": CP_OLD})
+    assert changes == {"chan": (CP_OLD, moved), "other": (None, CP_OLD)}
+    assert format_checkpoint_changes(changes) == (
+        "@chan 100→150 (с 2026-10-01→2026-10-05), @other новый 100 (с 2026-10-01)"
+    )
+    with session_scope() as session:
+        assert save_channel_checkpoints(session, {"chan": moved}) == {}  # те же значения — не изменение
+    assert format_checkpoint_changes({"chan": (CP_OLD, CP_NEW)}) == "@chan 100→150 (с 2026-10-01)"
 
 
 def test_completed_run_passes_and_saves_checkpoints(monkeypatch, run_id):

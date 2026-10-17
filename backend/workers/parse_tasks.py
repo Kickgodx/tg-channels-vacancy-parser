@@ -11,7 +11,11 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from backend.db import repository as repo
-from backend.db.channel_checkpoint_repository import load_channel_checkpoints, save_channel_checkpoints
+from backend.db.channel_checkpoint_repository import (
+    format_checkpoint_changes,
+    load_channel_checkpoints,
+    save_channel_checkpoints,
+)
 from backend.db.session import session_scope
 from backend.observability import (
     PARSE_RUNS_ACTIVE,
@@ -236,8 +240,11 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             if not repo.touch_parse_run_lease(session, run_id, lease_owner=lease_owner):
                 _mark_lease_lost()
                 return
-            save_channel_checkpoints(session, checkpoints, parse_run_id=run_id)
-        _LOG.info("Прогон %s: чекпоинт сдвинут — %s", run_id, ", ".join(f"@{c}" for c in checkpoints))
+            changes = save_channel_checkpoints(session, checkpoints, parse_run_id=run_id)
+        if changes:
+            _LOG.info("Прогон %s: чекпоинт сдвинут — %s", run_id, format_checkpoint_changes(changes))
+        else:
+            _LOG.info("Прогон %s: чекпоинт без изменений — %s", run_id, ", ".join(f"@{c}" for c in checkpoints))
 
     def persist_remaining(unique: list[Vacancy]) -> repo.VacancyUpsertStats:
         nonlocal upsert_totals
@@ -261,6 +268,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
         """
         nonlocal upsert_totals
         remaining = [v for v in res.vacancies_unique if v.id not in flushed_ids]
+        checkpoint_changes = {}
         with session_scope() as session:
             # Fenced UPDATE первым: проверяет lease до записи вакансий.
             if not repo.finalize_parse_run(
@@ -282,7 +290,14 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             if final_status == "completed":
                 # Чекпоинты двигаем только вместе с успешной финализацией: иначе
                 # следующий прогон пропустил бы посты, которые этот не сохранил.
-                save_channel_checkpoints(session, res.channel_checkpoints, parse_run_id=run_id)
+                checkpoint_changes = save_channel_checkpoints(session, res.channel_checkpoints, parse_run_id=run_id)
+        if checkpoint_changes:
+            # Обычно пусто: каналы уже сдвинуты по ходу прогона, финализация пишет те же значения.
+            _LOG.info(
+                "Прогон %s: чекпоинт сдвинут при финализации — %s",
+                run_id,
+                format_checkpoint_changes(checkpoint_changes),
+            )
         upsert_totals = totals
         flushed_ids.update(v.id for v in remaining)
         return totals
