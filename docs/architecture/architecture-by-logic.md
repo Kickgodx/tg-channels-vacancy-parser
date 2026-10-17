@@ -42,7 +42,8 @@ flowchart LR
 ```mermaid
 flowchart TB
   subgraph Import
-    I1["Текст из UI"] --> I2["ingestion MANUAL policy"] --> I3["UPSERT manual"]
+    I1["POST /vacancies/import"] --> I2["без LLM: ingestion MANUAL → 200"] --> I3["UPSERT manual"]
+    I1 --> I4["с LLM: llm_jobs kind=import → 202"] --> I5["llm-worker: ingestion MANUAL + LLM"] --> I3
   end
 
   subgraph HH["HH sync admin"]
@@ -77,5 +78,6 @@ flowchart TB
 
 - **JWT** — login/register; API Bearer + refresh-сессия в httpOnly cookie, SSE через одноразовый `?ticket=`
 - **Per-user** — resumes, saved_filters, matches, cover_letters, llm_jobs
-- **Shared** — vacancies, parse_runs, analytics, FX, AI cache
-- **Interactive LLM** — Task Queue (RQ) + Competing Consumers (`llm-worker`); Postgres = статус, Redis = очередь + pub/sub для SSE. Fallback `LLM_JOB_BACKEND=inprocess` для тестов. Scale: `--scale llm-worker=N`. Shared OpenRouter RPM across workers — follow-up (Redis token-bucket).
+- **Shared** (чтение — любой залогиненный, мутации — админ) — vacancies, analytics, FX, AI cache
+- **Admin-only** — parse_runs (`/runs/*`), ручной импорт, HH sync
+- **Interactive LLM** — Task Queue (RQ) + Competing Consumers (`llm-worker`); Postgres = статус, Redis = очередь + pub/sub для SSE. Fallback `LLM_JOB_BACKEND=inprocess` для тестов. Scale: `--scale llm-worker=N`. `ai.requests_per_minute` общий для всех процессов (окно в Redis, `backend/services/llm_rate_gate.py`).

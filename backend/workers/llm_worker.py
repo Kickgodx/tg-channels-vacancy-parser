@@ -7,11 +7,12 @@ from backend.workers.runner import run_rq_worker
 
 
 def _setup() -> None:
+    from backend.core_ports import register_core_ports
     from backend.observability import init_llm_model_series
-    from backend.services.llm_rate_gate import register_redis_rate_gate
 
+    # Ручной импорт идёт через AIEnrichmentService — без кэша LLM он не создаётся.
     # Реплики llm-worker делят один ai.requests_per_minute, а не умножают его.
-    register_redis_rate_gate()
+    register_core_ports()
     init_llm_model_series()
 
 

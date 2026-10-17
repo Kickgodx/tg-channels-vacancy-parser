@@ -43,7 +43,7 @@ class ParseRunRow(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -429,7 +429,8 @@ class AIExtractionCacheRow(Base):
 class TelegramChannelCheckpointRow(Base):
     """Чекпоинт инкрементальной вычитки канала: прочитано всё с ``covered_from`` по ``last_message_id``.
 
-    Пишется вместе с финализацией ``completed``-прогона (см. ``ChannelCheckpoint``).
+    Пишется сразу, как только посты канала разобраны и записаны в БД, пока ни один
+    пост прогона не потерян из-за LLM (``checkpoint_sink`` в ``run_parse``).
     """
 
     __tablename__ = "telegram_channel_checkpoints"

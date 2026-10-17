@@ -10,8 +10,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from datetime import UTC, date, datetime
-from pathlib import Path
+from datetime import date
 from typing import TYPE_CHECKING
 
 from opentelemetry import context as otel_context
@@ -40,8 +39,6 @@ from tg_jobs_parser.parse_progress import (
     PROGRESS_PREVIEW_LIMIT,
     ParseProgressCallback,
     ParseProgressSnapshot,
-    clear_partial_batches,
-    save_partial_batch,
 )
 from tg_jobs_parser.parsers.base import BaseChannelParser, ChannelCallback, ChannelCheckpoint, RawPost
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
@@ -437,13 +434,6 @@ def run_parse(
     channels_fetched = 0
     candidates: list[Vacancy] = []
     batch_step = progress_every_n_posts or config.parser.progress_batch_posts
-    partial_dir: Path | None = None
-    partial_run_id = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    if config.output.save_progress_batches:
-        partial_dir = Path(config.output.directory) / config.output.partial_batches_subdirectory
-        removed = clear_partial_batches(partial_dir)
-        if removed:
-            _LOG.info("Partial-батчи: удалено %s старых файлов из %s", removed, partial_dir)
 
     channels_unique: list[str] = []
     for ch in config.sources.channels:
@@ -554,19 +544,18 @@ def run_parse(
             )
 
         def _emit_progress(*, phase: str | None = None) -> None:
-            if not progress_callback and not partial_dir:
+            if not progress_callback:
                 return
             rl = ai_service._client.rate_limiter if ai_service is not None else None
             # В UI/SSE отдаём уникальные (инкрементальный дедуп уже прогнан):
             # candidates могут делить один content-id → React key warning.
-            # Превью нужен только хвост; полный список копируем лишь для partial-батчей
-            # (опция отладки) — иначе каждый тик копировал бы все уникальные прогона.
+            # Превью нужен только хвост — копия всех уникальных на каждом тике не нужна.
             unique_so_far = deduplicator.unique
             snap = ParseProgressSnapshot(
                 posts_processed=posts_processed,
                 posts_total=posts_fetched,
                 vacancies_found=len(unique_so_far),
-                vacancies=list(unique_so_far) if partial_dir else unique_so_far[-PROGRESS_PREVIEW_LIMIT:],
+                vacancies=unique_so_far[-PROGRESS_PREVIEW_LIMIT:],
                 phase=phase or ("processing" if fetch.done.is_set() else "fetching"),
                 channels_total=len(channels_unique),
                 channels_fetched=channels_fetched,
@@ -576,11 +565,7 @@ def run_parse(
                 ai_tokens_out=ai_service.stats.tokens_out if ai_service else 0,
                 ai_skipped_score=ai_service.stats.skipped_score if ai_service else 0,
             )
-            if partial_dir and unique_so_far:
-                p = save_partial_batch(partial_dir, snap, run_id=partial_run_id)
-                snap.extra["partial_path"] = str(p)
-            if progress_callback:
-                progress_callback(snap)
+            progress_callback(snap)
 
         # Пост-обработка: regex, с LLM — в пуле потоков. Только regex под GIL пул
         # не ускоряет: разбираем в этом потоке, пока фоновый читает каналы.

@@ -78,7 +78,6 @@ sources:
 ai:
   enabled: true
   mode: primary
-  provider: openrouter
   # id из llm_models.yaml; fallback — default_fallbacks из того же файла (в UI можно сменить)
   model: anthropic/claude-haiku-5.5
   # Матчинг резюме ↔ вакансия идёт отдельной моделью: здесь уместна reasoning
@@ -213,8 +212,3 @@ dictionaries:
   exclude_keywords: null
   technologies: []
   work_format_synonyms: {}
-
-output:
-  directory: output
-  save_progress_batches: false
-  partial_batches_subdirectory: partial

@@ -33,7 +33,9 @@ from backend.services.llm_job_service import KIND_MATCH, llm_job_runner
 from backend.services.llm_rate_gate import RedisWindowRateGate
 from backend.settings import get_settings
 from backend.workers import hh_sync_tasks, hh_worker, liveness, llm_worker, parse_tasks, parse_worker, runner
-from tg_jobs_parser.ai import rate_limit
+from tg_jobs_parser.ai import cache_registry, rate_limit
+from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
+from tg_jobs_parser.ai.schema import VacancyAIExtraction
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.parse_result import ParseResult
 
@@ -58,6 +60,9 @@ def fake_redis(pg_db, monkeypatch):
     monkeypatch.setattr(rq_conn, "get_redis_connection", lambda force_new=False: server)
     # _setup воркеров регистрирует глобальный rate gate — вернуть прежний после теста.
     monkeypatch.setattr(rate_limit, "_global_gate", rate_limit._global_gate)
+    # conftest регистрирует Postgres-кэш LLM на всю сессию — это скрывало воркер,
+    # который его не регистрирует. Здесь адаптер обязан подключить сам _setup воркера.
+    monkeypatch.setattr(cache_registry, "_postgres_factory", None)
     _executed.clear()
     yield server
     rq_conn.reset_redis_connection()
@@ -157,8 +162,9 @@ def test_parse_worker_runs_queued_parse_run(fake_redis, worker_process, monkeypa
         assert row.attempts == 1
     assert len(calls) == 1
     assert Queue(rq_conn.PARSE_QUEUE_NAME, connection=fake_redis).count == 0
-    # _setup: парсинг ходит в LLM — общий лимит запросов через Redis.
+    # _setup: парсинг ходит в LLM — общий лимит запросов через Redis и кэш LLM в Postgres.
     assert isinstance(rate_limit._global_gate, RedisWindowRateGate)
+    assert cache_registry.get_postgres_cache_factory() is not None
     _assert_process_lifecycle(
         worker_process,
         role="parse-worker",
@@ -202,12 +208,64 @@ def test_llm_worker_runs_queued_match_job(fake_redis, worker_process, monkeypatc
     assert Queue(rq_conn.LLM_QUEUE_NAME, connection=fake_redis).count == 0
     # Реплики llm-worker делят один лимит запросов, а не умножают его.
     assert isinstance(rate_limit._global_gate, RedisWindowRateGate)
+    assert cache_registry.get_postgres_cache_factory() is not None
     _assert_process_lifecycle(
         worker_process,
         role="llm-worker",
         queue=rq_conn.LLM_QUEUE_NAME,
         metrics_port=get_settings().llm_worker_metrics_port,
     )
+
+
+def test_llm_worker_runs_import_with_llm(fake_redis, worker_process, monkeypatch, default_test_config):
+    """Импорт с LLM в llm-worker идёт через настоящий AIEnrichmentService (Postgres-кэш).
+
+    Регрессия: воркер не регистрировал Postgres-кэш LLM, сервис не создавался, и импорт
+    молча разбирал тексты правилами — без проверки «это вакансия?».
+    """
+    from backend.db.models import AIExtractionCacheRow
+    from backend.services import import_service
+    from backend.services.llm_job_service import KIND_IMPORT
+    from tg_jobs_parser.config.loader import load_config
+
+    cfg = load_config(default_test_config)
+    ai_cfg = cfg.model_copy(
+        update={"ai": cfg.ai.model_copy(update={"enabled": True, "use_cache": True, "cache_backend": "postgres"})}
+    )
+    monkeypatch.setattr(import_service, "load_config", lambda *a, **k: ai_cfg)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    llm_calls: list[str] = []
+
+    def fake_extract(self, *, text, search_context):
+        llm_calls.append(text)
+        return VacancyAIExtraction(is_job_post=True, confidence=0.9), LLMUsage(model="test/model")
+
+    monkeypatch.setattr(OpenRouterClient, "extract_with_fallback", fake_extract)
+    text = (
+        "Вакансия: Senior Python-разработчик в компанию Acme.\n"
+        "Зарплата: от 250 000 до 350 000 руб. на руки.\n"
+        "Контакт: @recruiter_acme"
+    )
+    with session_scope() as session:
+        user_id = new_user(session)
+    job_id = llm_job_runner.enqueue(
+        user_id=user_id, kind=KIND_IMPORT, params=import_service.job_params([text], None)
+    ).job_id
+
+    llm_worker.main()
+
+    with session_scope() as session:
+        row = lj.get_llm_job(session, job_id)
+        assert row.status == "done", row.error_message
+        assert row.result["ai_enabled"] is True, row.result
+        assert row.result["warning"] is None, row.result
+        (item,) = row.result["items"]
+        assert item["status"] == "created"
+        vacancy = session.get(VacancyRow, item["vacancy_id"])
+        assert vacancy.extraction_source != "rules"
+        # Ответ модели лёг в Postgres-кэш — адаптер подключён в процессе воркера.
+        assert session.query(AIExtractionCacheRow).count() == 1
+    assert len(llm_calls) == 1
 
 
 def test_hh_worker_runs_queued_sync_job(fake_redis, worker_process, monkeypatch):

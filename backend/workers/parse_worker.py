@@ -7,13 +7,11 @@ from backend.workers.runner import run_rq_worker
 
 
 def _setup() -> None:
-    from backend.db.ai_cache import register_db_ai_cache
+    from backend.core_ports import register_core_ports
     from backend.observability import init_llm_model_series
-    from backend.services.llm_rate_gate import register_redis_rate_gate
 
-    # Парсинг с ai.cache_backend=postgres идёт в этом процессе, не в API.
-    register_db_ai_cache()
-    register_redis_rate_gate()
+    # Парсинг (и его LLM-разбор) идёт в этом процессе, не в API.
+    register_core_ports()
     init_llm_model_series()
 
 
