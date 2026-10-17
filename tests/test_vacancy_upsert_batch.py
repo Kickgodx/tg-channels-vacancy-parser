@@ -61,7 +61,7 @@ def test_batch_insert_uses_one_statement_per_chunk(db):
     assert db.scalar(select(VacancyRow).where(VacancyRow.id == f"v{n - 1:04d}").with_only_columns(VacancyRow.id))
 
 
-def test_existing_rows_update_metadata_but_keep_extracted_fields(db):
+def test_existing_rows_take_new_extraction_and_metadata(db):
     first_run, second_run = new_parse_run(db), new_parse_run(db)
     old = datetime(2026, 9, 1, tzinfo=UTC)
     vr.upsert_vacancies(db, [_v(1, post_date=old), _v(2, post_date=old)], parse_run_id=first_run, fx_config=FX_OFF)
@@ -80,7 +80,7 @@ def test_existing_rows_update_metadata_but_keep_extracted_fields(db):
     assert (stats.inserted, stats.updated_existing) == (1, 2)
     rows = {r.id: r for r in db.scalars(select(VacancyRow))}
     r1, r2 = rows["v0001"], rows["v0002"]
-    assert r1.detected_grade == "middle"  # извлечённые поля не трогаются
+    assert r1.detected_grade == "senior"  # LLM-разбор поверх rules заменяет поля (C1)
     assert (r1.ai_notes, r1.extraction_source) == ("new notes", "ai")
     assert r1.last_parse_run_id == second_run
     assert r1.post_date.replace(tzinfo=UTC) == reposted and r1.archived_at is None

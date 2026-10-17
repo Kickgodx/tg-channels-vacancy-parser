@@ -27,6 +27,7 @@ def _vac(
     company: str | None = None,
     parsed_at: datetime | None = None,
     post_date: datetime | None = None,
+    **extraction,
 ) -> Vacancy:
     return Vacancy(
         id=vacancy_content_id(cleaned),
@@ -39,6 +40,7 @@ def _vac(
         cleaned_text=cleaned,
         company=company,
         parsed_at=parsed_at or datetime.now(UTC),
+        **extraction,
     )
 
 
@@ -60,9 +62,75 @@ def test_upsert_sets_updated_at(db_session):
 
     row = db_session.get(VacancyRow, vacancy_content_id(text))
     assert row is not None
-    assert row.company is None
+    # rules поверх rules: разбор обновляется (правила могли поменяться)
+    assert row.company == "Acme"
     assert row.last_parse_run_id == run_id2
     assert row.source_post_key == "chan-1"
+
+
+def _upsert_twice(db_session, first: dict, second: dict) -> VacancyRow:
+    text = "Senior Python backend, remote, 300-400k"
+    upsert_vacancies(db_session, [_vac(cleaned=text, source_post_key="ch-1", **first)], parse_run_id=None)
+    db_session.commit()
+    run_id = new_parse_run(db_session)
+    upsert_vacancies(db_session, [_vac(cleaned=text, source_post_key="ch-2", **second)], parse_run_id=run_id)
+    db_session.commit()
+    row = db_session.get(VacancyRow, vacancy_content_id(text))
+    db_session.refresh(row)
+    assert row.last_parse_run_id == run_id
+    return row
+
+
+_RULES = dict(extraction_source="rules", detected_grade="unknown", company=None, vacancy_score=3)
+_AI_OLD = dict(
+    extraction_source="ai",
+    detected_grade="middle",
+    company="OldCo",
+    detected_salary_min=300_000.0,
+    detected_salary_max=400_000.0,
+    detected_salary_avg=350_000.0,
+    salary_currency="RUB",
+    ai_confidence=0.6,
+    ai_notes="old model",
+    vacancy_score=5,
+)
+_AI_NEW = dict(
+    extraction_source="ai",
+    detected_grade="senior",
+    company="Acme",
+    technologies=["python"],
+    ai_confidence=0.9,
+    ai_notes="new model",
+    vacancy_score=5,
+)
+
+
+@pytest.mark.parametrize("first", [_RULES, _AI_OLD], ids=["over-rules", "over-old-ai"])
+def test_upsert_ai_reextraction_replaces_extracted_fields(db_session, first):
+    """Новый LLM-разбор (смена модели/промпта) заменяет поля целиком, а не только метаданные."""
+    row = _upsert_twice(db_session, first, _AI_NEW)
+    assert row.extraction_source == "ai"
+    assert row.detected_grade == "senior"
+    assert row.company == "Acme"
+    assert row.technologies == ["python"]
+    assert row.ai_notes == "new model"
+    assert row.ai_confidence == 0.9
+    # поле, которого нет в новом разборе, не остаётся от старого
+    assert row.detected_salary_min is None
+    assert row.detected_salary_avg is None
+    assert row.salary_currency is None
+
+
+def test_upsert_rules_does_not_overwrite_ai_extraction(db_session):
+    """Прогон без AI не откатывает LLM-разбор к regex и не стирает AI-метаданные."""
+    row = _upsert_twice(db_session, _AI_OLD, _RULES)
+    assert row.extraction_source == "ai"
+    assert row.detected_grade == "middle"
+    assert row.company == "OldCo"
+    assert row.detected_salary_avg == 350_000.0
+    assert row.ai_notes == "old model"
+    assert row.ai_confidence == 0.6
+    assert row.vacancy_score == 5
 
 
 def test_upsert_long_required_experience(db_session):

@@ -19,6 +19,8 @@ export default function ResumesPage() {
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["resumes"] });
     void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
+    // Смена текста резюме удаляет на бэкенде его матчи и письма.
+    void queryClient.invalidateQueries({ queryKey: ["cover-letter"] });
   };
 
   const closeForm = () => {

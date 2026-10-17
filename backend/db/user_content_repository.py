@@ -120,18 +120,24 @@ def update_resume(
         return None
     if name is not None:
         row.name = name
-    if text is not None:
+    if text is not None and text != row.text:
         row.text = text
+        # Матчи и письма — кэш по старому тексту: без сброса POST match вернёт его с cached=true.
+        _delete_resume_llm_results(session, resume_id)
     session.flush()
     return row
+
+
+def _delete_resume_llm_results(session: Session, resume_id: int) -> None:
+    session.query(VacancyMatchRow).filter(VacancyMatchRow.resume_id == resume_id).delete()
+    session.query(CoverLetterRow).filter(CoverLetterRow.resume_id == resume_id).delete()
 
 
 def delete_resume(session: Session, resume_id: int, user_id: int | None = None) -> bool:
     row = session.get(ResumeRow, resume_id)
     if row is None or (user_id is not None and row.user_id != user_id):
         return False
-    session.query(VacancyMatchRow).filter(VacancyMatchRow.resume_id == resume_id).delete()
-    session.query(CoverLetterRow).filter(CoverLetterRow.resume_id == resume_id).delete()
+    _delete_resume_llm_results(session, resume_id)
     session.delete(row)
     session.flush()
     return True
