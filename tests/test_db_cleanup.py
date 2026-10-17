@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from backend.db import vacancy_repository
 from backend.db.models import (
     AIExtractionCacheRow,
+    ExchangeRateRow,
     HhSyncJobRow,
     IdempotencyKeyRow,
     LlmJobRow,
@@ -167,3 +168,48 @@ def test_purge_old_hh_sync_jobs_keeps_active_and_recent():
 
     assert stats.hh_sync_jobs == 2
     assert _count(HhSyncJobRow) == 2
+
+
+def _rate(days_ago: int, currency: str = "USD") -> ExchangeRateRow:
+    return ExchangeRateRow(rate_date=NOW.date() - timedelta(days=days_ago), currency=currency, rate_to_rub=90.0)
+
+
+def _rate_ages() -> list[int]:
+    with session_scope() as session:
+        dates = session.scalars(select(ExchangeRateRow.rate_date).distinct())
+        return sorted((NOW.date() - d).days for d in dates)
+
+
+def test_purges_old_exchange_rates():
+    with session_scope() as session:
+        session.add_all([_rate(0), _rate(0, "EUR"), _rate(59), _rate(61), _rate(61, "EUR"), _rate(200)])
+
+    stats = purge_service_tables(RetentionConfig(exchange_rates_ttl_days=60), now=NOW)
+
+    assert stats.exchange_rates == 3
+    assert _rate_ages() == [0, 59]
+
+
+def test_exchange_rates_keep_latest_date_and_startup_sync_window():
+    with session_scope() as session:
+        session.add_all([_rate(100), _rate(100, "EUR"), _rate(150)])  # ЦБ давно недоступен
+
+    stats = purge_service_tables(RetentionConfig(exchange_rates_ttl_days=60), now=NOW)
+    assert stats.exchange_rates == 1
+    assert _rate_ages() == [100]  # последняя дата — единственный источник курса
+
+    with session_scope() as session:
+        session.add_all([_rate(0), _rate(80)])
+    stats = purge_service_tables(RetentionConfig(exchange_rates_ttl_days=60), fx_sync_days=90, now=NOW)
+    assert stats.exchange_rates == 2  # 100 дней > окна 90; 80 — внутри окна догрузки
+    assert _rate_ages() == [0, 80]
+
+
+def test_exchange_rates_zero_ttl_keeps_all():
+    with session_scope() as session:
+        session.add_all([_rate(0), _rate(1000)])
+
+    stats = purge_service_tables(RetentionConfig(exchange_rates_ttl_days=0), now=NOW)
+
+    assert stats.exchange_rates == 0
+    assert _rate_ages() == [0, 1000]

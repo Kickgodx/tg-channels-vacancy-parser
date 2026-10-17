@@ -165,6 +165,8 @@ retention:
   # Очистка служебных таблиц (раз в час): завершённые прогоны и LLM-джобы старше N дней. 0 — хранить.
   parse_runs_ttl_days: 180
   llm_jobs_ttl_days: 30
+  # Курсы валют старше N дней (последняя дата и окно fx.sync_days_on_startup остаются). 0 — хранить.
+  exchange_rates_ttl_days: 60
 
 hh:
   enabled: true

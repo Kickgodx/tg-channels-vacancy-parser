@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -121,6 +121,28 @@ def ensure_latest_rates(
     today = datetime.now(UTC).date()
     ensure_rates(session, today, config)
     return get_latest_rates(session)
+
+
+def purge_old_rates(session: Session, *, older_than: date, limit: int = 1000) -> int:
+    """Удалить до ``limit`` курсов с датой раньше ``older_than``.
+
+    Читается только последняя дата (``get_latest_rates``) — история нужна лишь для
+    стартовой догрузки. Последняя дата остаётся всегда, даже если она старше
+    ``older_than`` (ЦБ долго недоступен): без неё зарплаты в ₽ не посчитать.
+    """
+    latest = get_latest_rate_date(session)
+    if latest is None:
+        return 0
+    cutoff = min(older_than, latest)
+    old = (
+        select(ExchangeRateRow.rate_date, ExchangeRateRow.currency)
+        .where(ExchangeRateRow.rate_date < cutoff)
+        .limit(limit)
+    )
+    result = session.execute(
+        delete(ExchangeRateRow).where(tuple_(ExchangeRateRow.rate_date, ExchangeRateRow.currency).in_(old))
+    )
+    return int(result.rowcount or 0)
 
 
 def refresh_rates_from_api(session: Session, config: FxConfig) -> tuple[date, dict[str, float], int]:

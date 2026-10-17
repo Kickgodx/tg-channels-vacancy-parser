@@ -1,7 +1,7 @@
 """Периодическая очистка служебных таблиц (вызывается из hourly-потока backend).
 
 Без неё растут: просроченный кэш LLM (уходил только при чтении того же ключа) и кэш
-от прежних версий промпта,
+от прежних версий промпта, старые курсы валют,
 завершённые LLM-джобы, ключи идемпотентности и журнал прогонов. Удаление — пачками
 в отдельных транзакциях, чтобы не держать длинные блокировки.
 """
@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from backend.db import ai_cache_repository as ai_cache_repo
+from backend.db import fx_repository as fx_repo
 from backend.db import hh_sync_job_repository as hh_sync_repo
 from backend.db import idempotency_repository as idem_repo
 from backend.db import llm_job_repository as llm_repo
@@ -40,6 +41,7 @@ class CleanupStats:
     parse_runs: int = 0
     hh_sync_jobs: int = 0
     refresh_tokens: int = 0
+    exchange_rates: int = 0
 
     @property
     def total(self) -> int:
@@ -50,6 +52,7 @@ class CleanupStats:
             + self.parse_runs
             + self.hh_sync_jobs
             + self.refresh_tokens
+            + self.exchange_rates
         )
 
 
@@ -64,8 +67,17 @@ def _purge_in_batches(purge: Callable[[Session, int], int], *, batch: int = _BAT
     return total
 
 
-def purge_service_tables(retention: RetentionConfig, *, now: datetime | None = None) -> CleanupStats:
-    """Один проход очистки. Ошибка одной таблицы не мешает остальным."""
+def purge_service_tables(
+    retention: RetentionConfig,
+    *,
+    fx_sync_days: int = 0,
+    now: datetime | None = None,
+) -> CleanupStats:
+    """Один проход очистки. Ошибка одной таблицы не мешает остальным.
+
+    ``fx_sync_days`` — ``fx.sync_days_on_startup``: курсы из этого окна не удаляются,
+    иначе каждый старт backend заново качал бы их из ЦБ.
+    """
     now = now or datetime.now(UTC)
     stats = CleanupStats()
 
@@ -86,6 +98,10 @@ def purge_service_tables(retention: RetentionConfig, *, now: datetime | None = N
         steps.append(
             ("hh_sync_jobs", lambda s, n: hh_sync_repo.purge_old_hh_sync_jobs(s, older_than=runs_cutoff, limit=n))
         )
+
+    if retention.exchange_rates_ttl_days > 0:
+        fx_cutoff = now.date() - timedelta(days=max(retention.exchange_rates_ttl_days, fx_sync_days))
+        steps.append(("exchange_rates", lambda s, n: fx_repo.purge_old_rates(s, older_than=fx_cutoff, limit=n)))
 
     for name, purge in steps:
         try:

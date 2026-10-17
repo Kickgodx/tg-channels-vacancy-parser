@@ -77,12 +77,13 @@ def _cleanup_expired_vacancies() -> None:
 
 
 def _periodic_cleanup() -> None:
-    """TTL вакансий и очистка служебных таблиц (кэш LLM, LLM-джобы, idempotency, прогоны)."""
+    """TTL вакансий и очистка служебных таблиц (кэш LLM, LLM-джобы, idempotency, прогоны, курсы)."""
     _cleanup_expired_vacancies()
     try:
         from backend.services.db_cleanup import purge_service_tables
 
-        purge_service_tables(load_config(get_settings().config_path).retention)
+        cfg = load_config(get_settings().config_path)
+        purge_service_tables(cfg.retention, fx_sync_days=cfg.fx.sync_days_on_startup)
     except Exception as e:
         logging.getLogger(__name__).warning("Очистка служебных таблиц не выполнена: %s", e)
 

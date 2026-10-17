@@ -552,6 +552,15 @@ class RetentionConfig(BaseModel):
             "отдельно и не удаляются. 0 — хранить всегда."
         ),
     )
+    exchange_rates_ttl_days: int = Field(
+        default=60,
+        ge=0,
+        description=(
+            "Через сколько дней удалять курсы валют из exchange_rates (по rate_date). Пересчёт в ₽ "
+            "берёт только последнюю дату — она остаётся всегда; окно fx.sync_days_on_startup "
+            "тоже не удаляется. 0 — хранить всегда."
+        ),
+    )
 
 
 DEFAULT_HH_SEARCH_TEXT = (
