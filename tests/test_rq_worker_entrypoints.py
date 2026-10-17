@@ -1,0 +1,341 @@
+"""RQ-воркеры целиком: entrypoint ``main()`` → ``run_rq_worker`` → LivenessWorker на fakeredis.
+
+Сервис ставит джобу в очередь (backend ``rq``), воркер забирает её из своей очереди и
+выполняет. Так проверяется, что очередь в entrypoint совпадает с очередью enqueue и что
+setup процесса (rate gate, recover на старте) не падает. Побочные эффекты процесса —
+логирование, .env, порт /metrics, трассировка, watchdog — подменены; ``work()`` идёт в
+режиме ``burst`` (выйти, когда очередь пуста), иначе блокировал бы тест.
+"""
+
+from __future__ import annotations
+
+import os
+import threading
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
+import fakeredis
+import pytest
+from rq import Queue
+from tests.conftest import new_user
+
+from backend.config_builder import build_config
+from backend.db import hh_sync_job_repository as hh_jobs
+from backend.db import llm_job_repository as lj
+from backend.db import parse_run_repository as pr
+from backend.db.models import ResumeRow, VacancyRow
+from backend.db.session import session_scope
+from backend.queue import rq_conn
+from backend.schemas import RunCreateRequest
+from backend.services import hh_sync_job_service, match_service, run_service
+from backend.services.hh_sync_window import ResolvedHhSearchWindow
+from backend.services.llm_job_service import KIND_MATCH, llm_job_runner
+from backend.services.llm_rate_gate import RedisWindowRateGate
+from backend.settings import get_settings
+from backend.workers import hh_sync_tasks, hh_worker, liveness, llm_worker, parse_tasks, parse_worker, runner
+from tg_jobs_parser.ai import rate_limit
+from tg_jobs_parser.models.metrics import MetricsSummary
+from tg_jobs_parser.models.parse_result import ParseResult
+
+_executed: list[str] = []
+
+
+def record_job(value: str) -> str:
+    """Джоба для тестов ``run_rq_worker``: RQ импортирует её по dotted path."""
+    _executed.append(value)
+    return value
+
+
+@pytest.fixture
+def fake_redis(pg_db, monkeypatch):
+    """Все три типа джоб — через RQ на общем fakeredis."""
+    server = fakeredis.FakeStrictRedis()
+    for env in ("PARSE_JOB_BACKEND", "LLM_JOB_BACKEND", "HH_SYNC_JOB_BACKEND"):
+        monkeypatch.setenv(env, "rq")
+    monkeypatch.setenv("REDIS_URL", "redis://fake:6379/0")
+    get_settings.cache_clear()
+    rq_conn.reset_redis_connection()
+    monkeypatch.setattr(rq_conn, "get_redis_connection", lambda force_new=False: server)
+    # _setup воркеров регистрирует глобальный rate gate — вернуть прежний после теста.
+    monkeypatch.setattr(rate_limit, "_global_gate", rate_limit._global_gate)
+    _executed.clear()
+    yield server
+    rq_conn.reset_redis_connection()
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def worker_process(monkeypatch):
+    """Подменить побочные эффекты процесса воркера; вернуть запись того, что он сделал."""
+    rec = SimpleNamespace(
+        pool_role=None,
+        metrics_ports=[],
+        tracing_shutdowns=0,
+        recover_stop=None,
+        recover_interval=None,
+        watchdog_stop=None,
+        watchdog_seconds=None,
+        queues=None,
+        worker_name=None,
+    )
+
+    def shutdown_tracing() -> None:
+        rec.tracing_shutdowns += 1
+
+    def start_periodic_recover(fn, *, interval_seconds, name):
+        rec.recover_interval = interval_seconds
+        rec.recover_stop = threading.Event()
+        return rec.recover_stop
+
+    def start_watchdog(stall_seconds, *, name):
+        rec.watchdog_seconds = stall_seconds
+        rec.watchdog_stop = None if stall_seconds <= 0 else threading.Event()
+        return rec.watchdog_stop
+
+    original_work = liveness.LivenessWorker.work
+
+    def burst_work(self, *args, **kwargs):
+        rec.queues = self.queue_names()
+        rec.worker_name = self.name
+        return original_work(self, burst=True, with_scheduler=False)
+
+    monkeypatch.setattr(runner, "setup_logging", lambda: None)
+    monkeypatch.setattr(runner, "try_load_dotenv", lambda: None)
+    monkeypatch.setattr(runner, "setup_tracing", lambda app, settings: False)
+    monkeypatch.setattr(runner, "shutdown_tracing", shutdown_tracing)
+    monkeypatch.setattr("backend.db.session.set_pool_role", lambda role: setattr(rec, "pool_role", role))
+    monkeypatch.setattr("prometheus_client.start_http_server", lambda port: rec.metrics_ports.append(port))
+    monkeypatch.setattr("backend.workers.recover_loop.start_periodic_recover", start_periodic_recover)
+    monkeypatch.setattr(liveness, "start_watchdog", start_watchdog)
+    monkeypatch.setattr(liveness.LivenessWorker, "work", burst_work)
+    # runner делает setdefault; setenv + delenv — чтобы monkeypatch убрал значение после теста.
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "x")
+    monkeypatch.delenv("OTEL_SERVICE_NAME")
+    return rec
+
+
+def _assert_process_lifecycle(rec, *, role: str, queue: str, metrics_port: int) -> None:
+    assert rec.pool_role == role
+    assert rec.queues == [queue]
+    assert rec.metrics_ports == [metrics_port]
+    assert os.environ["OTEL_SERVICE_NAME"] == f"tg-jobs-parser-{role}"
+    assert rec.recover_interval == get_settings().job_recover_interval_seconds
+    assert rec.watchdog_seconds == get_settings().worker_stall_exit_seconds
+    # После выхода из work() фоновые потоки остановлены, трассировка сброшена.
+    assert rec.recover_stop.is_set()
+    assert rec.watchdog_stop.is_set()
+    assert rec.tracing_shutdowns == 1
+
+
+# --- entrypoint'ы: enqueue сервисом → main() воркера выполняет ---
+
+
+def test_parse_worker_runs_queued_parse_run(fake_redis, worker_process, monkeypatch):
+    calls: list = []
+
+    def fake_run_parse(config, **kwargs):
+        calls.append(config)
+        return ParseResult(
+            run_params={},
+            posts_fetched=0,
+            vacancies_all=[],
+            vacancies_unique=[],
+            parse_warnings="",
+            metrics=MetricsSummary(),
+        )
+
+    monkeypatch.setattr(parse_tasks, "run_parse", fake_run_parse)
+    request = RunCreateRequest()
+    run_id = run_service.start_parse_run(build_config(get_settings().config_path, request), request)
+    assert Queue(rq_conn.PARSE_QUEUE_NAME, connection=fake_redis).count == 1
+
+    parse_worker.main()
+
+    with session_scope() as session:
+        row = pr.get_parse_run(session, run_id)
+        assert row.status == "completed", row.error_message
+        assert row.attempts == 1
+    assert len(calls) == 1
+    assert Queue(rq_conn.PARSE_QUEUE_NAME, connection=fake_redis).count == 0
+    # _setup: парсинг ходит в LLM — общий лимит запросов через Redis.
+    assert isinstance(rate_limit._global_gate, RedisWindowRateGate)
+    _assert_process_lifecycle(
+        worker_process,
+        role="parse-worker",
+        queue=rq_conn.PARSE_QUEUE_NAME,
+        metrics_port=get_settings().parse_worker_metrics_port,
+    )
+
+
+def test_llm_worker_runs_queued_match_job(fake_redis, worker_process, monkeypatch):
+    calls: list[dict] = []
+    monkeypatch.setattr(match_service, "match_single", lambda **kwargs: calls.append(kwargs))
+    with session_scope() as session:
+        user_id = new_user(session)
+        resume = ResumeRow(user_id=user_id, name="CV", text="Python, 5 лет")
+        session.add(resume)
+        session.add(
+            VacancyRow(
+                id="vac-worker",
+                source_post_key="ch-worker",
+                source_channel="ch",
+                source_url="https://t.me/s/ch",
+                post_date=datetime(2026, 9, 1, tzinfo=UTC),
+                raw_text="Python developer",
+                cleaned_text="Python developer",
+            )
+        )
+        session.flush()
+        resume_id = resume.id
+
+    job_id = llm_job_runner.enqueue(
+        user_id=user_id, kind=KIND_MATCH, resume_id=resume_id, vacancy_id="vac-worker"
+    ).job_id
+    assert Queue(rq_conn.LLM_QUEUE_NAME, connection=fake_redis).count == 1
+
+    llm_worker.main()
+
+    with session_scope() as session:
+        row = lj.get_llm_job(session, job_id)
+        assert row.status == "done", row.error_message
+    assert [(c["resume_id"], c["vacancy_id"]) for c in calls] == [(resume_id, "vac-worker")]
+    assert Queue(rq_conn.LLM_QUEUE_NAME, connection=fake_redis).count == 0
+    # Реплики llm-worker делят один лимит запросов, а не умножают его.
+    assert isinstance(rate_limit._global_gate, RedisWindowRateGate)
+    _assert_process_lifecycle(
+        worker_process,
+        role="llm-worker",
+        queue=rq_conn.LLM_QUEUE_NAME,
+        metrics_port=get_settings().llm_worker_metrics_port,
+    )
+
+
+def test_hh_worker_runs_queued_sync_job(fake_redis, worker_process, monkeypatch):
+    seen: dict = {}
+
+    def fake_sync(session, *, config, settings, search_window, progress_callback):
+        seen["window"] = search_window
+        result = hh_sync_tasks.HhSyncResult(searched=4, unique=3, window="7d", period=7)
+        progress_callback("purge", result, 1, 1)
+        return result
+
+    monkeypatch.setattr(hh_sync_tasks, "run_hh_sync", fake_sync)
+    job_id = hh_sync_job_service.start_hh_sync_job(ResolvedHhSearchWindow(window="7d", period=7), requested_by=None)
+    assert Queue(rq_conn.HH_QUEUE_NAME, connection=fake_redis).count == 1
+
+    hh_worker.main()
+
+    with session_scope() as session:
+        row = hh_jobs.get_hh_sync_job(session, job_id)
+        assert row.status == "completed", row.error_message
+        assert row.result["searched"] == 4
+    assert seen["window"].period == 7
+    assert Queue(rq_conn.HH_QUEUE_NAME, connection=fake_redis).count == 0
+    _assert_process_lifecycle(
+        worker_process,
+        role="hh-worker",
+        queue=rq_conn.HH_QUEUE_NAME,
+        metrics_port=get_settings().hh_worker_metrics_port,
+    )
+
+
+# --- run_rq_worker: отказоустойчивость старта и очистка ---
+
+
+def _run(*, recover_fn=lambda: 0, job_backend: str = "rq", setup=None) -> None:
+    runner.run_rq_worker(
+        role="test-worker",
+        queue_name="test",
+        metrics_port=0,
+        recover_fn=recover_fn,
+        job_backend=job_backend,
+        job_backend_env="TEST_JOB_BACKEND",
+        setup=setup,
+    )
+
+
+def test_run_rq_worker_requires_redis_url(fake_redis, worker_process, monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "")
+    get_settings.cache_clear()
+    recovered: list[int] = []
+
+    with pytest.raises(SystemExit) as exc:
+        _run(recover_fn=lambda: recovered.append(1) or 0)
+
+    assert exc.value.code == 1
+    assert recovered == []  # до recover и до work() не дошли
+    assert worker_process.queues is None
+
+
+def test_run_rq_worker_survives_startup_failures(fake_redis, worker_process, monkeypatch, caplog):
+    """Ни OTel, ни порт /metrics, ни recover на старте не мешают воркеру взять джобу."""
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(runner, "setup_tracing", broken)
+    monkeypatch.setattr("prometheus_client.start_http_server", broken)
+    setup_calls: list[int] = []
+    Queue("test", connection=fake_redis).enqueue(record_job, "done")
+
+    with caplog.at_level("WARNING"):
+        _run(recover_fn=broken, job_backend="inprocess", setup=lambda: setup_calls.append(1))
+
+    assert _executed == ["done"]
+    assert setup_calls == [1]
+    messages = caplog.text
+    assert "OTel для test-worker не включён" in messages
+    assert "Не удалось стартовать metrics HTTP" in messages
+    assert "Recover on start failed" in messages
+    assert "TEST_JOB_BACKEND=inprocess" in messages
+    assert worker_process.recover_stop.is_set()
+    assert worker_process.tracing_shutdowns == 1
+
+
+def test_run_rq_worker_reports_recovered_jobs(fake_redis, worker_process, caplog):
+    with caplog.at_level("INFO"):
+        _run(recover_fn=lambda: 3)
+
+    assert "Recover on start: 3 job(s)" in caplog.text
+
+
+def test_run_rq_worker_cleans_up_when_worker_crashes(fake_redis, worker_process, monkeypatch):
+    def crash(self, *args, **kwargs):
+        raise RuntimeError("redis connection lost")
+
+    monkeypatch.setattr(liveness.LivenessWorker, "work", crash)
+
+    with pytest.raises(RuntimeError, match="redis connection lost"):
+        _run()
+
+    assert worker_process.recover_stop.is_set()
+    assert worker_process.watchdog_stop.is_set()
+    assert worker_process.tracing_shutdowns == 1
+
+
+def test_run_rq_worker_without_watchdog(fake_redis, worker_process, monkeypatch):
+    """WORKER_STALL_EXIT_SECONDS=0 — watchdog выключен, finally это переживает."""
+    monkeypatch.setenv("WORKER_STALL_EXIT_SECONDS", "0")
+    get_settings.cache_clear()
+
+    _run()
+
+    assert worker_process.watchdog_seconds == 0
+    assert worker_process.watchdog_stop is None
+    assert worker_process.tracing_shutdowns == 1
+
+
+# --- имя воркера ---
+
+
+def test_worker_name_is_unique_per_call():
+    a, b = runner.worker_name("parse-worker"), runner.worker_name("parse-worker")
+
+    assert a != b
+    assert f"-{os.getpid()}-" in a
+
+
+def test_worker_name_falls_back_to_role_without_hostname(monkeypatch):
+    monkeypatch.setattr(runner.socket, "gethostname", lambda: "  ")
+
+    assert runner.worker_name("hh-worker").startswith(f"hh-worker-{os.getpid()}-")
