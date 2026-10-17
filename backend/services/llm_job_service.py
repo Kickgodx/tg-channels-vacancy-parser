@@ -11,6 +11,7 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 
 from backend.db import repository as repo
+from backend.db.llm_job_repository import lock_user_llm_enqueue
 from backend.db.session import session_scope
 from backend.observability import record_llm_job, record_llm_job_enqueue
 from backend.settings import get_settings
@@ -129,6 +130,7 @@ class LlmJobRunner:
             },
         ) as span:
             with session_scope() as session:
+                lock_user_llm_enqueue(session, user_id=user_id)
                 existing = None
                 if kind != KIND_IMPORT:
                     existing = repo.find_active_llm_job(

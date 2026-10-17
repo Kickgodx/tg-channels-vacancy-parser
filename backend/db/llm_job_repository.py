@@ -5,13 +5,29 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session
 
 from backend.db.models import LlmJobRow
 from backend.settings import get_settings
 
 _ACTIVE_LLM_STATUSES = ("queued", "running")
+
+# Пространство ключей pg_advisory_xact_lock(int, int) постановки LLM-джоб; второй ключ — user_id.
+_ENQUEUE_LOCK_NS = 874_291_003
+
+
+def lock_user_llm_enqueue(session: Session, *, user_id: int) -> None:
+    """Сериализовать постановку LLM-джоб одного пользователя до конца транзакции.
+
+    Без этого параллельные запросы проходят «нет активной» и «лимит не исчерпан»
+    одновременно: дубль джобы и обход ``interactive_per_user_limit``. Дубль пары
+    дополнительно запрещает ``uq_llm_jobs_one_active_pair``, лимит — только этот lock.
+    """
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(CAST(:ns AS integer), CAST(:uid AS integer))"),
+        {"ns": _ENQUEUE_LOCK_NS, "uid": user_id},
+    )
 
 
 def create_llm_job(

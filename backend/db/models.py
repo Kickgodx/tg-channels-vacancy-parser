@@ -355,6 +355,18 @@ class LlmJobRow(Base):
     """Фоновая LLM-задача (мэтчинг / сопроводительное письмо / ручной импорт)."""
 
     __tablename__ = "llm_jobs"
+    __table_args__ = (
+        # Одна активная джоба на пару резюме–вакансия (миграция 028); импорт — без пары.
+        Index(
+            "uq_llm_jobs_one_active_pair",
+            "user_id",
+            "kind",
+            "resume_id",
+            "vacancy_id",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running') AND kind <> 'import'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[int] = mapped_column(

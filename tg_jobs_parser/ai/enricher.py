@@ -243,9 +243,11 @@ class AIEnrichmentService:
                 usage.prompt_tokens,
                 usage.completion_tokens,
             )
+            # Ответ fallback-модели — под её ключом: иначе он на весь TTL выдавался бы
+            # за ответ основной, а следующий прогон не спросил бы основную модель заново.
             self._cache.put(
                 text=text,
-                model=self._ai.model,
+                model=cache_model,
                 prompt_version=prompt_version,
                 mode=self._ai.mode,
                 extraction=extraction,

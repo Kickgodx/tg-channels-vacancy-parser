@@ -94,3 +94,24 @@ def test_enrich_merges_job(monkeypatch):
     assert service._progress_done == 1
     assert out.detected_specializations == ["Go"]
     assert out.vacancy_score >= 3
+
+
+def test_enrich_caches_fallback_answer_under_fallback_model(monkeypatch):
+    """Ответ fallback-модели не должен попасть в кэш под ключом основной."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    cfg = AppConfig()
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "model": "primary/model"})})
+    service = AIEnrichmentService(cfg)
+    fake = VacancyAIExtraction(is_job_post=False, confidence=0.9)
+    service.begin_batch(1)
+    with (
+        patch.object(service._cache, "get", return_value=None),
+        patch.object(service._cache, "put") as put,
+        patch.object(
+            service._client,
+            "extract_with_fallback",
+            return_value=(fake, LLMUsage(model="fallback/model")),
+        ),
+    ):
+        service.enrich(_vacancy())
+    assert put.call_args.kwargs["model"] == "fallback/model"
