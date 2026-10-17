@@ -141,22 +141,23 @@ def test_location_country_found_in_text():
     assert matches_location_policy(v, ["Казахстан"], []) is True
 
 
-def test_location_unknown_country_passes():
-    assert matches_location_policy(_vacancy(country=None), ["Россия"], []) is True
+@pytest.mark.parametrize("country", [None, "", "   "])
+def test_location_unknown_country_passes(country):
+    """None и пустая строка одинаково значат «страна неизвестна» — не отсекаем."""
+    assert matches_location_policy(_vacancy(country=country), ["Россия"], []) is True
+
+
+@pytest.mark.parametrize("city", [None, "", "   "])
+def test_location_unknown_city_passes(city):
+    assert matches_location_policy(_vacancy(city=city), [], ["Москва"]) is True
 
 
 def test_location_other_country_rejected():
     assert matches_location_policy(_vacancy(country="Германия"), ["Россия", "Казахстан"], []) is False
 
 
-def test_location_empty_string_country_is_not_unknown():
-    """Пустая строка — не None: такая вакансия не считается «страна неизвестна»."""
-    assert matches_location_policy(_vacancy(country=""), ["Россия"], []) is False
-
-
 def test_location_city_rules():
     assert matches_location_policy(_vacancy(city="Москва"), [], ["Москва", "Казань"]) is True
-    assert matches_location_policy(_vacancy(city=None), [], ["Москва"]) is True
     assert matches_location_policy(_vacancy("Офис в центре Казань", city="Татарстан"), [], ["Казань"]) is True
     assert matches_location_policy(_vacancy(city="Новосибирск"), [], ["Москва"]) is False
 

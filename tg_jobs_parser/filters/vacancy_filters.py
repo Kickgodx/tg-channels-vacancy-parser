@@ -60,14 +60,14 @@ def matches_location_policy(
     countries: list[str],
     cities: list[str],
 ) -> bool:
-    """Пустые списки — без ограничения."""
+    """Пустые списки — без ограничения. Страна / город ``None`` или пустая строка — «неизвестно», пропускаем."""
     nt = normalize_for_match(v.cleaned_text)
     if countries:
         c_norms = [normalize_for_match(c) for c in countries]
         vc = normalize_for_match(v.country or "")
         matched = vc and any(c in vc or vc in c for c in c_norms)
         text_country = any(c in nt for c in c_norms)
-        if not (matched or text_country or v.country is None):
+        if not (matched or text_country or not vc):
             return False
 
     if cities:
@@ -75,7 +75,7 @@ def matches_location_policy(
         city_v = normalize_for_match(v.city or "")
         matched_city = city_v and any(c in city_v or city_v in c for c in ct_norms)
         text_city = any(c in nt for c in ct_norms)
-        if not (matched_city or text_city or v.city is None):
+        if not (matched_city or text_city or not city_v):
             return False
 
     return True
