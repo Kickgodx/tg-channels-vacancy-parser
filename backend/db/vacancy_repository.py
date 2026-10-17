@@ -148,6 +148,34 @@ def _fx_config(fx_config: FxConfig | None) -> FxConfig:
 # Строк на один INSERT: ~40 колонок × 200 = 8 000 параметров — с запасом ниже лимита Postgres (65 535).
 _UPSERT_CHUNK = 200
 
+# Результат разбора поста: обновляется только целиком, чтобы строка не смешивала два
+# разбора (грейд от старой модели, а extraction_source — от новой). RUB-зарплата — здесь
+# же: она считается из detected_salary_* нового разбора. AI поднимает vacancy_score до
+# порога, поэтому баллы — тоже часть разбора.
+_EXTRACTION_COLUMNS = (
+    "detected_specializations",
+    "detected_grade",
+    "detected_salary_min",
+    "detected_salary_max",
+    "detected_salary_avg",
+    "detected_salary_avg_rub",
+    "salary_currency",
+    "work_format",
+    "country",
+    "city",
+    "company",
+    "contact",
+    "technologies",
+    "required_experience",
+    "employment_type",
+    "application_urls",
+    "extraction_source",
+    "ai_confidence",
+    "ai_notes",
+    "vacancy_score",
+    "vacancy_substantive_score",
+)
+
 
 def upsert_vacancies(
     session: Session,
@@ -159,8 +187,10 @@ def upsert_vacancies(
     """
     Вставка вакансий по ``id`` (content hash) — пакетами, по INSERT на чанк.
 
-    При совпадении текста обновляются ``last_parse_run_id``, ``updated_at``, RUB-зарплата
-    и AI-метаданные; извлечённые поля не трогаются. Если пост новее сохранённого
+    При совпадении текста обновляются ``last_parse_run_id``, ``updated_at`` и результат
+    разбора (``_EXTRACTION_COLUMNS``) — целиком, если новый разбор не хуже: от LLM
+    (``ai``/``hybrid``) или поверх rules-разбора. Rules-разбор не затирает сохранённый
+    LLM-разбор (прогон с выключенным AI не откатывает строку к regex). Если пост новее сохранённого
     (канал повторно опубликовал тот же текст), ``post_date`` сдвигается вперёд, а
     вакансия возвращается из архива — иначе TTL по первой публикации прятал бы её навсегда.
     Каждая вакансия пачки (новая и уже известная) записывается в ``parse_run_vacancies``
@@ -199,12 +229,17 @@ def upsert_vacancies(
     for chunk in _chunks(existing_rows):
         stmt = insert(VacancyRow).values(chunk)
         reposted_later = stmt.excluded.post_date > VacancyRow.post_date
+        # SET в ON CONFLICT видит старую строку, так что extraction_source в условии — прежний.
+        refresh_extraction = or_(
+            stmt.excluded.extraction_source != "rules",
+            VacancyRow.extraction_source == "rules",
+        )
+        table = VacancyRow.__table__.c
         conflict_set = {
+            col: case((refresh_extraction, stmt.excluded[col]), else_=table[col]) for col in _EXTRACTION_COLUMNS
+        }
+        conflict_set |= {
             "updated_at": now,
-            "detected_salary_avg_rub": stmt.excluded.detected_salary_avg_rub,
-            "ai_notes": stmt.excluded.ai_notes,
-            "ai_confidence": stmt.excluded.ai_confidence,
-            "extraction_source": stmt.excluded.extraction_source,
             # GREATEST пропускает NULL: пустая дата заполняется, более ранний пост её не сдвигает.
             "post_date": func.greatest(VacancyRow.post_date, stmt.excluded.post_date),
             "archived_at": case((reposted_later, null()), else_=VacancyRow.archived_at),

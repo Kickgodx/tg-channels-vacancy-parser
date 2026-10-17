@@ -42,6 +42,38 @@ def test_resumes_crud(db_session):
     assert repo.list_resumes(db_session) == []
 
 
+def _resume_with_llm_results(db_session):
+    resume = repo.create_resume(db_session, name="r", text="python")
+    db_session.add(_vacancy("a", "Python dev"))
+    db_session.commit()
+    repo.upsert_vacancy_match(db_session, resume_id=resume.id, vacancy_id="a", **_match_kwargs(88))
+    repo.upsert_cover_letter(db_session, resume_id=resume.id, vacancy_id="a", text="Письмо", tone="neutral", model="m1")
+    db_session.commit()
+    return resume
+
+
+def test_update_resume_text_drops_matches_and_letters(db_session):
+    """Матч и письмо посчитаны по старому тексту — после правки их нельзя отдавать из кэша."""
+    resume = _resume_with_llm_results(db_session)
+
+    repo.update_resume(db_session, resume.id, text="python, go, kubernetes")
+    db_session.commit()
+
+    assert repo.get_vacancy_match(db_session, resume_id=resume.id, vacancy_id="a") is None
+    assert repo.get_cover_letter(db_session, resume_id=resume.id, vacancy_id="a") is None
+
+
+@pytest.mark.parametrize("update", [{"name": "Новое имя"}, {"name": "r", "text": "python"}])
+def test_update_resume_keeps_results_when_text_unchanged(db_session, update):
+    resume = _resume_with_llm_results(db_session)
+
+    repo.update_resume(db_session, resume.id, **update)
+    db_session.commit()
+
+    assert repo.get_vacancy_match(db_session, resume_id=resume.id, vacancy_id="a") is not None
+    assert repo.get_cover_letter(db_session, resume_id=resume.id, vacancy_id="a") is not None
+
+
 def _match_kwargs(score: int, **over) -> dict:
     base = dict(
         overall_score=score,
