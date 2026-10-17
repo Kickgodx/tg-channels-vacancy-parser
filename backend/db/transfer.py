@@ -21,7 +21,9 @@ from backend.db.models import (
     ParseRunRow,
     ParseRunVacancyRow,
     VacancyRow,
+    VacancySightingRow,
 )
+from backend.db.vacancy_repository import backfill_original_sightings
 
 _LOG = logging.getLogger(__name__)
 
@@ -32,10 +34,12 @@ TABLE_MODELS: list[tuple[str, type]] = [
     ("exchange_rates", ExchangeRateRow),
     ("vacancies", VacancyRow),
     ("parse_run_vacancies", ParseRunVacancyRow),
+    ("vacancy_sightings", VacancySightingRow),
     ("ai_extraction_cache", AIExtractionCacheRow),
 ]
 
 _RUN_LINKS_TABLE = "parse_run_vacancies"
+_SIGHTINGS_TABLE = "vacancy_sightings"
 
 ImportMode = Literal["merge", "replace"]
 
@@ -46,6 +50,7 @@ class DumpStats:
     exchange_rates: int = 0
     vacancies: int = 0
     parse_run_vacancies: int = 0
+    vacancy_sightings: int = 0
     ai_extraction_cache: int = 0
 
 
@@ -55,6 +60,7 @@ class ImportStats:
     exchange_rates: int = 0
     vacancies: int = 0
     parse_run_vacancies: int = 0
+    vacancy_sightings: int = 0
     ai_extraction_cache: int = 0
 
 
@@ -141,6 +147,7 @@ def write_dump_file(session: Session, path: Path) -> DumpStats:
         exchange_rates=len(tables.get("exchange_rates", [])),
         vacancies=len(tables.get("vacancies", [])),
         parse_run_vacancies=len(tables.get("parse_run_vacancies", [])),
+        vacancy_sightings=len(tables.get(_SIGHTINGS_TABLE, [])),
         ai_extraction_cache=len(tables.get("ai_extraction_cache", [])),
     )
 
@@ -230,6 +237,10 @@ def import_database(
     if _RUN_LINKS_TABLE not in tables:
         session.flush()
         stats[_RUN_LINKS_TABLE] = _backfill_run_links(session)
+    if _SIGHTINGS_TABLE not in tables:
+        # Дамп до vacancy_sightings: вакансии Telegram — оригиналы, о дублях данных нет.
+        session.flush()
+        stats[_SIGHTINGS_TABLE] = backfill_original_sightings(session)
 
     _LOG.info(
         "Импорт (%s): parse_runs=%s, exchange_rates=%s, vacancies=%s, ai_cache=%s",
@@ -244,6 +255,7 @@ def import_database(
         exchange_rates=stats.get("exchange_rates", 0),
         vacancies=stats.get("vacancies", 0),
         parse_run_vacancies=stats.get(_RUN_LINKS_TABLE, 0),
+        vacancy_sightings=stats.get(_SIGHTINGS_TABLE, 0),
         ai_extraction_cache=stats.get("ai_extraction_cache", 0),
     )
 

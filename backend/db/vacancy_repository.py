@@ -10,15 +10,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
-from sqlalchemy import and_, case, func, literal_column, null, or_, select, update
+from sqlalchemy import and_, case, false, func, literal_column, null, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, defer
 
 from backend.db.aggregate_cache import invalidate_aggregate_cache
 from backend.db.models import (
+    ParseRunRow,
     ParseRunVacancyRow,
     VacancyMatchRow,
     VacancyRow,
+    VacancySightingRow,
 )
 from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
 from backend.db.vacancy_mapper import (
@@ -159,7 +161,7 @@ def upsert_vacancies(
     fx_config: FxConfig | None = None,
 ) -> VacancyUpsertStats:
     """
-    Вставка уникальных вакансий по ``id`` (content hash) — пакетами, по INSERT на чанк.
+    Вставка вакансий по ``id`` (content hash) — пакетами, по INSERT на чанк.
 
     При совпадении текста обновляются ``last_parse_run_id``, ``updated_at``, RUB-зарплата
     и AI-метаданные; извлечённые поля не трогаются. Если пост новее сохранённого
@@ -169,12 +171,15 @@ def upsert_vacancies(
     этого прогона — по этой связке строятся список и экспорт прогона.
     ``parse_run_id=None`` — ручной импорт без прогона: существующая привязка
     к прогону при update не затирается. Повтор ``id`` внутри пачки — берётся последний.
+
+    Дубли дедупа (``is_duplicate``) в ``vacancies`` не пишутся. В прогоне каждый пост
+    пачки записывается в ``vacancy_sightings`` (см. ``_insert_sightings``).
     """
     if not vacancies:
         return VacancyUpsertStats()
     started = time.monotonic()
     now = datetime.now(UTC)
-    by_id = {v.id: v for v in vacancies}
+    by_id = {v.id: v for v in vacancies if not v.is_duplicate}
     existing_ids = set(session.scalars(select(VacancyRow.id).where(VacancyRow.id.in_(list(by_id)))).all())
     fx = _fx_config(fx_config)
     _LOG.info("Сохранение %s вакансий в БД (уже есть %s)…", len(by_id), len(existing_ids))
@@ -219,6 +224,7 @@ def upsert_vacancies(
         links = [{"parse_run_id": parse_run_id, "vacancy_id": vid} for vid in by_id]
         for chunk in _chunks(links):
             session.execute(insert(ParseRunVacancyRow).values(chunk).on_conflict_do_nothing())
+        _insert_sightings(session, vacancies, existing_ids=existing_ids, parse_run_id=parse_run_id, now=now)
 
     inserted, updated_existing = len(new_rows), len(existing_rows)
     _LOG.info(
@@ -231,6 +237,95 @@ def upsert_vacancies(
     if inserted or updated_existing:
         invalidate_vacancy_count_cache()
     return VacancyUpsertStats(inserted=inserted, updated_existing=updated_existing)
+
+
+def _insert_sightings(
+    session: Session,
+    vacancies: list[Vacancy],
+    *,
+    existing_ids: set[str],
+    parse_run_id: uuid.UUID,
+    now: datetime,
+) -> None:
+    """Появление каждого поста пачки: оригинал или дубль со ссылкой на каноническую вакансию.
+
+    Оригинал — пост, из которого вакансия впервые попала в БД. Дубль — дубль дедупа
+    внутри прогона или текст, уже бывший в БД до этой пачки (``seen_before``):
+    другой канал, перепост в том же канале, прошлый прогон. Повторная вычитка того же
+    поста (ретрай, пересечение окон) ничего не меняет — ON CONFLICT по ключу поста.
+    """
+    rows: list[dict] = []
+    for v in vacancies:
+        if v.is_duplicate:
+            vacancy_id, reason = v.duplicate_of, v.duplicate_reason or "duplicate"
+        elif v.id in existing_ids:
+            vacancy_id, reason = v.id, "seen_before"
+        else:
+            vacancy_id, reason = v.id, None
+        if not vacancy_id:
+            continue
+        rows.append(
+            {
+                "source_post_key": v.source_post_key[:128],
+                "vacancy_id": vacancy_id,
+                "source_channel": v.source_channel[:128],
+                "post_date": v.post_date,
+                "parse_run_id": parse_run_id,
+                "is_duplicate": reason is not None,
+                "duplicate_reason": reason[:64] if reason else None,
+                "seen_at": now,
+            }
+        )
+    # Каноническая вакансия дубля — в этой пачке или в прошлой. Если её нет (запись
+    # прошлой пачки не удалась), появление пропускаем: FK уронил бы всю пачку.
+    missing = {r["vacancy_id"] for r in rows} - {v.id for v in vacancies if not v.is_duplicate}
+    if missing:
+        absent = missing - set(session.scalars(select(VacancyRow.id).where(VacancyRow.id.in_(list(missing)))).all())
+        rows = [r for r in rows if r["vacancy_id"] not in absent]
+    for chunk in _chunks(rows):
+        session.execute(insert(VacancySightingRow).values(chunk).on_conflict_do_nothing())
+
+
+# HH и ручной импорт — не посты Telegram, у них нет появлений.
+NON_TELEGRAM_CHANNELS = ("hh", "manual")
+
+
+def backfill_original_sightings(session: Session) -> int:
+    """Появление-оригинал для каждой вакансии Telegram, у поста которой его ещё нет.
+
+    Для данных, записанных до ``vacancy_sightings`` (дамп старого формата).
+    """
+    src = (
+        select(
+            VacancyRow.source_post_key,
+            VacancyRow.id,
+            VacancyRow.source_channel,
+            VacancyRow.post_date,
+            ParseRunRow.id,
+            false(),
+            VacancyRow.parsed_at,
+        )
+        # last_parse_run_id — не FK: удалённый прогон превращается в NULL.
+        .outerjoin(ParseRunRow, ParseRunRow.id == VacancyRow.last_parse_run_id)
+        .where(VacancyRow.is_duplicate.is_(False), VacancyRow.source_channel.not_in(NON_TELEGRAM_CHANNELS))
+    )
+    stmt = (
+        insert(VacancySightingRow)
+        .from_select(
+            [
+                "source_post_key",
+                "vacancy_id",
+                "source_channel",
+                "post_date",
+                "parse_run_id",
+                "is_duplicate",
+                "seen_at",
+            ],
+            src,
+        )
+        .on_conflict_do_nothing()
+    )
+    return int(session.execute(stmt).rowcount or 0)
 
 
 def _chunks(rows: list[dict]):

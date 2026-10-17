@@ -368,10 +368,11 @@ def run_parse(
 
     ``cli_overrides`` — простой dict для сериализации в ``run_params`` (опционально).
     ``vacancy_batch_sink`` — опциональный колбэк: вызывается с очередной порцией
-    уникальных вакансий каждые ``parser.db_flush_every_posts`` обработанных постов,
-    при накоплении ``parser.db_flush_pending_vacancies`` незаписанных уникальных
+    вакансий каждые ``parser.db_flush_every_posts`` обработанных постов,
+    при накоплении ``parser.db_flush_pending_vacancies`` незаписанных
     (что наступит раньше) и в конце прогона — чтобы сохранять вакансии в БД по ходу
-    обработки, а не только в конце.
+    обработки, а не только в конце. В порции — уникальные и дубли в порядке дедупа
+    (у дубля ``is_duplicate`` и ``duplicate_of``): дубли нужны для учёта появлений.
     ``fx_rates`` — готовые курсы (из БД); если заданы, метрики не ходят в ЦБ.
     ``channel_checkpoints`` — чекпоинты каналов прошлых прогонов (из БД) для
     инкрементальной вычитки; новые возвращаются в ``ParseResult.channel_checkpoints``
@@ -486,7 +487,7 @@ def run_parse(
     dedup_elapsed = 0.0
     db_flush_step = max(1, config.parser.db_flush_every_posts)
     db_flush_pending = max(1, config.parser.db_flush_pending_vacancies)
-    pending_uniques: list[Vacancy] = []  # уникальные вакансии, ещё не ушедшие в sink
+    pending: list[Vacancy] = []  # вакансии (уникальные и дубли), ещё не ушедшие в sink
     incomplete_reason: str | None = None
     fetch = _BackgroundFetch(
         channel_fetcher,
@@ -503,35 +504,36 @@ def run_parse(
             nonlocal dedup_elapsed
             candidates.append(v)
             started = time.monotonic()
-            new_unique, _ = deduplicator.add((v,))
+            deduplicator.add((v,))
             dedup_elapsed += time.monotonic() - started
-            pending_uniques.extend(new_unique)
+            if vacancy_batch_sink is not None:
+                pending.append(v)
 
         def _flush_pending() -> None:
             """
-            Отдать накопленные уникальные вакансии в ``vacancy_batch_sink``.
+            Отдать накопленные вакансии (уникальные и дубли) в ``vacancy_batch_sink``.
 
             Ошибки записи глотаем: прогон не должен падать из-за БД — незаписанные
             вакансии остаются в pending и будут предложены повторно на следующем
             флаше / финальным UPSERT в конце прогона.
             """
-            if vacancy_batch_sink is None or not pending_uniques:
+            if vacancy_batch_sink is None or not pending:
                 return
             try:
                 with _TRACER.start_as_current_span(
-                    "parse.flush_vacancies", attributes={"parse.vacancies": len(pending_uniques)}
+                    "parse.flush_vacancies", attributes={"parse.vacancies": len(pending)}
                 ):
-                    vacancy_batch_sink(list(pending_uniques))
+                    vacancy_batch_sink(list(pending))
             except ParseCancelled:
                 raise
             except Exception as e:
                 _LOG.warning(
                     "Промежуточная запись %s вакансий в БД не удалась: %s — повторим позже.",
-                    len(pending_uniques),
+                    len(pending),
                     e,
                 )
                 return
-            pending_uniques.clear()
+            pending.clear()
 
         tg_policy = IngestPolicy(
             apply_post_filters=True,
@@ -605,7 +607,7 @@ def run_parse(
                 checkpoints_frozen = True
                 return
             _flush_pending()
-            if pending_uniques:
+            if pending:
                 return  # запись не удалась — канал перечитает следующий прогон
             try:
                 checkpoint_sink({ch: cp})
@@ -638,7 +640,7 @@ def run_parse(
                 _register_candidate(v)
             if posts_processed % batch_step == 0:
                 _emit_progress()
-            if len(pending_uniques) >= db_flush_pending or posts_processed % db_flush_step == 0:
+            if len(pending) >= db_flush_pending or posts_processed % db_flush_step == 0:
                 _flush_pending()
             if posts_processed % 500 == 0:
                 _LOG.info(

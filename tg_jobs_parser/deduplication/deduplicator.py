@@ -32,6 +32,7 @@ class VacancyDeduplicator:
         self._prefix_len = config.parser.fuzzy_compare_prefix_len
         self._block_by_specs = config.parser.fuzzy_dedup_block_by_specializations
         self._groups: dict[str, list[Vacancy]] = {}
+        self._group_rep: dict[str, str] = {}  # group_id → id первой вакансии группы
         # Блок → {group_id: ключ представителя группы}. Ключ кэшируется: иначе на каждой
         # новой вакансии он пересчитывался бы для всех групп заново.
         self._blocks: dict[str, dict[str, str]] = {}
@@ -54,7 +55,8 @@ class VacancyDeduplicator:
         """
         Прогнать новую порцию кандидатов через дедуп.
 
-        Помечает ``is_duplicate``, ``duplicate_group_id``, ``duplicate_reason``.
+        Помечает ``is_duplicate``, ``duplicate_group_id``, ``duplicate_reason``,
+        ``duplicate_of`` (id первой вакансии группы — для записи появления дубля).
         Возвращает ``(new_unique, new_duplicates)`` — только из этой порции;
         накопленные итоги доступны в ``self.unique`` / ``self.duplicates``.
         """
@@ -91,17 +93,20 @@ class VacancyDeduplicator:
             if assigned_group is None:
                 gid = short_id_from_hash(sha256_text(rh + nh))
                 self._groups.setdefault(gid, []).append(v)
+                self._group_rep.setdefault(gid, v.id)
                 block[gid] = candidate_key
                 self._raw_hashes[rh] = gid
                 self._norm_hashes[nh] = gid
                 v.is_duplicate = False
                 v.duplicate_group_id = gid
                 v.duplicate_reason = None
+                v.duplicate_of = None
                 new_unique.append(v)
             else:
                 v.is_duplicate = True
                 v.duplicate_group_id = assigned_group
                 v.duplicate_reason = reason
+                v.duplicate_of = self._group_rep[assigned_group]
                 self._groups.setdefault(assigned_group, []).append(v)
                 new_duplicates.append(v)
 

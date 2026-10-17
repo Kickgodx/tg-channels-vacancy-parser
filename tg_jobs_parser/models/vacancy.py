@@ -73,6 +73,10 @@ class Vacancy(BaseModel):
     is_duplicate: bool = False
     duplicate_group_id: str | None = None
     duplicate_reason: str | None = None
+    duplicate_of: str | None = Field(
+        default=None,
+        description="id первой вакансии группы, если эта — дубль (в БД не хранится, только связь появления).",
+    )
 
     match_score: float | None = Field(
         default=None,

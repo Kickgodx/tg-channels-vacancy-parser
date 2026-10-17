@@ -7,9 +7,10 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
 
 from backend.db import parse_run_repository as pr
-from backend.db.models import VacancyRow
+from backend.db.models import VacancyRow, VacancySightingRow
 from backend.db.session import init_db, reset_engine, session_scope
 from backend.settings import get_settings
 from backend.workers import parse_tasks
@@ -146,6 +147,39 @@ def test_completed_run_has_vacancies_and_upsert_stats(monkeypatch, run_id):
     assert run_params["vacancies_inserted"] == 1
     with session_scope() as session:
         assert session.get(VacancyRow, vacancy.id) is not None
+
+
+def test_duplicates_get_sightings_whether_flushed_or_finalized(monkeypatch, run_id):
+    """Дубль из промежуточной записи и дубль, дошедший только до финализации, — оба в vacancy_sightings."""
+    original = _vacancy()
+    flushed_dup = original.model_copy(
+        update={
+            "source_post_key": "other-5",
+            "source_channel": "other",
+            "is_duplicate": True,
+            "duplicate_reason": "normalized_hash",
+            "duplicate_of": original.id,
+        }
+    )
+    late_dup = flushed_dup.model_copy(update={"source_post_key": "other-6", "duplicate_reason": "fuzzy:95"})
+
+    def fake_run_parse(config, **kwargs):
+        kwargs["vacancy_batch_sink"]([original, flushed_dup])
+        return _result(original).model_copy(update={"duplicates": [flushed_dup, late_dup]})
+
+    monkeypatch.setattr(parse_tasks, "run_parse", fake_run_parse)
+
+    run_parse_job(str(run_id))
+
+    assert _run_row(run_id)[0] == "completed"
+    with session_scope() as session:
+        rows = session.scalars(select(VacancySightingRow)).all()
+        got = {r.source_post_key: (r.vacancy_id, r.duplicate_reason, r.parse_run_id) for r in rows}
+    assert got == {
+        "chan-1": (original.id, None, run_id),
+        "other-5": (original.id, "normalized_hash", run_id),
+        "other-6": (original.id, "fuzzy:95", run_id),
+    }
 
 
 def test_incomplete_run_is_partial_and_keeps_vacancies(monkeypatch, run_id):
