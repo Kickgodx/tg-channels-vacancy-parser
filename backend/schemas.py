@@ -248,9 +248,11 @@ class SourceStats(BaseModel):
     """Качество канала: доля уникальных вакансий, средний score, покрытие зарплатой."""
 
     channel: str
-    vacancies: int
-    duplicates: int
-    unique_share: float
+    vacancies: int = Field(description="Вакансий, впервые найденных в этом канале.")
+    duplicates: int = Field(
+        description="Постов канала с уже встречавшимся текстом: чужим, своим перепостом или из прошлых прогонов."
+    )
+    unique_share: float = Field(description="Доля постов канала с новым текстом (0–1).")
     avg_score: float | None = None
     with_salary_share: float
 

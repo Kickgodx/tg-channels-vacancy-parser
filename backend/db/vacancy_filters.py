@@ -19,7 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import Select
 
-from backend.db.models import VacancyRow
+from backend.db.models import VacancyRow, VacancySightingRow
 from backend.schemas import VacancyQuery
 
 
@@ -76,6 +76,25 @@ def vacancy_filter_conditions(
                 c.detected_salary_avg.isnot(None),
             )
         )
+    return conditions
+
+
+def sighting_filter_conditions(query: VacancyQuery, *, dialect: str = "postgresql") -> list[ColumnElement[bool]]:
+    """Условия для ``vacancy_sightings JOIN vacancies``: появления постов под фильтром.
+
+    Канал и даты — у самого поста: дубль из канала B ссылается на вакансию канала A,
+    а ``post_date`` вакансии сдвигается вперёд перепостами. Остальное — у канонической
+    вакансии, теми же условиями, что список и аналитика.
+    """
+    s = VacancySightingRow
+    own = query.model_copy(update={"source_channel": None, "date_from": None, "date_to": None})
+    conditions = vacancy_filter_conditions(own, dialect=dialect)
+    if query.source_channel:
+        conditions.append(s.source_channel == query.source_channel.lstrip("@"))
+    if query.date_from:
+        conditions.append(s.post_date >= datetime.combine(query.date_from, time.min, tzinfo=UTC))
+    if query.date_to:
+        conditions.append(s.post_date <= datetime.combine(query.date_to, time.max, tzinfo=UTC))
     return conditions
 
 

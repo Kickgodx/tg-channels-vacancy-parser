@@ -116,11 +116,17 @@ def test_sink_receives_unique_batches_during_run(monkeypatch):
     result = _run(monkeypatch, posts, batches.append)
 
     assert len(batches) >= 2  # сливы по ходу цикла + финальный
-    flushed_ids = [v.id for batch in batches for v in batch]
-    assert len(flushed_ids) == len(set(flushed_ids))  # без повторов между батчами
-    assert set(flushed_ids) == {v.id for v in result.vacancies_unique}
+    flushed = [v for batch in batches for v in batch]
+    keys = [v.source_post_key for v in flushed]
+    assert len(keys) == len(set(keys))  # каждый пост — ровно один раз
+    assert {v.id for v in flushed if not v.is_duplicate} == {v.id for v in result.vacancies_unique}
     assert len(result.vacancies_unique) == 6
     assert len(result.duplicates) == 1
+    # Дубль тоже уходит в sink — со ссылкой на первую вакансию группы (для vacancy_sightings).
+    (dup,) = [v for v in flushed if v.is_duplicate]
+    (first,) = [v for v in flushed if not v.is_duplicate and v.raw_text == dup.raw_text]
+    assert dup.duplicate_of == first.id
+    assert keys.index(dup.source_post_key) > keys.index(first.source_post_key)
 
 
 def test_flush_triggers_on_pending_vacancies_threshold(monkeypatch):

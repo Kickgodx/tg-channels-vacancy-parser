@@ -8,8 +8,8 @@ from collections import defaultdict
 from sqlalchemy import case, func, literal, select, true
 from sqlalchemy.orm import Session
 
-from backend.db.models import VacancyRow
-from backend.db.vacancy_filters import apply_vacancy_filters
+from backend.db.models import VacancyRow, VacancySightingRow
+from backend.db.vacancy_filters import apply_vacancy_filters, sighting_filter_conditions
 from backend.db.vacancy_metrics import (
     _dialect_name,
     _pg_spec_lateral,
@@ -371,7 +371,13 @@ def salary_analytics(session: Session, query: VacancyQuery) -> SalaryAnalytics:
 
 
 def source_quality(session: Session, query: VacancyQuery) -> list[SourceStats]:
-    """По каждому каналу: уникальные вакансии, дубли, средний score, покрытие зарплатой."""
+    """По каждому каналу: уникальные вакансии, дубли, доля уникальных постов, score, зарплата.
+
+    ``vacancies``, score и зарплата — по строкам ``vacancies`` канала. Дубли и
+    ``unique_share`` для Telegram — по ``vacancy_sightings``: доля постов канала,
+    чей текст до этого не встречался (ни в другом канале, ни у него самого).
+    У HH появлений нет — там дубли это строки ``is_duplicate`` (мультигород).
+    """
     dialect = _dialect_name(session)
     sal = _salary_rub_expr()
     stmt = apply_vacancy_filters(
@@ -387,28 +393,52 @@ def source_quality(session: Session, query: VacancyQuery) -> list[SourceStats]:
         include_duplicates=True,
     )
     per_channel: dict[str, dict] = {}
-    for channel, is_dup, cnt, avg_score, sal_share in session.execute(stmt).all():
-        d = per_channel.setdefault(
-            str(channel),
-            {"unique": 0, "dups": 0, "avg_score": None, "sal_share": 0.0},
+
+    def _channel(name: object) -> dict:
+        return per_channel.setdefault(
+            str(name),
+            {"unique": 0, "dups": 0, "avg_score": None, "sal_share": 0.0, "posts": 0, "post_dups": 0},
         )
+
+    for channel, is_dup, cnt, avg_score, sal_share in session.execute(stmt).all():
+        d = _channel(channel)
         if is_dup:
             d["dups"] += int(cnt)
         else:
             d["unique"] += int(cnt)
             d["avg_score"] = float(avg_score) if avg_score is not None else None
             d["sal_share"] = float(sal_share or 0.0)
-    out = [
-        SourceStats(
-            channel=ch,
-            vacancies=d["unique"],
-            duplicates=d["dups"],
-            unique_share=(d["unique"] / (d["unique"] + d["dups"]) if (d["unique"] + d["dups"]) else 1.0),
-            avg_score=d["avg_score"],
-            with_salary_share=d["sal_share"],
+
+    s = VacancySightingRow
+    sightings = (
+        select(s.source_channel, func.count(), func.sum(case((s.is_duplicate, 1), else_=0)))
+        .join(VacancyRow, VacancyRow.id == s.vacancy_id)
+        .where(*sighting_filter_conditions(query, dialect=dialect))
+        .group_by(s.source_channel)
+    )
+    # Канал может не иметь своих вакансий вовсе — только перепосты чужих: он тоже в отчёте.
+    for channel, posts, post_dups in session.execute(sightings).all():
+        d = _channel(channel)
+        d["posts"] += int(posts)
+        d["post_dups"] += int(post_dups or 0)
+
+    out: list[SourceStats] = []
+    for ch, d in per_channel.items():
+        if d["posts"]:
+            share = (d["posts"] - d["post_dups"]) / d["posts"]
+        else:
+            rows = d["unique"] + d["dups"]
+            share = d["unique"] / rows if rows else 1.0
+        out.append(
+            SourceStats(
+                channel=ch,
+                vacancies=d["unique"],
+                duplicates=d["dups"] + d["post_dups"],
+                unique_share=share,
+                avg_score=d["avg_score"],
+                with_salary_share=d["sal_share"],
+            )
         )
-        for ch, d in per_channel.items()
-    ]
     out.sort(key=lambda s: (-s.vacancies, s.channel))
     return out
 

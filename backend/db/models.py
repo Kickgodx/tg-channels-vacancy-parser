@@ -162,6 +162,34 @@ class ParseRunVacancyRow(Base):
     )
 
 
+class VacancySightingRow(Base):
+    """Появление вакансии в посте Telegram: один пост — одна строка.
+
+    В ``vacancies`` попадает только первый пост с данным текстом. Дубли (тот же
+    или похожий текст в другом канале, перепост в том же канале, повтор из прошлых
+    прогонов) пишутся сюда со ссылкой на каноническую вакансию: по ним считается
+    доля уникального контента канала.
+    """
+
+    __tablename__ = "vacancy_sightings"
+
+    # {channel}-{post_id}: повторная вычитка того же поста не создаёт второе появление.
+    source_post_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    vacancy_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("vacancies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_channel: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    post_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # SET NULL: очистка старых прогонов не должна стирать историю появлений.
+    parse_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("parse_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    is_duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # exact_raw_hash | normalized_hash | fuzzy:<score> | seen_before; NULL — оригинал.
+    duplicate_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+
+
 class UserRow(Base):
     """Пользователь: владелец резюме, пресетов фильтров и (косвенно) матчей."""
 

@@ -200,7 +200,19 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
                 return
             publish_parse_run_event(run_id, event="progress", payload=payload)
 
-    flushed_ids: set[str] = set()
+    # Ключи постов (source_post_key), уже записанных в БД: вакансии и появления дублей.
+    flushed_keys: set[str] = set()
+    flushed_vacancies = 0
+
+    def unflushed(res: ParseResult) -> list[Vacancy]:
+        # Уникальные первыми: каноническая вакансия дубля пишется до его появления.
+        return [v for v in (*res.vacancies_unique, *res.duplicates) if v.source_post_key not in flushed_keys]
+
+    def mark_flushed(batch: list[Vacancy]) -> None:
+        nonlocal flushed_vacancies
+        flushed_keys.update(v.source_post_key for v in batch)
+        flushed_vacancies += sum(1 for v in batch if not v.is_duplicate)
+
     upsert_totals = repo.VacancyUpsertStats()
 
     def flush_vacancies(batch: list[Vacancy]) -> None:
@@ -217,13 +229,13 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             inserted=upsert_totals.inserted + stats.inserted,
             updated_existing=upsert_totals.updated_existing + stats.updated_existing,
         )
-        flushed_ids.update(v.id for v in batch)
+        mark_flushed(batch)
         _LOG.info(
-            "Прогон %s: промежуточная запись — %s вакансий (+%s новых), уже в БД: %s",
+            "Прогон %s: промежуточная запись — %s постов (+%s новых вакансий), уже в БД: %s вакансий",
             run_id,
             len(batch),
             stats.inserted,
-            len(flushed_ids),
+            flushed_vacancies,
         )
 
     def save_checkpoints(checkpoints: dict[str, ChannelCheckpoint]) -> None:
@@ -246,9 +258,9 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
         else:
             _LOG.info("Прогон %s: чекпоинт без изменений — %s", run_id, ", ".join(f"@{c}" for c in checkpoints))
 
-    def persist_remaining(unique: list[Vacancy]) -> repo.VacancyUpsertStats:
+    def persist_remaining(res: ParseResult) -> repo.VacancyUpsertStats:
         nonlocal upsert_totals
-        remaining = [v for v in unique if v.id not in flushed_ids]
+        remaining = unflushed(res)
         with session_scope() as session:
             stats = repo.upsert_vacancies(session, remaining, parse_run_id=run_id)
             repo.archive_expired_vacancies(session)
@@ -257,7 +269,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
                 updated_existing=upsert_totals.updated_existing + stats.updated_existing,
             )
             repo.patch_run_vacancy_upsert_stats(session, run_id, upsert_totals)
-        flushed_ids.update(v.id for v in remaining)
+        mark_flushed(remaining)
         return upsert_totals
 
     def finalize_with_vacancies(res: ParseResult, final_status: str) -> repo.VacancyUpsertStats | None:
@@ -267,7 +279,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
         уходит в ``failed`` общим обработчиком, а не в ``completed`` без данных.
         """
         nonlocal upsert_totals
-        remaining = [v for v in res.vacancies_unique if v.id not in flushed_ids]
+        remaining = unflushed(res)
         checkpoint_changes = {}
         with session_scope() as session:
             # Fenced UPDATE первым: проверяет lease до записи вакансий.
@@ -299,7 +311,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
                 format_checkpoint_changes(checkpoint_changes),
             )
         upsert_totals = totals
-        flushed_ids.update(v.id for v in remaining)
+        mark_flushed(remaining)
         return totals
 
     fx_rates = None
@@ -359,8 +371,8 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             _LOG.info(
                 "Прогон %s: финальное сохранение в PostgreSQL (%s вакансий уже записано по ходу прогона, осталось %s)…",
                 run_id,
-                len(flushed_ids),
-                len(result.vacancies_unique) - len(flushed_ids),
+                flushed_vacancies,
+                len(result.vacancies_unique) - flushed_vacancies,
             )
             try:
                 totals = finalize_with_vacancies(result, final_status)
@@ -398,7 +410,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
                     )
                 if wrote:
                     try:
-                        persist_remaining(result.vacancies_unique)
+                        persist_remaining(result)
                     except Exception as vac_err:
                         _LOG.warning("Прогон %s отменён; вакансии не сохранены: %s", run_id, vac_err)
             else:
