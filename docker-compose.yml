@@ -153,7 +153,6 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
       - ./sessions:/app/sessions
-      - ./output:/app/output
     # /health отвечает 200 и при недоступной БД (status=degraded) — смотрим на поле.
     healthcheck:
       test:

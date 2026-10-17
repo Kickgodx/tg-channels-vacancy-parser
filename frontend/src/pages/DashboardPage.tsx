@@ -43,7 +43,7 @@ export default function DashboardPage() {
   });
 
   const hasActiveRun = runs.data?.some(
-    (r) => r.status === "queued" || r.status === "running" || r.status === "pending",
+    (r) => r.status === "queued" || r.status === "running",
   );
 
   return (

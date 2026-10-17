@@ -8,7 +8,6 @@ import tg_jobs_parser.parse_runner as parse_runner
 from tg_jobs_parser.config.schema import (
     AppConfig,
     FxConfig,
-    OutputConfig,
     ParserConfig,
     SourcesConfig,
 )
@@ -68,7 +67,6 @@ def _config(**parser_overrides) -> AppConfig:
     return AppConfig(
         sources=SourcesConfig(channels=["chan"]),
         parser=ParserConfig(**parser_kwargs),
-        output=OutputConfig(save_progress_batches=False),
         fx=FxConfig(enabled=False),
     )
 

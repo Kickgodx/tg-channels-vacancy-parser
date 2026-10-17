@@ -1,5 +1,4 @@
 export type RunStatus =
-  | "pending"
   | "queued"
   | "running"
   | "completed"

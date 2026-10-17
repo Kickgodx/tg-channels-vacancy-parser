@@ -14,7 +14,6 @@ from tg_jobs_parser.config.schema import (
     AiConfig,
     AppConfig,
     FxConfig,
-    OutputConfig,
     ParserConfig,
     SourcesConfig,
 )
@@ -51,7 +50,6 @@ def _config(channels: list[str] = CHANNELS, **parser_overrides) -> AppConfig:
                 **parser_overrides,
             }
         ),
-        output=OutputConfig(save_progress_batches=False),
         fx=FxConfig(enabled=False),
     )
 

@@ -1,12 +1,9 @@
-"""Снимки прогресса парсинга для UI и частичного экспорта."""
+"""Снимки прогресса парсинга для UI."""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -23,7 +20,7 @@ class ParseProgressSnapshot:
 
     ``vacancies_found`` — число уникальных на текущий момент (инкрементальный
     дедуп), ``vacancies`` — последние ``PROGRESS_PREVIEW_LIMIT`` из них для
-    live-preview (все — только при ``output.save_progress_batches``).
+    live-preview.
 
     Вычитка и обработка идут потоком: пока ``channels_fetched < channels_total``
     (фаза ``fetching``), ``posts_total`` — прочитанное на текущий момент и растёт.
@@ -42,41 +39,3 @@ class ParseProgressSnapshot:
     ai_tokens_out: int = 0
     ai_skipped_score: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
-
-
-def clear_partial_batches(directory: Path) -> int:
-    """Удалить ``partial_*.json`` перед новым прогоном. Возвращает число удалённых файлов."""
-    if not directory.is_dir():
-        return 0
-    removed = 0
-    for path in directory.glob("partial_*.json"):
-        try:
-            path.unlink()
-            removed += 1
-        except OSError:
-            continue
-    return removed
-
-
-def save_partial_batch(
-    directory: Path,
-    snapshot: ParseProgressSnapshot,
-    *,
-    run_id: str | None = None,
-) -> Path:
-    """Сохраняет JSON с вакансиями на текущий момент (инкрементальный батч)."""
-    directory.mkdir(parents=True, exist_ok=True)
-    rid = run_id or datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    path = directory / f"partial_{rid}_{snapshot.posts_processed:05d}.json"
-    payload = {
-        "posts_processed": snapshot.posts_processed,
-        "posts_total": snapshot.posts_total,
-        "vacancies_found": snapshot.vacancies_found,
-        "phase": snapshot.phase,
-        "ai_llm_disabled": snapshot.ai_llm_disabled,
-        "ai_llm_disabled_reason": snapshot.ai_llm_disabled_reason,
-        "saved_at": datetime.now(UTC).isoformat(),
-        "vacancies": [v.model_dump(mode="json") for v in snapshot.vacancies],
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path

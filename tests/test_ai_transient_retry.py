@@ -16,7 +16,6 @@ from tg_jobs_parser.config.schema import (
     AiConfig,
     AppConfig,
     FxConfig,
-    OutputConfig,
     ParserConfig,
     SourcesConfig,
 )
@@ -126,7 +125,6 @@ def _run_with_quota_exhausted_after(monkeypatch, *, mode: str, ok_calls: int, po
             vacancy_min_substantive_score=1,
             vacancy_fuzzy_duplicate_threshold=101,
         ),
-        output=OutputConfig(save_progress_batches=False),
         fx=FxConfig(enabled=False),
         ai=AiConfig(enabled=True, mode=mode, use_cache=False, concurrency=1, requests_per_minute=500),
     )
@@ -175,7 +173,6 @@ def _run_with_extract(monkeypatch, fake_extract, *, mode: str, posts: int, **ai_
             vacancy_min_substantive_score=1,
             vacancy_fuzzy_duplicate_threshold=101,
         ),
-        output=OutputConfig(save_progress_batches=False),
         fx=FxConfig(enabled=False),
         ai=AiConfig(enabled=True, mode=mode, use_cache=False, concurrency=1, requests_per_minute=500, **ai_overrides),
     )

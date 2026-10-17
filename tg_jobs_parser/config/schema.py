@@ -164,7 +164,6 @@ class AiConfig(BaseModel):
         default="assist",
         description="assist — AI дополняет/уточняет поля; primary — AI основной источник.",
     )
-    provider: str = Field(default="openrouter", description="openrouter")
     model: str = Field(
         default="",
         description="Id основной модели (из llm_models.yaml). Пусто — default_model из реестра.",
@@ -606,15 +605,6 @@ class HhConfig(BaseModel):
     app_version: str = Field(default="1.0")
 
 
-class OutputConfig(BaseModel):
-    directory: str = "output"
-    save_progress_batches: bool = Field(
-        default=True,
-        description="Сохранять partial_*.json по мере обработки (для UI и восстановления).",
-    )
-    partial_batches_subdirectory: str = "partial"
-
-
 class TelegramConfig(BaseModel):
     """Получение сообщений только через Telethon (MTProto, файл сессии)."""
 
@@ -648,7 +638,6 @@ class AppConfig(BaseModel):
     fx: FxConfig = Field(default_factory=FxConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     hh: HhConfig = Field(default_factory=HhConfig)
-    output: OutputConfig = Field(default_factory=OutputConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     dictionaries: DictionariesConfig = Field(default_factory=DictionariesConfig)
 
