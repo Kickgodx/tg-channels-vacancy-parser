@@ -37,6 +37,7 @@ export interface Vacancy {
   ai_notes?: string | null;
   match_score?: number | null;
   match_explanation?: string | null;
+  archived_at?: string | null;
 }
 
 /** Элемент списка: без полных текстов, только preview. */
@@ -68,6 +69,7 @@ export interface VacancyListItem {
   ai_notes?: string | null;
   match_score?: number | null;
   match_explanation?: string | null;
+  archived_at?: string | null;
 }
 
 export interface ConfigDefaults {

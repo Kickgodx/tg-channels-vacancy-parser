@@ -423,7 +423,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `GET` | `/runs` \| `/runs/{id}` | История прогонов / статус, метрики и durable `progress` (admin) |
 | `GET` | `/runs/{id}/events` | SSE: прогресс (admin; Redis pub/sub или DB poll); после F5 — resume; `?ticket=` или Bearer |
 | `POST` | `/runs/{id}/cancel` | Отмена (admin; флаг в БД; работает после рестарта API) |
-| `GET` | `/runs/{id}/vacancies` | Вакансии прогона (admin; `sort_by`, `sort_order`) |
+| `GET` | `/runs/{id}/vacancies` | Вакансии прогона (admin; `sort_by`, `sort_order`): все, что прогон встретил, — и новые, и уже известные; повторная встреча в следующем прогоне их из старого не убирает (связка `parse_run_vacancies`), архивные по TTL тоже остаются — с пометкой «архив» у даты |
 | `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта (admin) |
 | `GET` | `/vacancies` | Глобальный список (slim: `preview` без полных текстов; фильтры, сортировка, пагинация, `resume_id`) |
 | `GET` | `/vacancies/{id}` | Полная вакансия (`raw_text` / `cleaned_text`) для карточки |

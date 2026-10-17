@@ -136,8 +136,18 @@ export default function VacancyTable({
         );
       case "source_channel":
         return `@${v.source_channel}`;
-      case "post_date":
-        return v.post_date ? new Date(v.post_date).toLocaleDateString() : "—";
+      case "post_date": {
+        const date = v.post_date ? new Date(v.post_date).toLocaleDateString() : "—";
+        if (!v.archived_at) return date;
+        return (
+          <>
+            {date}{" "}
+            <span className="muted" title={`В архиве с ${new Date(v.archived_at).toLocaleDateString()}`}>
+              · архив
+            </span>
+          </>
+        );
+      }
       case "detected_salary_avg": {
         if (v.detected_salary_avg == null) return "—";
         const cur = (v.salary_currency || "").trim();

@@ -462,7 +462,8 @@ def purge_old_parse_runs(session: Session, *, older_than: datetime, limit: int =
     """Удалить до ``limit`` завершённых прогонов старше ``older_than``.
 
     Каждый прогон несёт снимок конфигурации, ``run_params`` и метрики. Вакансии не
-    трогаются: ``vacancies.last_parse_run_id`` — не FK, вакансия остаётся в корпусе.
+    трогаются: ``vacancies.last_parse_run_id`` — не FK, вакансия остаётся в корпусе;
+    строки ``parse_run_vacancies`` прогона уходят каскадом по FK.
     """
     old = (
         select(ParseRunRow.id)

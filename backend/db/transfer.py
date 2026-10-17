@@ -19,6 +19,7 @@ from backend.db.models import (
     AIExtractionCacheRow,
     ExchangeRateRow,
     ParseRunRow,
+    ParseRunVacancyRow,
     VacancyRow,
 )
 
@@ -30,8 +31,11 @@ TABLE_MODELS: list[tuple[str, type]] = [
     ("parse_runs", ParseRunRow),
     ("exchange_rates", ExchangeRateRow),
     ("vacancies", VacancyRow),
+    ("parse_run_vacancies", ParseRunVacancyRow),
     ("ai_extraction_cache", AIExtractionCacheRow),
 ]
+
+_RUN_LINKS_TABLE = "parse_run_vacancies"
 
 ImportMode = Literal["merge", "replace"]
 
@@ -41,6 +45,7 @@ class DumpStats:
     parse_runs: int = 0
     exchange_rates: int = 0
     vacancies: int = 0
+    parse_run_vacancies: int = 0
     ai_extraction_cache: int = 0
 
 
@@ -49,6 +54,7 @@ class ImportStats:
     parse_runs: int = 0
     exchange_rates: int = 0
     vacancies: int = 0
+    parse_run_vacancies: int = 0
     ai_extraction_cache: int = 0
 
 
@@ -134,6 +140,7 @@ def write_dump_file(session: Session, path: Path) -> DumpStats:
         parse_runs=len(tables.get("parse_runs", [])),
         exchange_rates=len(tables.get("exchange_rates", [])),
         vacancies=len(tables.get("vacancies", [])),
+        parse_run_vacancies=len(tables.get("parse_run_vacancies", [])),
         ai_extraction_cache=len(tables.get("ai_extraction_cache", [])),
     )
 
@@ -176,6 +183,20 @@ def _upsert_rows(session: Session, model: type, rows: list[dict[str, Any]]) -> i
     return count
 
 
+def _backfill_run_links(session: Session) -> int:
+    """Связка прогон ↔ вакансия из ``last_parse_run_id`` — для дампов, снятых до неё."""
+    dialect = session.get_bind().dialect.name
+    ins = pg_insert if dialect == "postgresql" else sqlite_insert
+    # WHERE обязателен: без него SQLite не разбирает INSERT … SELECT … ON CONFLICT.
+    src = (
+        select(VacancyRow.last_parse_run_id, VacancyRow.id)
+        .join(ParseRunRow, ParseRunRow.id == VacancyRow.last_parse_run_id)
+        .where(VacancyRow.last_parse_run_id.is_not(None))
+    )
+    stmt = ins(ParseRunVacancyRow).from_select(["parse_run_id", "vacancy_id"], src).on_conflict_do_nothing()
+    return int(session.execute(stmt).rowcount or 0)
+
+
 def import_database(
     session: Session,
     payload: dict[str, Any],
@@ -201,9 +222,14 @@ def import_database(
         if mode == "replace":
             for raw in raw_rows:
                 session.add(model(**_deserialize_row(model, raw)))
+            # Flush по таблице: без relationship ORM не гарантирует порядок INSERT под FK.
+            session.flush()
             stats[name] = len(raw_rows)
         else:
             stats[name] = _upsert_rows(session, model, raw_rows)
+    if _RUN_LINKS_TABLE not in tables:
+        session.flush()
+        stats[_RUN_LINKS_TABLE] = _backfill_run_links(session)
 
     _LOG.info(
         "Импорт (%s): parse_runs=%s, exchange_rates=%s, vacancies=%s, ai_cache=%s",
@@ -217,6 +243,7 @@ def import_database(
         parse_runs=stats.get("parse_runs", 0),
         exchange_rates=stats.get("exchange_rates", 0),
         vacancies=stats.get("vacancies", 0),
+        parse_run_vacancies=stats.get(_RUN_LINKS_TABLE, 0),
         ai_extraction_cache=stats.get("ai_extraction_cache", 0),
     )
 
