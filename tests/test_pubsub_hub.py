@@ -11,7 +11,7 @@ import pytest
 
 from backend.api.routes import runs
 from backend.db import parse_run_repository as pr
-from backend.db.session import init_db, reset_engine, session_scope
+from backend.db.session import reset_engine, session_scope
 from backend.queue import rq_conn
 from backend.services.pubsub_hub import PubSubHub, PubSubUnavailable
 from backend.settings import get_settings
@@ -125,12 +125,10 @@ def test_subscribe_without_redis_raises_unavailable(monkeypatch):
 
 
 @pytest.fixture
-def running_run(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{(tmp_path / 'sse.db').as_posix()}")
+def running_run(monkeypatch, pg_db):
     monkeypatch.setenv("REDIS_URL", "redis://fake:6379/0")
     get_settings.cache_clear()
     reset_engine()
-    init_db()
     with session_scope() as session:
         rid = pr.create_parse_run(session, config_snapshot={}, status="running").id
     yield rid

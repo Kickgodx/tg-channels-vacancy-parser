@@ -14,7 +14,7 @@ from backend.db.channel_checkpoint_repository import (
     load_channel_checkpoints,
     save_channel_checkpoints,
 )
-from backend.db.session import init_db, reset_engine, session_scope
+from backend.db.session import reset_engine, session_scope
 from backend.settings import get_settings
 from backend.workers import parse_tasks
 from backend.workers.parse_tasks import run_parse_job
@@ -29,11 +29,9 @@ CP_NEW = ChannelCheckpoint(last_message_id=150, covered_from=date(2026, 10, 1))
 
 
 @pytest.fixture(autouse=True)
-def _sqlite_db(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{(tmp_path / 'cp.db').as_posix()}")
+def _db(monkeypatch, pg_db):
     get_settings.cache_clear()
     reset_engine()
-    init_db()
     yield
     reset_engine()
     get_settings.cache_clear()

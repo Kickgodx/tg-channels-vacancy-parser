@@ -178,7 +178,7 @@ def reclaim_expired_hh_sync_job(session: Session, job_id: uuid.UUID, *, now: dat
     else:
         outcome = "queued"
         values = {**base, "status": "queued", "started_at": None, "progress": None}
-    # synchronize_session=False: SQLite отдаёт naive datetime, evaluate ломается на aware ts.
+    # synchronize_session=False: identity map всё равно сбрасывается expire_all() ниже.
     result = session.execute(
         update(HhSyncJobRow)
         .where(

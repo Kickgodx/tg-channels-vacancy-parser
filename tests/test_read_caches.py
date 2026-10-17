@@ -9,7 +9,7 @@ import pytest
 
 from backend.db import aggregate_cache, vacancy_repository
 from backend.db.aggregate_cache import cached_aggregate, invalidate_aggregate_cache
-from backend.db.session import init_db, reset_engine, session_scope
+from backend.db.session import reset_engine, session_scope
 from backend.schemas import VacancyQuery
 from backend.settings import get_settings
 from tg_jobs_parser.config import loader
@@ -62,11 +62,9 @@ def test_load_config_errors_are_not_cached(tmp_path):
 
 
 @pytest.fixture
-def db(monkeypatch, tmp_path):
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{(tmp_path / 'agg.db').as_posix()}")
+def db(monkeypatch, pg_db):
     get_settings.cache_clear()
     reset_engine()
-    init_db()
     yield
     reset_engine()
     get_settings.cache_clear()

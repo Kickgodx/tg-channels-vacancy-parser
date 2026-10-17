@@ -112,7 +112,7 @@ def export_vacancies_xlsx(
     """Excel вакансий в БД с учётом фильтров (как в списке), не больше ``EXPORT_MAX_ROWS`` строк."""
     query = filters.model_copy(update={"sort_by": sort_by, "sort_order": sort_order})
     limit = export_service.export_row_limit()
-    total = counted_vacancies(db, query, dialect=db.get_bind().dialect.name)
+    total = counted_vacancies(db, query)
     metrics = aggregate_vacancy_metrics(db, query)
     return export_service.xlsx_response(
         repo.iter_export_vacancies(db, query, limit=limit),

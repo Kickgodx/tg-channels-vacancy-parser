@@ -6,12 +6,13 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import event, select
 from sqlalchemy.orm import sessionmaker
+from tests.conftest import new_parse_run
 
 from backend.db import vacancy_repository as vr
-from backend.db.base import Base
 from backend.db.models import VacancyRow
+from backend.db.session import get_engine
 from tg_jobs_parser.config.schema import FxConfig
 from tg_jobs_parser.models.vacancy import Vacancy
 
@@ -19,12 +20,8 @@ FX_OFF = FxConfig(enabled=False)
 
 
 @pytest.fixture
-def db(tmp_path):
-    engine = create_engine(
-        f"sqlite+pysqlite:///{(tmp_path / 'upsert.db').as_posix()}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
+def db(pg_db):
+    engine = get_engine()
     inserts: list[int] = []
 
     @event.listens_for(engine, "before_cursor_execute")
@@ -36,7 +33,6 @@ def db(tmp_path):
     session.info["inserts"] = inserts
     yield session
     session.close()
-    engine.dispose()
 
 
 def _v(i: int, **kw) -> Vacancy:
@@ -66,7 +62,7 @@ def test_batch_insert_uses_one_statement_per_chunk(db):
 
 
 def test_existing_rows_update_metadata_but_keep_extracted_fields(db):
-    first_run, second_run = uuid.uuid4(), uuid.uuid4()
+    first_run, second_run = new_parse_run(db), new_parse_run(db)
     old = datetime(2026, 9, 1, tzinfo=UTC)
     vr.upsert_vacancies(db, [_v(1, post_date=old), _v(2, post_date=old)], parse_run_id=first_run, fx_config=FX_OFF)
     db.execute(VacancyRow.__table__.update().values(archived_at=datetime(2026, 10, 1, tzinfo=UTC)))
@@ -93,7 +89,7 @@ def test_existing_rows_update_metadata_but_keep_extracted_fields(db):
 
 
 def test_manual_import_keeps_run_binding(db):
-    run = uuid.uuid4()
+    run = new_parse_run(db)
     vr.upsert_vacancies(db, [_v(1)], parse_run_id=run, fx_config=FX_OFF)
     vr.upsert_vacancies(db, [_v(1)], parse_run_id=None, fx_config=FX_OFF)
     db.commit()

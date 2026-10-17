@@ -47,12 +47,11 @@ def upgrade() -> None:
         op.create_index("ix_hh_sync_jobs_status", _TABLE, ["status"])
         op.create_index("ix_hh_sync_jobs_requested_by", _TABLE, ["requested_by"])
         op.create_index("ix_hh_sync_jobs_rq_job_id", _TABLE, ["rq_job_id"])
-    # Один активный sync. Postgres: expression ((true)); SQLite: (1) — см. 015.
-    expr = "((true))" if bind.dialect.name == "postgresql" else "(1)"
+    # Один активный sync: partial UNIQUE по ((true)) — см. 015.
     op.execute(
         sa.text(
             f"CREATE UNIQUE INDEX IF NOT EXISTS uq_hh_sync_jobs_one_active "
-            f"ON {_TABLE} {expr} WHERE status IN ('queued', 'running')"
+            f"ON {_TABLE} ((true)) WHERE status IN ('queued', 'running')"
         )
     )
 

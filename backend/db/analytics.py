@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import math
-from collections import defaultdict
-
 from sqlalchemy import case, func, literal, select, true
 from sqlalchemy.orm import Session
 
 from backend.db.models import VacancyRow, VacancySightingRow
 from backend.db.vacancy_filters import apply_vacancy_filters, sighting_filter_conditions
 from backend.db.vacancy_metrics import (
-    _dialect_name,
-    _pg_spec_lateral,
     _prepare_fx,
     _salary_rub_expr,
     _salary_rub_expr_table,
+    _spec_lateral,
     _vacancies_alias,
 )
 from backend.schemas import (
@@ -29,7 +25,7 @@ from backend.schemas import (
     VacancyQuery,
 )
 
-PeriodGrain = str  # "year" | "month"
+PeriodGrain = str  # "year" | "month" — первый аргумент date_trunc
 
 _TOP_COMPANIES = 20
 _TOP_SALARY_SPECS = 15
@@ -45,45 +41,15 @@ _SALARY_BANDS: list[tuple[float | None, str]] = [
 ]
 
 
-def _quantile(sorted_values: list[float], q: float) -> float | None:
-    """Линейная интерполяция, как percentile_cont в PostgreSQL."""
-    n = len(sorted_values)
-    if n == 0:
-        return None
-    if n == 1:
-        return sorted_values[0]
-    pos = (n - 1) * q
-    lo = math.floor(pos)
-    hi = math.ceil(pos)
-    if lo == hi:
-        return sorted_values[lo]
-    return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (pos - lo)
-
-
-def _stats_from_values(group: str, values: list[float]) -> SalaryGroupStats:
-    s = sorted(values)
-    return SalaryGroupStats(
-        group=group,
-        count=len(s),
-        mean=sum(s) / len(s),
-        min=s[0],
-        q1=_quantile(s, 0.25),
-        median=_quantile(s, 0.5),
-        q3=_quantile(s, 0.75),
-        max=s[-1],
-    )
-
-
-def _group_stats_pg(
+def _group_stats(
     session: Session,
     query: VacancyQuery,
     group_expr,
     *,
-    dialect: str,
     table=None,
     from_clause=None,
 ) -> list[SalaryGroupStats]:
-    """Квантили через percentile_cont WITHIN GROUP (PostgreSQL)."""
+    """Квантили через percentile_cont WITHIN GROUP; по убыванию числа вакансий."""
     sal = _salary_rub_expr_table(table) if table is not None else _salary_rub_expr()
     stmt = select(
         group_expr.label("grp"),
@@ -97,12 +63,7 @@ def _group_stats_pg(
     ).where(sal.isnot(None))
     if from_clause is not None:
         stmt = stmt.select_from(from_clause)
-    stmt = apply_vacancy_filters(
-        stmt.group_by(group_expr),
-        query,
-        table=table,
-        dialect=dialect,
-    )
+    stmt = apply_vacancy_filters(stmt.group_by(group_expr), query, table=table)
     out: list[SalaryGroupStats] = []
     for grp, n, mean_v, min_v, q1, med, q3, max_v in session.execute(stmt).all():
         if grp is None or not n:
@@ -119,152 +80,48 @@ def _group_stats_pg(
                 max=float(max_v) if max_v is not None else None,
             )
         )
+    out.sort(key=lambda r: (-r.count, r.group))
     return out
 
 
-def _group_stats_generic(
-    session: Session,
-    query: VacancyQuery,
-    group_expr,
-    *,
-    dialect: str,
-    table=None,
-    from_clause=None,
-) -> list[SalaryGroupStats]:
-    """Квантили в Python — для SQLite (тесты) и прочих диалектов."""
-    sal = _salary_rub_expr_table(table) if table is not None else _salary_rub_expr()
-    stmt = select(group_expr.label("grp"), sal.label("sal")).where(sal.isnot(None))
-    if from_clause is not None:
-        stmt = stmt.select_from(from_clause)
-    stmt = apply_vacancy_filters(stmt, query, table=table, dialect=dialect)
-    values: dict[str, list[float]] = defaultdict(list)
-    for grp, v in session.execute(stmt).all():
-        if grp is not None and v is not None:
-            values[str(grp)].append(float(v))
-    return [_stats_from_values(g, vals) for g, vals in values.items()]
-
-
-def _group_stats(
-    session: Session,
-    query: VacancyQuery,
-    group_expr,
-    *,
-    dialect: str,
-    table=None,
-    from_clause=None,
-) -> list[SalaryGroupStats]:
-    fn = _group_stats_pg if dialect == "postgresql" else _group_stats_generic
-    rows = fn(
-        session,
-        query,
-        group_expr,
-        dialect=dialect,
-        table=table,
-        from_clause=from_clause,
-    )
-    rows.sort(key=lambda r: (-r.count, r.group))
-    return rows
-
-
-def _salary_by_spec(session: Session, query: VacancyQuery, *, dialect: str) -> list[SalaryGroupStats]:
-    if dialect == "postgresql":
-        v = _vacancies_alias()
-        spec_lat = _pg_spec_lateral(v)
-        rows = _group_stats_pg(
-            session,
-            query,
-            spec_lat.c.spec,
-            dialect=dialect,
-            table=v,
-            from_clause=v.join(spec_lat, true()),
-        )
-    else:
-        je = func.json_each(VacancyRow.detected_specializations).table_valued("value", with_ordinality=False)
-        rows = _group_stats_generic(
-            session,
-            query,
-            je.c.value,
-            dialect=dialect,
-            from_clause=VacancyRow.__table__.join(je, true()),
-        )
-    rows.sort(key=lambda r: (-r.count, r.group))
+def _salary_by_spec(session: Session, query: VacancyQuery) -> list[SalaryGroupStats]:
+    v = _vacancies_alias()
+    spec_lat = _spec_lateral(v)
+    rows = _group_stats(session, query, spec_lat.c.spec, table=v, from_clause=v.join(spec_lat, true()))
     return rows[:_TOP_SALARY_SPECS]
-
-
-def _period_key(post_date, grain: PeriodGrain) -> str:
-    return post_date.strftime("%Y") if grain == "year" else post_date.strftime("%Y-%m")
 
 
 def _salary_period_buckets(
     session: Session,
     query: VacancyQuery,
     *,
-    dialect: str,
     grain: PeriodGrain,
 ) -> list[SalaryMonthlyBucket]:
     sal = _salary_rub_expr()
-    if dialect == "postgresql":
-        trunc = func.date_trunc(grain, VacancyRow.post_date)
-        stmt = apply_vacancy_filters(
-            select(
-                trunc.label("p"),
-                func.count(),
-                func.avg(sal),
-                func.percentile_cont(0.5).within_group(sal),
-            )
-            .where(VacancyRow.post_date.isnot(None), sal.isnot(None))
-            .group_by(trunc)
-            .order_by(trunc),
-            query,
-            dialect=dialect,
-        )
-        fmt = "%Y" if grain == "year" else "%Y-%m"
-        return [
-            SalaryMonthlyBucket(
-                period=p.strftime(fmt),
-                count=int(n),
-                mean=float(mn) if mn is not None else None,
-                median=float(md) if md is not None else None,
-            )
-            for p, n, mn, md in session.execute(stmt).all()
-            if p is not None
-        ]
+    trunc = func.date_trunc(grain, VacancyRow.post_date)
     stmt = apply_vacancy_filters(
-        select(VacancyRow.post_date, sal.label("sal")).where(VacancyRow.post_date.isnot(None), sal.isnot(None)),
-        query,
-        dialect=dialect,
-    )
-    values: dict[str, list[float]] = defaultdict(list)
-    for post_date, v in session.execute(stmt).all():
-        if post_date is not None and v is not None:
-            values[_period_key(post_date, grain)].append(float(v))
-    out: list[SalaryMonthlyBucket] = []
-    for period in sorted(values):
-        vals = sorted(values[period])
-        out.append(
-            SalaryMonthlyBucket(
-                period=period,
-                count=len(vals),
-                mean=sum(vals) / len(vals),
-                median=_quantile(vals, 0.5),
-            )
+        select(
+            trunc.label("p"),
+            func.count(),
+            func.avg(sal),
+            func.percentile_cont(0.5).within_group(sal),
         )
-    return out
-
-
-def _period_group_bucket(period: str, group: str, values: list[float]) -> SalaryPeriodGroupBucket:
-    s = sorted(values)
-    return SalaryPeriodGroupBucket(
-        period=period,
-        group=group,
-        count=len(s),
-        mean=sum(s) / len(s),
-        min=s[0],
-        q1=_quantile(s, 0.25),
-        median=_quantile(s, 0.5),
-        q3=_quantile(s, 0.75),
-        max=s[-1],
+        .where(VacancyRow.post_date.isnot(None), sal.isnot(None))
+        .group_by(trunc)
+        .order_by(trunc),
+        query,
     )
+    fmt = "%Y" if grain == "year" else "%Y-%m"
+    return [
+        SalaryMonthlyBucket(
+            period=p.strftime(fmt),
+            count=int(n),
+            mean=float(mn) if mn is not None else None,
+            median=float(md) if md is not None else None,
+        )
+        for p, n, mn, md in session.execute(stmt).all()
+        if p is not None
+    ]
 
 
 def _salary_period_group(
@@ -272,100 +129,75 @@ def _salary_period_group(
     query: VacancyQuery,
     group_expr,
     *,
-    dialect: str,
     grain: PeriodGrain,
 ) -> list[SalaryPeriodGroupBucket]:
     sal = _salary_rub_expr()
-    if dialect == "postgresql":
-        trunc = func.date_trunc(grain, VacancyRow.post_date)
-        stmt = apply_vacancy_filters(
-            select(
-                trunc.label("p"),
-                group_expr.label("grp"),
-                func.count(),
-                func.avg(sal),
-                func.min(sal),
-                func.percentile_cont(0.25).within_group(sal),
-                func.percentile_cont(0.5).within_group(sal),
-                func.percentile_cont(0.75).within_group(sal),
-                func.max(sal),
-            )
-            .where(VacancyRow.post_date.isnot(None), sal.isnot(None))
-            .group_by(trunc, group_expr)
-            .order_by(trunc, group_expr),
-            query,
-            dialect=dialect,
-        )
-        fmt = "%Y" if grain == "year" else "%Y-%m"
-        out: list[SalaryPeriodGroupBucket] = []
-        for p, grp, n, mean_v, min_v, q1, med, q3, max_v in session.execute(stmt).all():
-            if p is None or grp is None or not n:
-                continue
-            out.append(
-                SalaryPeriodGroupBucket(
-                    period=p.strftime(fmt),
-                    group=str(grp),
-                    count=int(n),
-                    mean=float(mean_v) if mean_v is not None else None,
-                    min=float(min_v) if min_v is not None else None,
-                    q1=float(q1) if q1 is not None else None,
-                    median=float(med) if med is not None else None,
-                    q3=float(q3) if q3 is not None else None,
-                    max=float(max_v) if max_v is not None else None,
-                )
-            )
-        return out
-
+    trunc = func.date_trunc(grain, VacancyRow.post_date)
     stmt = apply_vacancy_filters(
-        select(VacancyRow.post_date, group_expr.label("grp"), sal.label("sal")).where(
-            VacancyRow.post_date.isnot(None),
-            sal.isnot(None),
-        ),
+        select(
+            trunc.label("p"),
+            group_expr.label("grp"),
+            func.count(),
+            func.avg(sal),
+            func.min(sal),
+            func.percentile_cont(0.25).within_group(sal),
+            func.percentile_cont(0.5).within_group(sal),
+            func.percentile_cont(0.75).within_group(sal),
+            func.max(sal),
+        )
+        .where(VacancyRow.post_date.isnot(None), sal.isnot(None))
+        .group_by(trunc, group_expr)
+        .order_by(trunc, group_expr),
         query,
-        dialect=dialect,
     )
-    values: dict[tuple[str, str], list[float]] = defaultdict(list)
-    for post_date, grp, v in session.execute(stmt).all():
-        if post_date is None or grp is None or v is None:
+    fmt = "%Y" if grain == "year" else "%Y-%m"
+    out: list[SalaryPeriodGroupBucket] = []
+    for p, grp, n, mean_v, min_v, q1, med, q3, max_v in session.execute(stmt).all():
+        if p is None or grp is None or not n:
             continue
-        values[(_period_key(post_date, grain), str(grp))].append(float(v))
-    out = [_period_group_bucket(period, group, vals) for (period, group), vals in values.items()]
-    out.sort(key=lambda r: (r.period, -r.count, r.group))
+        out.append(
+            SalaryPeriodGroupBucket(
+                period=p.strftime(fmt),
+                group=str(grp),
+                count=int(n),
+                mean=float(mean_v) if mean_v is not None else None,
+                min=float(min_v) if min_v is not None else None,
+                q1=float(q1) if q1 is not None else None,
+                median=float(med) if med is not None else None,
+                q3=float(q3) if q3 is not None else None,
+                max=float(max_v) if max_v is not None else None,
+            )
+        )
     return out
 
 
-def _salary_distribution(session: Session, query: VacancyQuery, *, dialect: str) -> list[SalaryDistributionBucket]:
+def _salary_distribution(session: Session, query: VacancyQuery) -> list[SalaryDistributionBucket]:
     sal = _salary_rub_expr()
     band = case(
         *[(sal < edge, literal(label)) for edge, label in _SALARY_BANDS[:-1]],
         else_=literal(_SALARY_BANDS[-1][1]),
     )
-    stmt = apply_vacancy_filters(
-        select(band.label("band"), func.count()).where(sal.isnot(None)).group_by(band),
-        query,
-        dialect=dialect,
-    )
+    stmt = apply_vacancy_filters(select(band.label("band"), func.count()).where(sal.isnot(None)).group_by(band), query)
     counts = {str(b): int(c) for b, c in session.execute(stmt).all()}
     return [SalaryDistributionBucket(range=label, count=counts.get(label, 0)) for _, label in _SALARY_BANDS]
 
 
 def salary_analytics(session: Session, query: VacancyQuery) -> SalaryAnalytics:
     """Зарплатная аналитика по фильтрам списка вакансий."""
-    dialect = _dialect_name(session)
     salary_display = _prepare_fx(session)
     wf_expr = func.coalesce(VacancyRow.work_format, literal("unknown"))
     grade_expr = VacancyRow.detected_grade
     return SalaryAnalytics(
-        by_grade=_group_stats(session, query, grade_expr, dialect=dialect),
-        by_work_format=_group_stats(session, query, wf_expr, dialect=dialect),
-        by_specialization=_salary_by_spec(session, query, dialect=dialect),
-        monthly=_salary_period_buckets(session, query, dialect=dialect, grain="month"),
-        yearly=_salary_period_buckets(session, query, dialect=dialect, grain="year"),
-        by_grade_yearly=_salary_period_group(session, query, grade_expr, dialect=dialect, grain="year"),
-        by_work_format_yearly=_salary_period_group(session, query, wf_expr, dialect=dialect, grain="year"),
-        by_grade_monthly=_salary_period_group(session, query, grade_expr, dialect=dialect, grain="month"),
-        by_work_format_monthly=_salary_period_group(session, query, wf_expr, dialect=dialect, grain="month"),
-        distribution=_salary_distribution(session, query, dialect=dialect),
+        by_grade=_group_stats(session, query, grade_expr),
+        by_work_format=_group_stats(session, query, wf_expr),
+        by_specialization=_salary_by_spec(session, query),
+        monthly=_salary_period_buckets(session, query, grain="month"),
+        yearly=_salary_period_buckets(session, query, grain="year"),
+        by_grade_yearly=_salary_period_group(session, query, grade_expr, grain="year"),
+        by_work_format_yearly=_salary_period_group(session, query, wf_expr, grain="year"),
+        by_grade_monthly=_salary_period_group(session, query, grade_expr, grain="month"),
+        by_work_format_monthly=_salary_period_group(session, query, wf_expr, grain="month"),
+        distribution=_salary_distribution(session, query),
         salary_display=salary_display,
     )
 
@@ -378,7 +210,6 @@ def source_quality(session: Session, query: VacancyQuery) -> list[SourceStats]:
     чей текст до этого не встречался (ни в другом канале, ни у него самого).
     У HH появлений нет — там дубли это строки ``is_duplicate`` (мультигород).
     """
-    dialect = _dialect_name(session)
     sal = _salary_rub_expr()
     stmt = apply_vacancy_filters(
         select(
@@ -389,7 +220,6 @@ def source_quality(session: Session, query: VacancyQuery) -> list[SourceStats]:
             func.avg(case((sal.isnot(None), 1.0), else_=0.0)),
         ).group_by(VacancyRow.source_channel, VacancyRow.is_duplicate),
         query,
-        dialect=dialect,
         include_duplicates=True,
     )
     per_channel: dict[str, dict] = {}
@@ -413,7 +243,7 @@ def source_quality(session: Session, query: VacancyQuery) -> list[SourceStats]:
     sightings = (
         select(s.source_channel, func.count(), func.sum(case((s.is_duplicate, 1), else_=0)))
         .join(VacancyRow, VacancyRow.id == s.vacancy_id)
-        .where(*sighting_filter_conditions(query, dialect=dialect))
+        .where(*sighting_filter_conditions(query))
         .group_by(s.source_channel)
     )
     # Канал может не иметь своих вакансий вовсе — только перепосты чужих: он тоже в отчёте.
@@ -445,7 +275,6 @@ def source_quality(session: Session, query: VacancyQuery) -> list[SourceStats]:
 
 def top_companies(session: Session, query: VacancyQuery, *, limit: int = _TOP_COMPANIES) -> list[CompanyStats]:
     """Топ работодателей по числу вакансий."""
-    dialect = _dialect_name(session)
     sal = _salary_rub_expr()
     stmt = apply_vacancy_filters(
         select(
@@ -460,7 +289,6 @@ def top_companies(session: Session, query: VacancyQuery, *, limit: int = _TOP_CO
         .order_by(func.count().desc(), VacancyRow.company.asc())
         .limit(limit),
         query,
-        dialect=dialect,
     )
     return [
         CompanyStats(

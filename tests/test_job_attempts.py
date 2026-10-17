@@ -11,7 +11,7 @@ import pytest
 from backend.db import llm_job_repository as lj
 from backend.db import parse_run_repository as pr
 from backend.db.models import LlmJobRow, ResumeRow, UserRow, VacancyRow
-from backend.db.session import init_db, reset_engine, session_scope
+from backend.db.session import reset_engine, session_scope
 from backend.settings import get_settings
 from backend.workers import parse_tasks
 from backend.workers.recover import recover_stuck_llm_jobs
@@ -22,9 +22,7 @@ from tg_jobs_parser.models.parse_result import ParseResult
 
 
 @pytest.fixture(autouse=True)
-def _db(monkeypatch, tmp_path):
-    db_file = tmp_path / "attempts.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
+def _db(monkeypatch, pg_db):
     monkeypatch.setenv("JWT_SECRET", "test-secret-value-for-tests")
     monkeypatch.setenv("PARSE_JOB_BACKEND", "inprocess")
     monkeypatch.setenv("LLM_JOB_BACKEND", "inprocess")
@@ -32,7 +30,6 @@ def _db(monkeypatch, tmp_path):
     monkeypatch.setenv("LLM_JOB_MAX_ATTEMPTS", "2")
     get_settings.cache_clear()
     reset_engine()
-    init_db()
     yield
     reset_engine()
     get_settings.cache_clear()

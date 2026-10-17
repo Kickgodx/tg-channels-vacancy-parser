@@ -30,23 +30,14 @@ def _fail_if_multiple_active_parses() -> None:
 
 
 def _create_one_active_parse_index() -> None:
-    """Postgres: expression index ``((true))``; SQLite: константа ``(1)``."""
-    bind = op.get_bind()
-    if bind.dialect.name == "postgresql":
-        # Одинарные скобки (1) — SyntaxError; нужен expression: ((true)).
-        op.execute(
-            sa.text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_parse_runs_one_active "
-                "ON parse_runs ((true)) WHERE status IN ('queued', 'running')"
-            )
+    """Partial UNIQUE по выражению ``((true))``: не больше одной активной строки."""
+    # Одинарные скобки (1) — SyntaxError; нужен expression: ((true)).
+    op.execute(
+        sa.text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_parse_runs_one_active "
+            "ON parse_runs ((true)) WHERE status IN ('queued', 'running')"
         )
-    else:
-        op.execute(
-            sa.text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_parse_runs_one_active "
-                "ON parse_runs (1) WHERE status IN ('queued', 'running')"
-            )
-        )
+    )
 
 
 def upgrade() -> None:

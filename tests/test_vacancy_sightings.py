@@ -9,13 +9,12 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from backend.db import analytics
 from backend.db import parse_run_repository as prr
 from backend.db import vacancy_repository as vr
-from backend.db.base import Base
 from backend.db.migrate import alembic_ini_path
 from backend.db.models import ParseRunRow, VacancyRow, VacancySightingRow
 from backend.db.transfer import import_dump_file, write_dump_file
@@ -28,21 +27,8 @@ DAY = datetime(2026, 9, 1, tzinfo=UTC)
 
 
 @pytest.fixture
-def db(tmp_path):
-    engine = create_engine(
-        f"sqlite+pysqlite:///{(tmp_path / 's.db').as_posix()}", connect_args={"check_same_thread": False}
-    )
-
-    # Как в Postgres: FK проверяются, каскадят и обнуляются.
-    @event.listens_for(engine, "connect")
-    def _fk_on(dbapi_conn, _record):
-        dbapi_conn.execute("PRAGMA foreign_keys=ON")
-
-    Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
-    yield session
-    session.close()
-    engine.dispose()
+def db(db_session):
+    return db_session
 
 
 def _v(
@@ -188,14 +174,12 @@ def test_source_quality_filters_apply_to_sightings(db):
     assert (beta.channel, beta.vacancies, beta.duplicates) == ("beta", 1, 0)
 
 
-def test_migration_backfills_telegram_originals(tmp_path, monkeypatch):
-    path = tmp_path / "migrate.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{path.as_posix()}")
+def test_migration_backfills_telegram_originals(pg_empty_db):
     cfg = Config(str(alembic_ini_path()))
     cfg.attributes["configure_logger"] = False
     command.upgrade(cfg, "026_parse_run_vacancies")
 
-    engine = create_engine(f"sqlite+pysqlite:///{path.as_posix()}")
+    engine = create_engine(pg_empty_db)
     run_id = uuid.uuid4()
     with sessionmaker(bind=engine)() as s:
         s.add(ParseRunRow(id=run_id, status="completed", config_snapshot={}))

@@ -149,11 +149,6 @@ def _hash_refresh(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _aware(value: datetime) -> datetime:
-    # SQLite отдаёт naive datetime — в БД всё в UTC.
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
 def issue_refresh_token(session: Session, user: UserRow, *, family_id: str | None = None) -> str:
     """Новый refresh-токен; без ``family_id`` — новая сессия (вход)."""
     raw = secrets.token_urlsafe(32)
@@ -172,7 +167,7 @@ def rotate_refresh_token(session: Session, raw: str) -> RefreshOutcome | None:
     """Обменять refresh-токен на следующий в той же сессии; None — сессии нет (401)."""
     row = refresh_repo.get_refresh_token_by_hash(session, _hash_refresh(raw))
     now = datetime.now(UTC)
-    if row is None or row.revoked_at is not None or _aware(row.expires_at) <= now:
+    if row is None or row.revoked_at is not None or row.expires_at <= now:
         return None
     user = session.get(UserRow, row.user_id)
     if user is None or not user.is_active or row.token_version != user.token_version:
@@ -182,7 +177,7 @@ def rotate_refresh_token(session: Session, raw: str) -> RefreshOutcome | None:
     session.refresh(row)
     if row.revoked_at is not None:
         return None
-    if row.rotated_at is not None and now - _aware(row.rotated_at) <= REFRESH_REUSE_GRACE:
+    if row.rotated_at is not None and now - row.rotated_at <= REFRESH_REUSE_GRACE:
         return RefreshOutcome(user, None)
     refresh_repo.revoke_family(session, row.family_id, now=now)
     # Коммит здесь: вызывающий ответит 401, и get_db откатил бы отзыв вместе с ним.

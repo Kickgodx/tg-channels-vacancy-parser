@@ -2,7 +2,7 @@
 
 Функциональный GIN-индекс на ``to_tsvector('russian', cleaned_text)`` —
 запросы вида ``to_tsvector('russian', cleaned_text) @@ query`` используют
-его без отдельной generated-колонки (совместимо с SQLite в тестах).
+его без отдельной generated-колонки.
 
 Revision ID: 004_fts_and_saved_filters
 Revises: 003_vacancy_archived_at
@@ -21,9 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # GIN/to_tsvector — только PostgreSQL; на SQLite (тесты) поиск идёт через ILIKE.
-    if op.get_bind().dialect.name == "postgresql":
-        op.execute("CREATE INDEX ix_vacancies_fts ON vacancies USING GIN (to_tsvector('russian', cleaned_text))")
+    op.execute("CREATE INDEX ix_vacancies_fts ON vacancies USING GIN (to_tsvector('russian', cleaned_text))")
     op.create_table(
         "saved_filters",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),

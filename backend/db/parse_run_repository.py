@@ -146,12 +146,11 @@ def reclaim_expired_parse_run(
     # legacy без lease_until: не reclaim здесь (recover отфильтрует по older_than)
     if row.lease_until is None:
         return None
-    until = row.lease_until if row.lease_until.tzinfo else row.lease_until.replace(tzinfo=UTC)
-    if until >= ts:
+    if row.lease_until >= ts:
         return None
 
     outcome, values = _reclaim_values(row, ts)
-    # synchronize_session=False: SQLite отдаёт naive datetime, evaluate ломается на aware ts.
+    # synchronize_session=False: identity map всё равно сбрасывается expire_all() ниже.
     result = session.execute(
         update(ParseRunRow)
         .where(
@@ -180,8 +179,7 @@ def reclaim_legacy_stale_parse_run(
     heartbeat = row.started_at or row.created_at
     if heartbeat is None:
         return None
-    hb = heartbeat if heartbeat.tzinfo else heartbeat.replace(tzinfo=UTC)
-    if hb >= older_than:
+    if heartbeat >= older_than:
         return None
     outcome, values = _reclaim_values(row, datetime.now(UTC))
     result = session.execute(

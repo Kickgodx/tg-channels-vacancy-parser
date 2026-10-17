@@ -10,22 +10,19 @@ from rq import Queue
 
 from backend.db import parse_run_repository as pr
 from backend.db.models import ParseRunRow
-from backend.db.session import init_db, reset_engine, session_scope
+from backend.db.session import reset_engine, session_scope
 from backend.settings import get_settings
 from backend.workers.parse_tasks import run_parse_job
 from backend.workers.recover_parse import recover_stuck_parse_runs
 
 
 @pytest.fixture(autouse=True)
-def _sqlite_parse_jobs_db(monkeypatch, tmp_path):
-    db_file = tmp_path / "parse_jobs.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
+def _db(monkeypatch, pg_db):
     monkeypatch.setenv("JWT_SECRET", "test-secret-value-for-tests")
     from backend.settings import get_settings
 
     get_settings.cache_clear()
     reset_engine()
-    init_db()
     yield
     reset_engine()
     get_settings.cache_clear()

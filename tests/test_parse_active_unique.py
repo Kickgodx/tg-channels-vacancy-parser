@@ -6,19 +6,16 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from backend.db import parse_run_repository as pr
-from backend.db.session import init_db, reset_engine, session_scope
+from backend.db.session import reset_engine, session_scope
 
 
 @pytest.fixture(autouse=True)
-def _db(monkeypatch, tmp_path):
-    db_file = tmp_path / "active_unique.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
+def _db(monkeypatch, pg_db):
     monkeypatch.setenv("JWT_SECRET", "test-secret-value-for-tests")
     from backend.settings import get_settings
 
     get_settings.cache_clear()
     reset_engine()
-    init_db()
     yield
     reset_engine()
     get_settings.cache_clear()

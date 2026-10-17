@@ -123,7 +123,7 @@ def register(
             is_admin=is_first,
         )
     except IntegrityError:
-        # Параллельная регистрация того же email мимо lock'а (SQLite, CLI).
+        # Параллельная регистрация того же email мимо lock'а (например, из CLI).
         db.rollback()
         raise _email_taken(email) from None
     if is_first:

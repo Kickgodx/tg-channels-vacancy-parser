@@ -62,26 +62,19 @@ class _FakeConn:
         self.log.append(str(stmt).split("(")[0].replace("SELECT ", ""))
 
 
-def _fake_engine(dialect: str, log: list[str]):
-    return SimpleNamespace(dialect=SimpleNamespace(name=dialect), connect=lambda: _FakeConn(log))
+def _fake_engine(log: list[str]):
+    return SimpleNamespace(connect=lambda: _FakeConn(log))
 
 
 def test_migration_lock_wraps_upgrade_on_postgres():
     log: list[str] = []
-    with migrate.migration_lock(_fake_engine("postgresql", log)):
+    with migrate.migration_lock(_fake_engine(log)):
         log.append("upgrade")
     assert log == ["options:AUTOCOMMIT", "pg_advisory_lock", "upgrade", "pg_advisory_unlock"]
 
 
 def test_migration_lock_released_on_failure():
     log: list[str] = []
-    with pytest.raises(RuntimeError), migrate.migration_lock(_fake_engine("postgresql", log)):
+    with pytest.raises(RuntimeError), migrate.migration_lock(_fake_engine(log)):
         raise RuntimeError("DDL failed")
     assert log[-1] == "pg_advisory_unlock"
-
-
-def test_migration_lock_is_noop_on_sqlite():
-    log: list[str] = []
-    with migrate.migration_lock(_fake_engine("sqlite", log)):
-        log.append("upgrade")
-    assert log == ["upgrade"]

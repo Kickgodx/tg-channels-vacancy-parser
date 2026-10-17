@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import os
 import time
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
-
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
+def client(monkeypatch, tmp_path, pg_db):
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
         """
@@ -42,16 +39,14 @@ hh:
 """,
         encoding="utf-8",
     )
-    db_file = tmp_path / "test.db"
     monkeypatch.setenv("CONFIG_PATH", str(cfg))
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
     monkeypatch.setenv("JWT_SECRET", "test-secret")
     # Пустые строки перекрывают значения из корневого .env (pydantic env_file).
     monkeypatch.setenv("HH_API_TOKEN", "")
     monkeypatch.setenv("HH_CONTACT_EMAIL", "")
     monkeypatch.setenv("HH_SYNC_JOB_BACKEND", "inprocess")
 
-    from backend.db.session import init_db, reset_engine
+    from backend.db.session import reset_engine
     from backend.settings import get_settings
 
     get_settings.cache_clear()
@@ -59,7 +54,6 @@ hh:
 
     from backend.main import app
 
-    init_db()
     with TestClient(app) as c:
         yield c
 

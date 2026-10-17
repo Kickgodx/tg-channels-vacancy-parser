@@ -372,7 +372,7 @@ def record_hh_listings_purged(count: int) -> None:
 class _DBPoolCollector:
     """Состояние QueuePool на scrape ``/metrics``.
 
-    На SQLite (SingletonThreadPool в тестах) метрики не отдаются — не QueuePool.
+    На пуле не QueuePool (NullPool и т.п.) метрики не отдаются.
     Ошибки чтения пула глотаются: scrape не должен падать.
     """
 

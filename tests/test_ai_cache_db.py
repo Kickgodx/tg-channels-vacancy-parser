@@ -1,12 +1,8 @@
-"""Кэш LLM в PostgreSQL / SQLite."""
+"""Кэш LLM в Postgres."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from backend.db.ai_cache_repository import (
     cache_clear_all,
@@ -14,25 +10,8 @@ from backend.db.ai_cache_repository import (
     cache_get,
     cache_put,
 )
-from backend.db.migrate import upgrade_head
 from tg_jobs_parser.ai.cache import cache_key
 from tg_jobs_parser.ai.schema import VacancyAIExtraction
-
-
-@pytest.fixture
-def db_session(tmp_path, monkeypatch):
-    db_file = tmp_path / "cache.db"
-    url = f"sqlite+pysqlite:///{db_file.as_posix()}"
-    monkeypatch.setenv("DATABASE_URL", url)
-    from backend.db.session import reset_engine
-
-    reset_engine()
-    upgrade_head()
-    engine = create_engine(url, connect_args={"check_same_thread": False})
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
 
 
 def _sample() -> VacancyAIExtraction:

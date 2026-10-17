@@ -6,28 +6,12 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from backend.db import repository as repo
-from backend.db.base import Base
 from backend.db.models import VacancyRow
 from backend.schemas import VacancyQuery
 from tg_jobs_parser.ai.clients.openrouter import _parse_match
 from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION, build_match_messages
-
-
-@pytest.fixture
-def db_session(tmp_path):
-    engine = create_engine(
-        f"sqlite+pysqlite:///{(tmp_path / 't.db').as_posix()}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
 
 
 def _vacancy(vid: str, text: str, score: int = 0) -> VacancyRow:

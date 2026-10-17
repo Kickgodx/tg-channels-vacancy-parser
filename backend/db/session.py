@@ -65,23 +65,15 @@ def get_engine():
     global _engine, _SessionLocal
     if _engine is None:
         settings = get_settings()
-        url = settings.database_url
-        connect_args = {}
-        if url.startswith("sqlite"):
-            connect_args["check_same_thread"] = False
-            # busy-timeout: параллельные писатели (worker-потоки, тесты) ждут,
-            # а не падают мгновенно с "database is locked".
-            connect_args["timeout"] = 30
-        pool_kw: dict = {"pool_pre_ping": True}
-        if url.startswith("postgresql"):
-            pool_kw["pool_size"], pool_kw["max_overflow"] = pool_limits(settings)
+        pool_size, max_overflow = pool_limits(settings)
         # Через модуль, а не `from sqlalchemy import create_engine`: OTel-инструментация
         # подменяет `sqlalchemy.create_engine` уже после импорта этого модуля.
         _engine = sqlalchemy.create_engine(
-            url,
-            connect_args=connect_args,
+            settings.database_url,
             json_serializer=_json_serializer,
-            **pool_kw,
+            pool_pre_ping=True,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
         )
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
     return _engine

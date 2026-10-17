@@ -114,8 +114,9 @@ pub/sub для SSE). Оба типа джоб устроены одинаков�
 - Фильтры списка, метрик, аналитики и экспорта строятся одной функцией
   (`backend/db/vacancy_filters.py`) из `VacancyQuery` — новый фильтр добавлять там,
   иначе список и аналитика разойдутся.
-- Тесты идут на SQLite, прод — Postgres: диалект-зависимые вещи (FTS →
-  `ILIKE`, JSON-операторы, миграции с FK) требуют ветки под оба диалекта.
+- Только Postgres (`DATABASE_URL` другого диалекта отклоняет `Settings`): FTS,
+  JSONB, advisory lock, `ON CONFLICT` пишутся напрямую, без веток под диалекты.
+  Тесты — тоже на Postgres (testcontainers или `TEST_DATABASE_URL`, см. `AGENTS.md`).
 - Per-user (по `user_id`, JWT): резюме, пресеты, матчи, письма, `llm_jobs`.
   Общее: вакансии, аналитика, курсы, AI-кэш — чтение любому
   залогиненному (`get_current_user` на роутере), мутации — `require_admin`.

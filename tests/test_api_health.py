@@ -2,22 +2,15 @@
 
 from __future__ import annotations
 
-import os
 from datetime import UTC
 
 import pytest
 from fastapi.testclient import TestClient
-from tests.conftest import login_as_admin, metrics_text
-
-# SQLite для тестов без Docker
-os.environ.setdefault(
-    "DATABASE_URL",
-    "sqlite+pysqlite:///:memory:",
-)
+from tests.conftest import login_as_admin, metrics_text, new_parse_run
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
+def client(monkeypatch, tmp_path, pg_db):
     cfg = tmp_path / "config.yaml"
     cfg.write_text(
         """
@@ -39,11 +32,9 @@ fx:
 """,
         encoding="utf-8",
     )
-    db_file = tmp_path / "test.db"
     monkeypatch.setenv("CONFIG_PATH", str(cfg))
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
 
-    from backend.db.session import init_db, reset_engine
+    from backend.db.session import reset_engine
     from backend.settings import get_settings
 
     get_settings.cache_clear()
@@ -51,7 +42,6 @@ fx:
 
     from backend.main import app
 
-    init_db()
     with TestClient(app) as c:
         login_as_admin(c)
         yield c
@@ -105,7 +95,6 @@ def test_ai_cache_stats(client: TestClient):
 
 
 def test_vacancy_metrics_aggregated(client: TestClient):
-    import uuid
     from datetime import datetime
 
     from backend.db.repository import upsert_vacancies
@@ -113,7 +102,6 @@ def test_vacancy_metrics_aggregated(client: TestClient):
     from tg_jobs_parser.models.vacancy import Vacancy
     from tg_jobs_parser.utils.hashing import vacancy_content_id
 
-    run_id = uuid.uuid4()
     text1 = "Python dev remote"
     v = Vacancy(
         id=vacancy_content_id(text1),
@@ -132,6 +120,7 @@ def test_vacancy_metrics_aggregated(client: TestClient):
     factory = get_session_factory()
     session = factory()
     try:
+        run_id = new_parse_run(session)
         upsert_vacancies(session, [v], parse_run_id=run_id)
         session.commit()
     finally:

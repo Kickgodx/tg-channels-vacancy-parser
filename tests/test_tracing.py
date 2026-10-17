@@ -161,14 +161,14 @@ def test_installed_libraries_satisfy_instrumentations(instrumentor_path):
     assert get_dependency_conflicts(instrumentor.instrumentation_dependencies()) is None
 
 
-def test_sql_spans_are_children_of_current_span(exporter):
+def test_sql_spans_are_children_of_current_span(exporter, pg_db):
     import sqlalchemy
     from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
     instrumentor = SQLAlchemyInstrumentor()
     instrumentor.instrument(tracer_provider=trace.get_tracer_provider())
     try:
-        engine = sqlalchemy.create_engine("sqlite://")
+        engine = sqlalchemy.create_engine(pg_db)
         with (
             trace.get_tracer("test").start_as_current_span("vacancy.match") as parent,
             engine.connect() as conn,

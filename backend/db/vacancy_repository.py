@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
-from sqlalchemy import and_, case, false, func, literal_column, null, or_, select, update
+from sqlalchemy import and_, case, false, func, null, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, defer
 
@@ -22,7 +22,7 @@ from backend.db.models import (
     VacancyRow,
     VacancySightingRow,
 )
-from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
+from backend.db.vacancy_filters import apply_vacancy_filters, fts_query, vacancy_count_stmt
 from backend.db.vacancy_mapper import (
     row_to_list_item,
     row_to_vacancy,
@@ -61,9 +61,9 @@ _count_cache_lock = Lock()
 _count_cache: dict[str, tuple[float, int]] = {}
 
 
-def _vacancy_count_cache_key(query: VacancyQuery, dialect: str) -> str:
+def _vacancy_count_cache_key(query: VacancyQuery) -> str:
     payload = query.model_dump(exclude={"page", "page_size", "sort_by", "sort_order"})
-    return f"{dialect}:{sorted(payload.items())!r}"
+    return repr(sorted(payload.items()))
 
 
 def _get_cached_vacancy_count(key: str) -> int | None:
@@ -100,12 +100,12 @@ def invalidate_vacancy_count_cache() -> None:
     invalidate_aggregate_cache()
 
 
-def counted_vacancies(session: Session, query: VacancyQuery, *, dialect: str) -> int:
-    key = _vacancy_count_cache_key(query, dialect)
+def counted_vacancies(session: Session, query: VacancyQuery) -> int:
+    key = _vacancy_count_cache_key(query)
     cached = _get_cached_vacancy_count(key)
     if cached is not None:
         return cached
-    total = int(session.scalar(vacancy_count_stmt(query, dialect=dialect)) or 0)
+    total = int(session.scalar(vacancy_count_stmt(query)) or 0)
     _set_cached_vacancy_count(key, total)
     return total
 
@@ -128,18 +128,14 @@ _SORT_COLUMNS: dict[VacancySortField, object] = {
 }
 
 
-def _vacancy_order_by(query: VacancyQuery, *, dialect: str = "postgresql") -> list:
+def _vacancy_order_by(query: VacancyQuery) -> list:
     if query.sort_by == "match_score" and query.resume_id is not None:
         col = VacancyMatchRow.overall_score
     else:
         col = _SORT_COLUMNS.get(query.sort_by, VacancyRow.post_date)
     order = col.asc().nulls_last() if query.sort_order == "asc" else col.desc().nulls_last()
-    if query.q and dialect == "postgresql":
-        rank = func.ts_rank(
-            func.to_tsvector(literal_column("'russian'"), VacancyRow.cleaned_text),
-            func.websearch_to_tsquery(literal_column("'russian'"), query.q),
-        )
-        return [rank.desc(), order]
+    if query.q:
+        return [func.ts_rank(*fts_query(VacancyRow.cleaned_text, query.q)).desc(), order]
     return [order]
 
 
@@ -149,7 +145,7 @@ def _fx_config(fx_config: FxConfig | None) -> FxConfig:
     return load_config(get_settings().config_path).fx
 
 
-# Строк на один INSERT: ~40 колонок × 200 = 8 000 параметров — ниже лимитов SQLite и Postgres.
+# Строк на один INSERT: ~40 колонок × 200 = 8 000 параметров — с запасом ниже лимита Postgres (65 535).
 _UPSERT_CHUNK = 200
 
 
@@ -202,7 +198,6 @@ def upsert_vacancies(
         session.execute(insert(VacancyRow).values(chunk).on_conflict_do_nothing(index_elements=["id"]))
     for chunk in _chunks(existing_rows):
         stmt = insert(VacancyRow).values(chunk)
-        # CASE вместо GREATEST: в SQLite (тесты) его нет, а max() там не игнорирует NULL.
         reposted_later = stmt.excluded.post_date > VacancyRow.post_date
         conflict_set = {
             "updated_at": now,
@@ -210,11 +205,8 @@ def upsert_vacancies(
             "ai_notes": stmt.excluded.ai_notes,
             "ai_confidence": stmt.excluded.ai_confidence,
             "extraction_source": stmt.excluded.extraction_source,
-            "post_date": case(
-                (VacancyRow.post_date.is_(None), stmt.excluded.post_date),
-                (reposted_later, stmt.excluded.post_date),
-                else_=VacancyRow.post_date,
-            ),
+            # GREATEST пропускает NULL: пустая дата заполняется, более ранний пост её не сдвигает.
+            "post_date": func.greatest(VacancyRow.post_date, stmt.excluded.post_date),
             "archived_at": case((reposted_later, null()), else_=VacancyRow.archived_at),
         }
         if parse_run_id is not None:
@@ -325,7 +317,8 @@ def backfill_original_sightings(session: Session) -> int:
         )
         .on_conflict_do_nothing()
     )
-    return int(session.execute(stmt).rowcount or 0)
+    # Для INSERT SQLAlchemy без preserve_rowcount отдаёт rowcount -1 (запоминает только UPDATE/DELETE).
+    return int(session.execute(stmt.execution_options(preserve_rowcount=True)).rowcount or 0)
 
 
 def _chunks(rows: list[dict]):
@@ -374,13 +367,12 @@ def _list_text_defer():
 
 
 def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[VacancyListItem], int]:
-    dialect = session.get_bind().dialect.name
     offset = (query.page - 1) * query.page_size
-    order = [*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc()]
+    order = [*_vacancy_order_by(query), VacancyRow.id.asc()]
     preview = vacancy_preview_expr()
     if query.resume_id is not None:
         stmt = (
-            apply_vacancy_filters(select(VacancyRow, VacancyMatchRow, preview), query, dialect=dialect)
+            apply_vacancy_filters(select(VacancyRow, VacancyMatchRow, preview), query)
             .outerjoin(
                 VacancyMatchRow,
                 and_(
@@ -404,13 +396,13 @@ def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[VacancyL
         # На первой неполной странице total = len (без отдельного COUNT).
         if query.page == 1 and len(items) < query.page_size:
             return items, len(items)
-        return items, counted_vacancies(session, query, dialect=dialect)
-    stmt = apply_vacancy_filters(select(VacancyRow, preview), query, dialect=dialect).options(*_list_text_defer())
+        return items, counted_vacancies(session, query)
+    stmt = apply_vacancy_filters(select(VacancyRow, preview), query).options(*_list_text_defer())
     rows = session.execute(stmt.order_by(*order).offset(offset).limit(query.page_size)).all()
     items = [row_to_list_item(vrow, prev or "") for vrow, prev in rows]
     if query.page == 1 and len(items) < query.page_size:
         return items, len(items)
-    return items, counted_vacancies(session, query, dialect=dialect)
+    return items, counted_vacancies(session, query)
 
 
 def get_vacancy(session: Session, vacancy_id: str) -> Vacancy | None:
@@ -440,14 +432,13 @@ def list_run_vacancies(
     query: VacancyQuery,
 ) -> tuple[list[VacancyListItem], int]:
     total = count_run_vacancies(session, run_id)
-    dialect = session.get_bind().dialect.name
     offset = (query.page - 1) * query.page_size
     preview = vacancy_preview_expr()
     stmt = (
         select(VacancyRow, preview)
         .where(*_run_conditions(run_id))
         .options(*_list_text_defer())
-        .order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
+        .order_by(*_vacancy_order_by(query), VacancyRow.id.asc())
         .offset(offset)
         .limit(query.page_size)
     )
@@ -472,9 +463,8 @@ def _iter_rows(session: Session, stmt) -> Iterator[Vacancy]:
 
 def iter_export_vacancies(session: Session, query: VacancyQuery, *, limit: int) -> Iterator[Vacancy]:
     """Полные Vacancy (с raw/cleaned_text) по фильтрам списка, не больше ``limit`` — для экспорта."""
-    dialect = session.get_bind().dialect.name
-    order = [*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc()]
-    stmt = apply_vacancy_filters(select(VacancyRow), query, dialect=dialect).order_by(*order).limit(limit)
+    order = [*_vacancy_order_by(query), VacancyRow.id.asc()]
+    stmt = apply_vacancy_filters(select(VacancyRow), query).order_by(*order).limit(limit)
     return _iter_rows(session, stmt)
 
 
@@ -485,11 +475,10 @@ def iter_export_run_vacancies(
     *,
     limit: int,
 ) -> Iterator[Vacancy]:
-    dialect = session.get_bind().dialect.name
     stmt = (
         select(VacancyRow)
         .where(*_run_conditions(run_id))
-        .order_by(*_vacancy_order_by(query, dialect=dialect), VacancyRow.id.asc())
+        .order_by(*_vacancy_order_by(query), VacancyRow.id.asc())
         .limit(limit)
     )
     return _iter_rows(session, stmt)

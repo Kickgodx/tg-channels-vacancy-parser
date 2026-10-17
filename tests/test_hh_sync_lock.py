@@ -7,8 +7,6 @@ from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from backend.db import hh_repository as hh_repo
 from backend.services import hh_sync_service
@@ -45,7 +43,6 @@ class _FakeConn:
 
 def _pg_session(conn: _FakeConn) -> MagicMock:
     engine = MagicMock()
-    engine.dialect.name = "postgresql"
     engine.engine = engine
     engine.connect.return_value = conn
     session = MagicMock()
@@ -94,12 +91,16 @@ def test_failed_unlock_invalidates_connection():
     assert conn.closed is True
 
 
-def test_sqlite_lock_is_noop():
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    with sessionmaker(bind=engine)() as session:
-        lock = hh_repo.HhSyncDbLock(session)
-        assert lock.try_acquire() is True
-        lock.release()
+def test_lock_excludes_second_holder_on_real_postgres(db_session):
+    first = hh_repo.HhSyncDbLock(db_session)
+    second = hh_repo.HhSyncDbLock(db_session)
+    assert first.try_acquire() is True
+    # Коммит сессии не отпускает lock: он живёт на своём соединении.
+    db_session.commit()
+    assert second.try_acquire() is False
+    first.release()
+    assert second.try_acquire() is True
+    second.release()
 
 
 class _RecordingLock:

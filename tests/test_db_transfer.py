@@ -6,29 +6,13 @@ import uuid
 from datetime import date
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from backend.db.base import Base
 from backend.db.models import ExchangeRateRow, ParseRunRow, VacancyRow
 from backend.db.transfer import (
     import_dump_file,
     load_dump_file,
     write_dump_file,
 )
-
-
-@pytest.fixture
-def db_session(tmp_path):
-    engine = create_engine(
-        f"sqlite+pysqlite:///{(tmp_path / 'transfer.db').as_posix()}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
 
 
 def _seed(session) -> uuid.UUID:

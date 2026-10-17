@@ -141,3 +141,8 @@ def test_database_url_defaults_to_compose_postgres_password(make_settings):
     assert s.database_url == "postgresql+psycopg://tgjobs:p%40ss%2Fword@127.0.0.1:5432/tgjobs"
     explicit = "postgresql+psycopg://u:x@db:5432/other"
     assert make_settings(POSTGRES_PASSWORD="ignored", DATABASE_URL=explicit).database_url == explicit
+
+
+def test_database_url_must_be_postgres(make_settings):
+    with pytest.raises(ValueError, match="только PostgreSQL"):
+        make_settings(DATABASE_URL="sqlite:///tgjobs.db")

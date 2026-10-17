@@ -186,8 +186,10 @@ def test_db_pool_collector_queue_pool(monkeypatch):
 
     from backend.observability import _DBPoolCollector
 
+    # Без соединения: коллектор читает только счётчики пула.
+    url = "postgresql+psycopg://u:p@127.0.0.1:1/x"
     eng = create_engine(
-        "sqlite+pysqlite:///:memory:",
+        url,
         poolclass=QueuePool,
         pool_size=3,
         max_overflow=2,
@@ -203,7 +205,7 @@ def test_db_pool_collector_queue_pool(monkeypatch):
     assert by_name["db_pool_checked_in"].samples[0].value == 0.0
     assert by_name["db_pool_overflow"].samples[0].value == 0.0
 
-    null_eng = create_engine("sqlite+pysqlite:///:memory:", poolclass=NullPool)
+    null_eng = create_engine(url, poolclass=NullPool)
     monkeypatch.setattr("backend.db.session.get_engine", lambda: null_eng)
     assert list(_DBPoolCollector().collect()) == []
 

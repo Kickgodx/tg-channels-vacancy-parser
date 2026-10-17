@@ -1,8 +1,190 @@
-"""Общие фикстуры тестов: конфиг без сети и без AI."""
+"""Общие фикстуры тестов: конфиг без сети и без AI, Postgres для тестов с БД."""
 
 from __future__ import annotations
 
+import os
+from dataclasses import dataclass
+
 import pytest
+import sqlalchemy as sa
+
+# --- Postgres -------------------------------------------------------------------------
+# База для тестов — тот же Postgres 16, что в docker-compose.yml. Источник:
+#   * TEST_DATABASE_URL — готовый сервер (compose-Postgres, CI-сервис); нужна роль с CREATEDB;
+#   * иначе testcontainers поднимает postgres:16-alpine в Docker на время прогона.
+# Контейнер поднимает один процесс-контроллер (pytest_configure), xdist-воркеры получают URL
+# через env. Каждый воркер создаёт свою базу и прогоняет в ней миграции; перед тестом — TRUNCATE.
+
+_PG_IMAGE = "postgres:16-alpine"
+# Данные в tmpfs без fsync: тестовой базе durability не нужна, а запись заметно быстрее.
+_PG_COMMAND = "postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c max_connections=300"
+_PG_ERROR_ENV = "TGJOBS_TEST_PG_ERROR"
+_RUN_ID_ENV = "TGJOBS_TEST_RUN_ID"
+# Нет тестового сервера: адрес никуда не ведёт (а не в dev-базу из .env), отказ — за секунду.
+_NO_DB_URL = "postgresql+psycopg://no-test-db@127.0.0.1:1/none?connect_timeout=1"
+
+_container = None
+
+
+def pytest_configure(config) -> None:
+    if hasattr(config, "workerinput"):
+        return  # xdist-воркер: URL уже в env от контроллера
+    os.environ.setdefault(_RUN_ID_ENV, str(os.getpid()))
+    if os.environ.get("TEST_DATABASE_URL"):
+        return
+    global _container
+    try:
+        from testcontainers.community.postgres import PostgresContainer
+
+        _container = (
+            PostgresContainer(_PG_IMAGE, driver="psycopg")
+            .with_command(_PG_COMMAND)
+            .with_tmpfs_mount("/var/lib/postgresql/data")
+        )
+        _container.start()
+    except Exception as exc:  # Docker не запущен — тесты без БД всё равно идут
+        _container = None
+        os.environ[_PG_ERROR_ENV] = f"{type(exc).__name__}: {exc}"
+        return
+    host = _container.get_container_host_ip()
+    # localhost на Windows сначала пробует ::1 и ждёт connect timeout.
+    os.environ["TEST_DATABASE_URL"] = _container.get_connection_url(host="127.0.0.1" if host == "localhost" else host)
+
+
+def pytest_unconfigure(config) -> None:
+    global _container
+    if _container is not None:
+        _container.stop()
+        _container = None
+
+
+def _worker_db_url() -> str | None:
+    """База этого xdist-воркера на тестовом сервере (создаёт её ``pg_database``)."""
+    admin_url = os.environ.get("TEST_DATABASE_URL")
+    if not admin_url:
+        return None
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    name = f"tgjobs_test_{os.environ.get(_RUN_ID_ENV, os.getpid())}_{worker}"
+    return sa.make_url(admin_url).set(database=name).render_as_string(hide_password=False)
+
+
+@dataclass
+class PgDatabase:
+    url: str
+    admin_url: str  # сервер целиком: создание/удаление служебных баз
+    engine: sa.Engine  # служебное соединение: TRUNCATE и сброс чужих сессий
+    tables: list[str]
+
+
+@pytest.fixture(scope="session")
+def pg_database(default_test_config):
+    """Своя база воркера с применёнными миграциями (как при старте backend)."""
+    admin_url = os.environ.get("TEST_DATABASE_URL")
+    if not admin_url:
+        reason = os.environ.get(_PG_ERROR_ENV, "TEST_DATABASE_URL не задан")
+        pytest.fail(
+            f"Нет Postgres для тестов ({reason}). Запустите Docker Desktop "
+            "или задайте TEST_DATABASE_URL на сервер с правом CREATEDB.",
+            pytrace=False,
+        )
+    from backend.db.session import init_db, reset_engine
+    from backend.settings import get_settings
+
+    url = _worker_db_url()
+    name = sa.make_url(url).database
+    admin = sa.create_engine(admin_url, isolation_level="AUTOCOMMIT", poolclass=sa.NullPool)
+    with admin.connect() as conn:
+        conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        conn.execute(sa.text(f'CREATE DATABASE "{name}"'))
+
+    mp = pytest.MonkeyPatch()
+    mp.setenv("DATABASE_URL", url)
+    get_settings.cache_clear()
+    reset_engine()
+    init_db()
+    reset_engine()
+    mp.undo()
+    get_settings.cache_clear()
+
+    engine = sa.create_engine(url, pool_size=1, max_overflow=0, pool_pre_ping=True)
+    with engine.connect() as conn:
+        tables = sorted(
+            conn.execute(
+                sa.text(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
+                )
+            ).scalars()
+        )
+    yield PgDatabase(url=url, admin_url=admin_url, engine=engine, tables=tables)
+    engine.dispose()
+    with admin.connect() as conn:
+        conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+    admin.dispose()
+
+
+def _clean(db: PgDatabase) -> None:
+    with db.engine.begin() as conn:
+        # Фоновые потоки прошлого теста (inprocess-джобы, lifespan) могли оставить
+        # открытые транзакции — они держали бы TRUNCATE на lock'е.
+        conn.execute(
+            sa.text(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            )
+        )
+        conn.execute(sa.text("SET LOCAL lock_timeout = '10s'"))
+        conn.execute(sa.text(f"TRUNCATE {', '.join(db.tables)} RESTART IDENTITY CASCADE"))
+
+
+@pytest.fixture
+def pg_db(pg_database, monkeypatch) -> str:
+    """Пустая схема (TRUNCATE) и DATABASE_URL на неё; движок приложения пересоздаётся."""
+    from backend.db.session import reset_engine
+    from backend.settings import get_settings
+
+    monkeypatch.setenv("DATABASE_URL", pg_database.url)
+    get_settings.cache_clear()
+    reset_engine()
+    _clean(pg_database)
+    yield pg_database.url
+    reset_engine()
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def pg_empty_db(pg_database, monkeypatch) -> str:
+    """Пустая база без миграций (для тестов самих миграций); DATABASE_URL — на неё."""
+    from backend.db.session import reset_engine
+    from backend.settings import get_settings
+
+    name = f"{sa.make_url(pg_database.url).database}_empty"
+    admin = sa.create_engine(pg_database.admin_url, isolation_level="AUTOCOMMIT", poolclass=sa.NullPool)
+    with admin.connect() as conn:
+        conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        conn.execute(sa.text(f'CREATE DATABASE "{name}"'))
+    url = sa.make_url(pg_database.url).set(database=name).render_as_string(hide_password=False)
+    monkeypatch.setenv("DATABASE_URL", url)
+    get_settings.cache_clear()
+    reset_engine()
+    yield url
+    reset_engine()
+    get_settings.cache_clear()
+    with admin.connect() as conn:
+        conn.execute(sa.text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+    admin.dispose()
+
+
+@pytest.fixture
+def db_session(pg_db):
+    """ORM-сессия на тестовой базе (autoflush, как у ``sessionmaker`` по умолчанию)."""
+    from sqlalchemy.orm import sessionmaker
+
+    from backend.db.session import get_engine
+
+    session = sessionmaker(bind=get_engine())()
+    yield session
+    session.close()
+
 
 # Минимальный конфиг: fx выключен (upsert/apply и startup-sync не тянут ЦБ в оффлайне).
 _TEST_CONFIG = """
@@ -36,6 +218,9 @@ def default_test_config(tmp_path_factory):
     register_db_ai_cache()
     mp = pytest.MonkeyPatch()
     mp.setenv("CONFIG_PATH", str(cfg))
+    # Тест без pg_db, задевший БД (сборщик метрик, фоновый поток), попадёт в базу воркера,
+    # а не в dev-базу из .env.
+    mp.setenv("DATABASE_URL", _worker_db_url() or _NO_DB_URL)
     # Тесты рассчитаны на dev-умолчания и не должны зависеть от APP_ENV в .env разработчика.
     mp.setenv("APP_ENV", "dev")
     # Сервер /metrics на отдельном порту в тестах не поднимаем (TestClient на каждый тест,
@@ -117,6 +302,26 @@ def metrics_text() -> str:
     return generate_latest(REGISTRY).decode("utf-8")
 
 
+def new_parse_run(session):
+    """Строка ``parse_runs`` под FK вакансий/связок прогона; возвращает её id."""
+    from backend.db.models import ParseRunRow
+
+    row = ParseRunRow(status="completed", config_snapshot={})
+    session.add(row)
+    session.flush()
+    return row.id
+
+
+def new_user(session, email: str = "user@example.com") -> int:
+    """Строка ``users`` под FK per-user таблиц; возвращает её id."""
+    from backend.db.models import UserRow
+
+    row = UserRow(email=email, password_hash="x")
+    session.add(row)
+    session.flush()
+    return row.id
+
+
 def login_as_admin(client, email: str = "admin@example.com") -> str:
     """Первый зарегистрированный пользователь — admin; Bearer ставится клиенту по умолчанию."""
     r = client.post("/api/v1/auth/register", json={"email": email, "password": "secret1"})
@@ -128,30 +333,24 @@ def login_as_admin(client, email: str = "admin@example.com") -> str:
 
 
 @pytest.fixture
-def api_client(monkeypatch, tmp_path, default_test_config):
-    """TestClient на своей SQLite-базе; схема — через alembic (`init_db`)."""
+def api_client(monkeypatch, pg_db, default_test_config):
+    """TestClient на пустой тестовой базе (схема уже прогнана миграциями)."""
     from fastapi.testclient import TestClient
 
-    db_file = tmp_path / "api.db"
     monkeypatch.setenv("CONFIG_PATH", str(default_test_config))
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{db_file.as_posix()}")
     monkeypatch.setenv("JWT_SECRET", "test-secret-value-for-tests")
+    monkeypatch.setenv("LLM_JOB_BACKEND", "inprocess")
 
-    from backend.db.session import init_db, reset_engine
+    from backend.db.session import reset_engine
     from backend.settings import get_settings
 
     get_settings.cache_clear()
-    reset_engine()
 
     from backend.main import app
     from backend.queue.rq_conn import reset_redis_connection
     from backend.services.interactive_llm import reset_interactive_client
     from backend.services.llm_job_service import llm_job_runner
 
-    monkeypatch.setenv("LLM_JOB_BACKEND", "inprocess")
-    get_settings.cache_clear()
-
-    init_db()
     with TestClient(app) as c:
         yield c
     llm_job_runner.reset()

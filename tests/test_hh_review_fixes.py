@@ -6,12 +6,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 import backend.db.models  # noqa: F401
 from backend.db import hh_repository as hh_repo
-from backend.db.base import Base
 from backend.db.models import HhListingRow, VacancyRow
 from backend.services import hh_sync_service
 from backend.settings import Settings
@@ -36,13 +32,10 @@ def _short(vid: str, *, area: str = "Москва", req: str = "Python") -> Vaca
     )
 
 
-def test_content_hash_change_resets_detail_fetched_at():
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
+def test_content_hash_change_resets_detail_fetched_at(db_session):
     now = datetime.now(UTC)
 
-    with SessionLocal() as session:
+    with db_session as session:
         session.add(
             HhListingRow(
                 hh_id="1",
@@ -62,10 +55,7 @@ def test_content_hash_change_resets_detail_fetched_at():
         assert row.content_hash != "oldhash"
 
 
-def test_employer_area_truncated():
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
+def test_employer_area_truncated(db_session):
     long_name = "X" * 400
     short = VacancyShort.model_validate(
         {
@@ -75,7 +65,7 @@ def test_employer_area_truncated():
             "area": {"name": long_name},
         }
     )
-    with SessionLocal() as session:
+    with db_session as session:
         hh_repo.upsert_listings_from_shorts(session, [short])
         session.commit()
         row = session.get(HhListingRow, "9")
@@ -84,10 +74,7 @@ def test_employer_area_truncated():
         assert len(row.area or "") <= 256
 
 
-def test_stabilize_prefers_detail_fetched_canonical():
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
+def test_stabilize_prefers_detail_fetched_canonical(db_session):
     now = datetime.now(UTC)
     by_id = {
         "1": _short("1", area="Москва"),
@@ -103,7 +90,7 @@ def test_stabilize_prefers_detail_fetched_canonical():
             duplicates=[("2", "Казань")],
         )
     ]
-    with SessionLocal() as session:
+    with db_session as session:
         session.add(
             HhListingRow(
                 hh_id="2",
@@ -120,13 +107,10 @@ def test_stabilize_prefers_detail_fetched_canonical():
         assert stabilized[0].duplicates == [("1", "Москва")]
 
 
-def test_duplicate_does_not_overwrite_existing_detail_vacancy():
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
+def test_duplicate_does_not_overwrite_existing_detail_vacancy(db_session):
     now = datetime.now(UTC)
     vid = "42"
-    with SessionLocal() as session:
+    with db_session as session:
         session.add(
             VacancyRow(
                 id=stable_vacancy_id(vid),

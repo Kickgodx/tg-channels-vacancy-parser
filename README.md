@@ -199,11 +199,11 @@ JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(4
 
 Поиск по тексту — полнотекстовый (Postgres FTS): функциональный GIN-индекс
 `to_tsvector('russian', cleaned_text)`, запрос через `websearch_to_tsquery`,
-сортировка по `ts_rank`. Со стеммингом: «python разработчик» находит
-«python-разработку». На SQLite (тесты) откатывается на `ILIKE`.
+сортировка по `ts_rank`. Со стеммингом: «разработчик» находит
+«разработчиков».
 
 Список вакансий по умолчанию опирается на частичный индекс
-`ix_vacancies_active_post_date (post_date, id) WHERE NOT is_duplicate AND archived_at IS NULL`
+`ix_vacancies_active_post_date (post_date DESC NULLS LAST, id) WHERE NOT is_duplicate AND archived_at IS NULL`
 (ORDER BY + COUNT без seq scan). `GET /vacancies` отдаёт slim-карточки с
 `preview`; полный текст — `GET /vacancies/{id}`. COUNT кэшируется ~1 с в
 процессе API.
@@ -894,6 +894,11 @@ Sampling: доля трасс — `OTEL_TRACES_SAMPLE_RATIO`. Sampler отбра
 pytest
 pytest -n 8     # параллельно (pytest-xdist)
 ```
+
+Тесты идут на Postgres 16: `tests/conftest.py` поднимает `postgres:16-alpine` через
+testcontainers (нужен запущенный Docker). Готовый сервер вместо контейнера —
+`TEST_DATABASE_URL=postgresql+psycopg://user:pass@127.0.0.1:5432/db` (роль с правом
+CREATEDB; тесты создают и удаляют свои базы `tgjobs_test_*`).
 
 В том числе: `tests/test_api_health.py`, `tests/test_auth.py`,
 `tests/test_solo_match.py`, `tests/test_cover_letter.py`, `tests/test_llm_jobs.py`,
