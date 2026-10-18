@@ -277,13 +277,14 @@ class _BackgroundFetch:
 def _llm_posts_lost(config: AppConfig, ai_service: AIEnrichmentService | None) -> bool:
     """Отброшен ли из-за LLM хоть один пост — тогда чекпоинты двигать нельзя.
 
-    В ``primary`` теряется пост с ошибкой LLM; вне ``assist`` — и пост, пропущенный
-    из-за отключения LLM (лимит / квота). Те же условия, что у ``incomplete_reason``.
+    В ``primary`` теряется пост с ошибкой LLM и пост сверх ``ai.max_posts_per_run``;
+    вне ``assist`` — и пост, пропущенный из-за отключения LLM (лимит / квота). Те же
+    условия, что у ``incomplete_reason``.
     """
     if ai_service is None:
         return False
     stats = ai_service.stats
-    if config.ai.mode == "primary" and stats.errors:
+    if config.ai.mode == "primary" and (stats.errors or stats.skipped_limit):
         return True
     return config.ai.mode != "assist" and bool(stats.rate_limit_skipped)
 
@@ -316,6 +317,20 @@ def _checkpoints_if_fully_processed(
         )
         return {}
     return new
+
+
+def _llm_call_limit_reason(config: AppConfig, ai_service: AIEnrichmentService) -> str | None:
+    """Причина неполного прогона, если в ``primary`` посты не разобраны из-за ``ai.max_posts_per_run``.
+
+    В ``primary`` такой пост не сохраняется с полями правил (см. ``AIEnrichmentService.enrich``).
+    """
+    skipped = ai_service.stats.skipped_limit
+    if config.ai.mode != "primary" or not skipped:
+        return None
+    return (
+        f"AI: достигнут лимит ai.max_posts_per_run={config.ai.max_posts_per_run}; в режиме primary "
+        f"не разобрано постов: {skipped}. Они не кэшируются — повторный прогон обработает их."
+    )
 
 
 def _llm_error_ratio_reason(config: AppConfig, ai_service: AIEnrichmentService) -> str | None:
@@ -469,6 +484,15 @@ def run_parse(
                 config.ai.concurrency,
             )
         except Exception as e:
+            if config.ai.mode == "primary":
+                # Без LLM primary сохранил бы одни правила и сдвинул чекпоинты — эти посты
+                # никто бы не перечитал. Вычитка ещё не начата: падаем до Telegram.
+                from tg_jobs_parser.ai.enricher import LlmUnavailableError
+
+                raise LlmUnavailableError(
+                    f"LLM не запущен: {e}. Режим ai.mode=primary требует LLM — исправьте "
+                    "конфигурацию LLM (ключ, модель) или запустите прогон без AI либо в режиме assist."
+                ) from e
             all_warnings.append(f"AI не запущен: {e}")
             _LOG.error("AI не инициализирован: %s", e)
 
@@ -736,6 +760,10 @@ def run_parse(
                 all_warnings.append(
                     f"AI: LLM отключён ({rate_limiter.llm_disabled_reason}). Оставшиеся посты обработаны только rules."
                 )
+            if incomplete_reason is None:
+                incomplete_reason = _llm_call_limit_reason(config, ai_service)
+                if incomplete_reason and not _api_run(cli_overrides):
+                    all_warnings.append(incomplete_reason)
             if incomplete_reason is None:
                 incomplete_reason = _llm_error_ratio_reason(config, ai_service)
                 if incomplete_reason and not _api_run(cli_overrides):

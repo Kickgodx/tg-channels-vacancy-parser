@@ -158,3 +158,48 @@ def test_checkpoints_only_when_no_post_lost(mode, errors, incomplete, expected):
     )
     assert out == expected
     assert bool(warnings) == (mode == "primary" and errors > 0 and not incomplete)
+
+
+def test_max_posts_per_run_in_primary_stops_checkpoints(monkeypatch, default_test_config):
+    """primary, потолок 2: канал, разобранный до потолка, сдвинут; канал с пропущенными постами — нет."""
+    from tests.test_streaming_parse import _post, _StreamingParser
+
+    import tg_jobs_parser.parse_runner as parse_runner
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
+    from tg_jobs_parser.ai.schema import VacancyAIExtraction
+
+    cfg = load_config(default_test_config)
+    cfg = cfg.model_copy(
+        update={
+            "sources": cfg.sources.model_copy(update={"channels": ["chan", "other"]}),
+            "ai": cfg.ai.model_copy(
+                update={"enabled": True, "mode": "primary", "max_posts_per_run": 2, "concurrency": 1}
+            ),
+            "parser": cfg.parser.model_copy(update={"vacancy_fuzzy_duplicate_threshold": 101}),
+        }
+    )
+    with session_scope() as session:
+        save_channel_checkpoints(session, {"chan": CP_OLD, "other": CP_OLD})
+        rid = pr.create_parse_run(session, config_snapshot=cfg.model_dump(mode="json")).id
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(
+        OpenRouterClient,
+        "extract_with_fallback",
+        lambda self, *, text, search_context: (VacancyAIExtraction(is_job_post=True, confidence=0.9), LLMUsage()),
+    )
+    parser = _StreamingParser(
+        {"chan": [_post("chan", i) for i in range(2)], "other": [_post("other", i) for i in range(3)]}
+    )
+    parser.new_checkpoints = {}
+    monkeypatch.setattr(parse_runner, "_channel_parser", lambda config, cancellation=None: parser)
+
+    run_parse_job(str(rid))
+
+    with session_scope() as session:
+        row = pr.get_parse_run(session, rid)
+        assert row.status == "partial", row.error_message
+        assert "ai.max_posts_per_run=2" in row.error_message
+    stored = _stored()
+    assert stored["chan"] != CP_OLD  # разобран целиком до потолка — сдвинут по ходу прогона
+    assert stored["other"] == CP_OLD  # посты сверх потолка потеряны — следующий прогон перечитает

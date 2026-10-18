@@ -94,6 +94,7 @@ def _enrich_status(
         stats.dropped_not_job,
         stats.errors,
         stats.rate_limit_skipped,
+        stats.skipped_limit,
     )
     enriched = apply_ingest_stages(
         vacancy,
@@ -106,8 +107,9 @@ def _enrich_status(
         stats.dropped_not_job,
         stats.errors,
         stats.rate_limit_skipped,
+        stats.skipped_limit,
     )
-    d_score, d_notjob, d_err, d_rl = (a - b for a, b in zip(after, before, strict=False))
+    d_score, d_notjob, d_err, d_rl, d_limit = (a - b for a, b in zip(after, before, strict=False))
 
     if enriched is None:
         if d_notjob:
@@ -116,6 +118,8 @@ def _enrich_status(
             return None, "not_vacancy", f"Низкий vacancy_score (< {skip_below})"
         if d_rl:
             return None, "error", "LLM недоступен (rate limit / дневная квота)"
+        if d_limit:
+            return None, "error", "Достигнут лимит вызовов LLM (ai.max_posts_per_run) — текст не разобран"
         return None, "error", "Ошибка LLM-разбора"
 
     warnings = []
@@ -123,6 +127,8 @@ def _enrich_status(
         warnings.append("ошибка LLM — сохранён rules-разбор")
     if d_rl:
         warnings.append("LLM rate-limit — сохранён rules-разбор")
+    if d_limit:
+        warnings.append("лимит вызовов LLM (ai.max_posts_per_run) — сохранён rules-разбор")
     return enriched, None, "; ".join(warnings) or None
 
 
@@ -226,15 +232,21 @@ def run_import_job(
         # AI выключили, пока джоба стояла в очереди.
         warning = warning or "AI выключен — вакансии разобраны без LLM."
     else:
-        try:
-            from tg_jobs_parser.ai.enricher import AIEnrichmentService
+        from tg_jobs_parser.ai.enricher import AIEnrichmentService, LlmUnavailableError
 
+        try:
             ai_service = AIEnrichmentService(ingest_config)
-            ai_service.begin_batch(len(texts) - len(done))
-            ai_enabled = True
         except Exception as e:
-            warning = warning or f"AI не запущен ({e}); вакансии разобраны без LLM."
-            _LOG.warning("Импорт %s: AI не инициализирован: %s", job_id, e)
+            # Откат на правила сохранил бы любой текст в общую базу без проверки
+            # «это вакансия?». Причина в конфигурации — джоба завершается ошибкой;
+            # итог по уже обработанным текстам остаётся в llm_jobs.result.
+            _LOG.warning("Импорт %s: LLM не запущен: %s", job_id, e)
+            raise LlmUnavailableError(
+                f"LLM не запущен: {e}. Импорт с LLM невозможен — исправьте конфигурацию LLM "
+                "(ключ, модель) или выключите AI, чтобы импортировать правилами."
+            ) from e
+        ai_service.begin_batch(len(texts) - len(done))
+        ai_enabled = True
 
     def _commit(item: dict, vacancy: Vacancy | None = None) -> bool:
         payload = {

@@ -246,15 +246,129 @@ def test_child_token_follows_parent_but_not_back():
 
 
 @pytest.mark.parametrize(
-    ("mode", "errors", "rate_limit_skipped", "lost"),
+    ("mode", "errors", "rate_limit_skipped", "skipped_limit", "lost"),
     [
-        ("primary", 0, 0, False),
-        ("primary", 1, 0, True),
-        ("primary", 0, 1, True),
-        ("assist", 3, 3, False),  # в assist такие посты разобраны rules
+        ("primary", 0, 0, 0, False),
+        ("primary", 1, 0, 0, True),
+        ("primary", 0, 1, 0, True),
+        ("primary", 0, 0, 1, True),  # пост сверх ai.max_posts_per_run не сохранён
+        ("assist", 3, 3, 3, False),  # в assist такие посты разобраны rules
     ],
 )
-def test_llm_posts_lost(mode, errors, rate_limit_skipped, lost):
-    ai = SimpleNamespace(stats=SimpleNamespace(errors=errors, rate_limit_skipped=rate_limit_skipped))
+def test_llm_posts_lost(mode, errors, rate_limit_skipped, skipped_limit, lost):
+    ai = SimpleNamespace(
+        stats=SimpleNamespace(errors=errors, rate_limit_skipped=rate_limit_skipped, skipped_limit=skipped_limit)
+    )
     assert parse_runner._llm_posts_lost(AppConfig(ai=AiConfig(mode=mode)), ai) is lost
     assert parse_runner._llm_posts_lost(AppConfig(ai=AiConfig(mode=mode)), None) is False
+
+
+class _NeverFetched(_StreamingParser):
+    """Парсер, к которому не должны обращаться: прогон обязан упасть до вычитки."""
+
+    def __init__(self):
+        super().__init__({})
+        self.calls = 0
+
+    def stream_posts_many(self, channels, on_channel):
+        self.calls += 1
+        return super().stream_posts_many(channels, on_channel)
+
+
+def _ai_config(mode: str) -> AppConfig:
+    cfg = _config()
+    return cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": mode})})
+
+
+def _broken_ai(monkeypatch) -> None:
+    def broken(*args, **kwargs):
+        raise ValueError("OPENROUTER_API_KEY не задан")
+
+    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", broken)
+
+
+def test_primary_without_llm_fails_before_fetch(monkeypatch):
+    from tg_jobs_parser.ai.enricher import LlmUnavailableError
+
+    _broken_ai(monkeypatch)
+    parser = _NeverFetched()
+    _install(monkeypatch, parser)
+
+    with pytest.raises(LlmUnavailableError) as exc:
+        parse_runner.run_parse(_ai_config("primary"))
+
+    message = str(exc.value)
+    assert "OPENROUTER_API_KEY не задан" in message
+    assert "primary" in message and "assist" in message
+    assert parser.calls == 0
+
+
+def test_assist_without_llm_runs_on_rules(monkeypatch):
+    _broken_ai(monkeypatch)
+    _install(monkeypatch, _StreamingParser({"alpha": [_post("alpha", 1)], "beta": []}))
+
+    result = parse_runner.run_parse(_ai_config("assist"))
+
+    assert len(result.vacancies_unique) == 1
+    assert result.vacancies_unique[0].extraction_source == "rules"
+    assert "AI не запущен: OPENROUTER_API_KEY не задан" in result.parse_warnings
+    assert result.incomplete_reason is None
+
+
+class _MemCache:
+    def __init__(self, hits: set[str]) -> None:
+        self.hits = hits
+
+    def get(self, *, text, model, prompt_version, mode):
+        from tg_jobs_parser.ai.schema import VacancyAIExtraction
+
+        return VacancyAIExtraction(is_job_post=True, confidence=0.9) if text in self.hits else None
+
+    def put(self, **kwargs) -> None:
+        pass
+
+
+def _run_primary_with_limit(monkeypatch, *, limit: int, posts: list[RawPost], cached: set[str]):
+    """run_parse в primary с настоящим AIEnrichmentService: подменены только кэш и вызов модели."""
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
+    from tg_jobs_parser.ai.schema import VacancyAIExtraction
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr("tg_jobs_parser.ai.cache.build_extraction_cache", lambda ai: _MemCache(cached))
+    calls: list[str] = []
+
+    def fake_extract(self, *, text, search_context):
+        calls.append(text)
+        return VacancyAIExtraction(is_job_post=True, confidence=0.9), LLMUsage(model="m")
+
+    monkeypatch.setattr(OpenRouterClient, "extract_with_fallback", fake_extract)
+    _install(monkeypatch, _StreamingParser({"alpha": posts, "beta": []}))
+    cfg = _ai_config("primary")
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"max_posts_per_run": limit})})
+    return parse_runner.run_parse(cfg, cli_overrides={"api": True}), calls
+
+
+def test_primary_over_max_posts_per_run_is_incomplete(monkeypatch):
+    posts = [_post("alpha", i) for i in range(5)]
+
+    result, calls = _run_primary_with_limit(monkeypatch, limit=2, posts=posts, cached=set())
+
+    assert len(calls) == 2
+    assert len(result.vacancies_unique) == 2  # посты сверх потолка не сохранены правилами
+    assert "ai.max_posts_per_run=2" in result.incomplete_reason
+    assert "не разобрано постов: 3" in result.incomplete_reason
+    assert result.channel_checkpoints == {}
+
+
+def test_cached_answers_do_not_spend_max_posts_per_run(monkeypatch):
+    posts = [_post("alpha", i) for i in range(5)]
+    # Кэшированные идут последними: раньше потолок проверялся до кэша и отсекал их.
+    from tg_jobs_parser.ingestion.rules import rules_from_raw_post
+
+    cached = {rules_from_raw_post(p, _config()).cleaned_text for p in posts[2:]}
+
+    result, calls = _run_primary_with_limit(monkeypatch, limit=2, posts=posts, cached=cached)
+
+    assert len(calls) == 2
+    assert len(result.vacancies_unique) == 5
+    assert result.incomplete_reason is None
