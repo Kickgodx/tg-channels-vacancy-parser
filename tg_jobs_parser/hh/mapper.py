@@ -146,8 +146,7 @@ def _specializations(detail: VacancyDetail | VacancyShort) -> list[str]:
         alias = _HH_ROLE_ALIASES.get(role.name or "")
         if alias and alias not in names:
             names.append(alias)
-    if not names:
-        names = ["AQA", "Python"]
+    # Без ролей — пусто: выдуманные специализации пускали бы вакансию под чужие фильтры.
     return names
 
 

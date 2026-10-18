@@ -143,3 +143,11 @@ def test_metrics_ignore_native_salary_without_stored_rub(db_session, monkeypatch
     assert metrics.unique_vacancies == 1
     assert metrics.vacancies_with_salary == 0
     assert metrics.salary_by_grade == {}
+
+
+def test_rates_as_of_is_null_without_rates(db_session):
+    from backend.db.vacancy_metrics import _prepare_fx
+
+    assert fx_repo.get_latest_rates(db_session) == (None, {})
+    assert _prepare_fx(db_session).rates_as_of is None
+    assert aggregate_vacancy_metrics(db_session, VacancyQuery()).salary_display.rates_as_of is None

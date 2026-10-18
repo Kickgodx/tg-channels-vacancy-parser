@@ -278,6 +278,16 @@ export default function HhPage() {
             </li>
             <li>Listings upsert / purge: {result.listings_upserted} / {result.listings_purged}</li>
           </ul>
+          {(result.warnings?.length ?? 0) > 0 && (
+            <>
+              <h4>Предупреждения ({result.warnings?.length})</h4>
+              <ul className="plain-list">
+                {result.warnings?.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            </>
+          )}
           {result.errors.length > 0 && (
             <>
               <h4>Ошибки ({result.errors.length})</h4>

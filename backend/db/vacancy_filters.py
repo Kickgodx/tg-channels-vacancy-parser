@@ -62,14 +62,12 @@ def vacancy_filter_conditions(
     if query.q:
         document, ts_query = fts_query(c.cleaned_text, query.q)
         conditions.append(document.op("@@")(ts_query))
-    if query.has_salary:
-        conditions.append(
-            or_(
-                c.detected_salary_min.isnot(None),
-                c.detected_salary_max.isnot(None),
-                c.detected_salary_avg.isnot(None),
-            )
-        )
+    # «С зарплатой» — есть рублёвая сумма, как в метриках и аналитике: иначе список
+    # и цифры над ним расходятся (зарплата в валюте без курса суммы не получает).
+    if query.has_salary is True:
+        conditions.append(c.detected_salary_avg_rub.isnot(None))
+    elif query.has_salary is False:
+        conditions.append(c.detected_salary_avg_rub.is_(None))
     return conditions
 
 

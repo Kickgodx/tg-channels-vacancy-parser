@@ -97,7 +97,8 @@ def apply_post_filters(
         return False
     if v.vacancy_substantive_score < config.parser.vacancy_min_substantive_score:
         return False
-    if not matches_specialization_filter(v, config.filters.specializations):
+    # any_specialization — любая IT-роль: список специализаций не ограничивает.
+    if not config.filters.any_specialization and not matches_specialization_filter(v, config.filters.specializations):
         return False
     excl = exclude_keywords if exclude_keywords is not None else config.merged_exclude_keywords()
     if not matches_exclude_keywords(v, excl):

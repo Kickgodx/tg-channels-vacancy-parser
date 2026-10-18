@@ -419,12 +419,13 @@ class TelegramTelethonParser(BaseChannelParser):
                         break
                     scanned += 1
                     if scanned > max_scan:
-                        _LOG.warning(
-                            "Telethon @%s: достигнут лимит max_posts_per_channel=%s просмотренных сообщений. "
-                            "Увеличьте parser.max_posts_per_channel в config.yaml, если нужна более глубокая история.",
-                            username,
-                            max_scan,
+                        # В parse_warnings, а не только в журнал: иначе неполное окно не видно в итоге прогона.
+                        warning = (
+                            f"@{username}: просмотрено {max_scan} сообщений (лимит parser.max_posts_per_channel) — "
+                            f"канал прочитан частично: {len(posts)} постов. Увеличьте лимит, если нужна "
+                            "более глубокая история."
                         )
+                        _LOG.warning("Telethon %s", warning)
                         stopped_early = True
                         break
                     offset_id = msg.id

@@ -56,7 +56,9 @@ def apply_salary_rub_for_vacancy(
         v.detected_salary_avg_rub = None
         return
     _, rates = _rates_from_cache(rates_cache)
-    if not rates:
+    # Переданный кэш, даже пустой, — попытка уже была (одна на пачку): при пустой базе и
+    # недоступном ЦБ повтор на каждой вакансии стоил бы таймаута ЦБ на каждую.
+    if rates_cache is None:
         if db_rates_only:
             _, rates = fx_repo.get_latest_rates(session)
         else:

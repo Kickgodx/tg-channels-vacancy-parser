@@ -233,3 +233,12 @@ def test_apply_post_filters_explicit_exclude_keywords_override_config():
 
     assert apply_post_filters(junior, cfg, exclude_keywords=[]) is True
     assert apply_post_filters(_vacancy(), cfg, exclude_keywords=["django"]) is False
+
+
+def test_apply_post_filters_any_specialization_skips_specialization_filter():
+    v = _vacancy(detected_specializations=["QA"])
+    cfg = _config(specializations=["Python"], any_specialization=True)
+
+    assert apply_post_filters(v, cfg) is True
+    cfg.filters.any_specialization = False
+    assert apply_post_filters(v, cfg) is False

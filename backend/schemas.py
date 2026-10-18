@@ -174,7 +174,7 @@ class VacancyQuery(BaseModel):
     date_to: date | None = None
     has_salary: bool | None = Field(
         default=None,
-        description="True — только вакансии с указанной зарплатой (min/max/avg).",
+        description="True — только вакансии с рублёвой суммой зарплаты (как в аналитике), False — только без неё.",
     )
     q: str | None = Field(default=None, description="Поиск по cleaned_text (ILIKE)")
     include_archived: bool = Field(

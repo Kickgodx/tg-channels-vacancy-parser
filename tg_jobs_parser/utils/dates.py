@@ -11,13 +11,16 @@ def utc_now() -> datetime:
 
 
 def clamp_range_days(dt_from: date, dt_to: date, max_days: int) -> tuple[date, date]:
-    """Ограничивает длину диапазона ``max_days`` днями (включительно)."""
+    """Ограничивает длину диапазона ``max_days`` днями (включительно), оставляя самые свежие дни.
+
+    Для поиска вакансий важнее свежие посты: обрезается начало окна, ``dt_to`` сохраняется.
+    """
     if dt_from > dt_to:
         dt_from, dt_to = dt_to, dt_from
     span = (dt_to - dt_from).days + 1
     if span <= max_days:
         return dt_from, dt_to
-    return dt_from, dt_from + timedelta(days=max_days - 1)
+    return dt_to - timedelta(days=max_days - 1), dt_to
 
 
 _TODAY_ALIASES = frozenset({"today", "сегодня", "сейчас", "now"})

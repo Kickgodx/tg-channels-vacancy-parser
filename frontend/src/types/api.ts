@@ -314,6 +314,8 @@ export interface HhSyncResult {
   pages: number;
   flush_batches: number;
   errors: string[];
+  /** Нет у итогов, сохранённых до появления поля. */
+  warnings?: string[];
   duration_seconds: number;
   window: string;
   period: number | null;

@@ -372,3 +372,16 @@ def test_cached_answers_do_not_spend_max_posts_per_run(monkeypatch):
     assert len(calls) == 2
     assert len(result.vacancies_unique) == 5
     assert result.incomplete_reason is None
+
+
+def test_long_window_keeps_newest_days_and_warns(monkeypatch):
+    from tg_jobs_parser.config.schema import SearchConfig
+
+    _install(monkeypatch, _StreamingParser({"alpha": [_post("alpha", 1)]}))
+    cfg = _config(channels=["alpha"])
+    cfg.search = SearchConfig(date_from="2026-01-01", date_to="2026-10-19", max_days=30)
+
+    result = parse_runner.run_parse(cfg)
+
+    assert "2026-09-20" in (result.parse_warnings or "")
+    assert "2026-10-19" in (result.parse_warnings or "")
