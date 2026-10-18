@@ -220,3 +220,51 @@ def test_max_posts_per_run_holds_under_concurrency(monkeypatch):
     assert len(calls) == 3
     assert sum(r is not None for r in results) == 3
     assert (service.stats.calls, service.stats.skipped_limit) == (3, 7)
+
+
+def _accepted_by_llm(monkeypatch, vacancy: Vacancy, *, exclude: list[str]) -> tuple[Vacancy | None, AppConfig]:
+    """Ответ LLM «вакансия» при пороге содержательной оценки 1."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    cfg = AppConfig()
+    cfg = cfg.model_copy(
+        update={
+            "ai": cfg.ai.model_copy(update={"enabled": True, "use_cache": False}),
+            "parser": cfg.parser.model_copy(update={"vacancy_min_substantive_score": 1}),
+            "filters": cfg.filters.model_copy(update={"exclude_keywords": exclude}),
+        }
+    )
+    service = AIEnrichmentService(cfg)
+    fake = VacancyAIExtraction(is_job_post=True, confidence=0.9)
+    service.begin_batch(1)
+    with patch.object(service._client, "extract_with_fallback", return_value=(fake, LLMUsage())):
+        return service.enrich(vacancy), cfg
+
+
+def test_llm_verdict_lifts_substantive_score_to_threshold(monkeypatch):
+    from tg_jobs_parser.filters.vacancy_filters import apply_post_filters
+
+    only_contact = _vacancy().model_copy(update={"vacancy_score": 1, "vacancy_substantive_score": 0})
+
+    enriched, cfg = _accepted_by_llm(monkeypatch, only_contact, exclude=[])
+
+    assert enriched is not None
+    assert enriched.vacancy_substantive_score >= 1
+    assert enriched.vacancy_score >= cfg.parser.vacancy_score_threshold
+    assert apply_post_filters(enriched, cfg) is True
+
+
+def test_llm_verdict_keeps_post_filters(monkeypatch):
+    from tg_jobs_parser.filters.vacancy_filters import apply_post_filters
+
+    casino = _vacancy().model_copy(
+        update={
+            "raw_text": "Go dev в онлайн-казино",
+            "cleaned_text": "Go dev в онлайн-казино",
+            "vacancy_substantive_score": 0,
+        }
+    )
+
+    enriched, cfg = _accepted_by_llm(monkeypatch, casino, exclude=["казино"])
+
+    assert enriched is not None
+    assert apply_post_filters(enriched, cfg) is False

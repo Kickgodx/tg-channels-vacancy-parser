@@ -42,6 +42,10 @@ class GlobalRateGate(Protocol):
         """Списать запрос из суточного (UTC) бюджета ``budget``. False — бюджет на сегодня исчерпан."""
         ...
 
+    def daily_used(self, key: str) -> int:
+        """Сколько запросов суточного бюджета уже списано сегодня (без списания)."""
+        ...
+
 
 class _LocalDailyBudget:
     """Суточный бюджет внутри процесса — когда общего хранилища нет или оно недоступно."""
@@ -61,8 +65,29 @@ class _LocalDailyBudget:
             self._used += 1
             return True
 
+    def used(self) -> int:
+        with self._lock:
+            return self._used if self._day == datetime.now(UTC).date() else 0
+
 
 _local_daily_budget = _LocalDailyBudget()
+
+
+def interactive_daily_budget_exhausted(budget: int) -> bool:
+    """Исчерпан ли на сегодня суточный бюджет ``budget`` — без списания запроса.
+
+    Проверка при постановке задачи: тот же счётчик, что у ``OpenRouterRateLimiter`` —
+    общий через порт, а без него или при его сбое — счётчик процесса.
+    """
+    if budget <= 0:
+        return False
+    gate = _global_gate
+    if gate is not None:
+        try:
+            return int(gate.daily_used(_GLOBAL_RATE_KEY)) >= budget
+        except Exception as e:
+            _LOG.debug("Общий суточный бюджет LLM недоступен для проверки: %s", e)
+    return _local_daily_budget.used() >= budget
 
 
 def _next_utc_midnight_ms() -> int:

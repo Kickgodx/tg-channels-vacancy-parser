@@ -207,7 +207,7 @@ def record_llm_job(*, outcome: str, kind: str, duration_seconds: float | None = 
 LLM_JOB_ENQUEUE = Counter(
     "llm_job_enqueue_total",
     "Постановка LLM-джоб в очередь",
-    labelnames=("backend", "kind", "outcome"),  # queued|reused|rejected_limit|error
+    labelnames=("backend", "kind", "outcome"),  # queued|reused|rejected_limit|rejected_quota|rejected_budget|error
 )
 
 # Имя метрики историческое (была только очередь llm); лейбл queue — llm | parse.

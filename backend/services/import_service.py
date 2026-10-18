@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from backend.db import llm_job_repository as llm_job_repo
 from backend.db import vacancy_repository as vacancy_repo
+from backend.db.llm_usage_repository import refund_llm_calls
 from backend.db.models import VacancyRow
 from backend.db.session import session_scope
 from backend.db.vacancy_mapper import row_to_vacancy
@@ -298,10 +299,11 @@ def run_import_job(
                 continue
 
             message = None
+            quota_day = None
             if ai_service is not None:
                 try:
                     with session_scope() as session:
-                        reserve_user_llm_calls(session, user_id=user_id, calls=1)
+                        quota_day = reserve_user_llm_calls(session, user_id=user_id, calls=1)
                 except LlmDailyQuotaError as e:
                     _LOG.warning("Импорт %s: %s — дальше без LLM", job_id, e)
                     warning = f"{e} Остальные тексты разобраны без LLM."
@@ -309,12 +311,17 @@ def run_import_job(
                     ai_service.close()
                     ai_service = None
             if ai_service is not None:
+                calls_before = ai_service.stats.calls
                 enriched, reject_status, message = _enrich_status(
                     ai_service,
                     v,
                     ingest_config,
                     skip_below=config.ai.skip_if_vacancy_score_below,
                 )
+                if quota_day is not None and ai_service.stats.calls == calls_before:
+                    # Модель не вызывалась (ответ из AI-кэша или потолок вызовов) — вызов не оплачен.
+                    with session_scope() as session:
+                        refund_llm_calls(session, user_id=user_id, day=quota_day)
                 if reject_status is not None:
                     if not _commit(_item_dict(i, reject_status, message)):
                         return False

@@ -428,3 +428,32 @@ def test_cancelled_import_stops_between_texts(api_client, monkeypatch, fake_ai):
     with session_scope() as session:
         assert all(session.get(VacancyRow, it["vacancy_id"]) is not None for it in job.result["items"])
         assert llm_calls_today(session, user_id=user_id, day=datetime.now(UTC).date()) == 2
+
+
+def test_import_cache_hit_does_not_spend_quota(api_client, monkeypatch, fake_ai):
+    """Ответ из AI-кэша: модель не вызывалась — списанный за текст вызов возвращается."""
+    from backend.db.llm_usage_repository import llm_calls_today
+    from backend.db.session import session_scope
+    from backend.settings import get_settings
+
+    monkeypatch.setenv("LLM_USER_DAILY_CALLS", "5")
+    get_settings.cache_clear()
+
+    def cached_enrich(self, vacancy, *, cancel=None):
+        if "QA" in vacancy.cleaned_text:
+            self.stats.cache_hits += 1  # ответ из кэша, без вызова модели
+        else:
+            self.stats.calls += 1
+            _FakeAI.calls.append(vacancy.id)
+        return vacancy.model_copy(update={"extraction_source": "hybrid", "ai_confidence": 0.9})
+
+    monkeypatch.setattr(_FakeAI, "enrich", cached_enrich)
+    job_id, user_id = _running_import_job([VACANCY_TEXT, "Вакансия: QA-инженер, удалёнка, Selenium и pytest."])
+
+    assert import_service.run_import_job(
+        job_id, user_id=user_id, params=_job_row(job_id).params, result=None, lease_owner="owner-1"
+    )
+
+    assert [it["status"] for it in _job_row(job_id).result["items"]] == ["created", "created"]
+    with session_scope() as session:
+        assert llm_calls_today(session, user_id=user_id) == 1  # только текст, ушедший в модель

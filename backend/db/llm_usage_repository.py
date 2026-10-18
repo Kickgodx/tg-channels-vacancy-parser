@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -43,6 +43,17 @@ def try_reserve_llm_calls(
         .returning(LlmUserUsageRow.calls)
     )
     return session.execute(stmt).first() is not None
+
+
+def refund_llm_calls(session: Session, *, user_id: int, day: date, calls: int = 1) -> None:
+    """Вернуть ``calls`` в квоту суток ``day`` (счётчик не опускается ниже 0)."""
+    if calls <= 0:
+        return
+    session.execute(
+        update(LlmUserUsageRow)
+        .where(LlmUserUsageRow.user_id == user_id, LlmUserUsageRow.day == day)
+        .values(calls=func.greatest(LlmUserUsageRow.calls - calls, 0))
+    )
 
 
 def llm_calls_today(session: Session, *, user_id: int, day: date | None = None) -> int:
