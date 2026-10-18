@@ -106,6 +106,14 @@ class RunAIStats:
         return data
 
 
+class LlmUnavailableError(RuntimeError):
+    """LLM не удалось запустить там, где без него нельзя (``ai.mode: primary``, LLM-импорт).
+
+    Причина детерминированная (ключ, модель, кэш), поэтому задача завершается ошибкой,
+    а не откатывается на правила и не повторяется.
+    """
+
+
 class AIEnrichmentService:
     def __init__(
         self,
@@ -176,12 +184,8 @@ class AIEnrichmentService:
             record_enrich_event("skipped_score")
             return None
 
-        with self.stats._lock:
-            if self._ai.max_posts_per_run > 0 and self.stats.calls >= self._ai.max_posts_per_run:
-                self.stats.skipped_limit += 1
-                record_enrich_event("skipped_limit")
-                return vacancy
-
+        # Потолок ai.max_posts_per_run проверяется после кэша: он ограничивает вызовы,
+        # а уже оплаченный ответ из кэша используется всегда.
         text = (vacancy.cleaned_text or vacancy.raw_text or "")[: self._ai.max_input_chars]
         prompt_version = resolve_extract_prompt_version(self._ai.prompt_version)
         cached = self._cache.get(
@@ -209,8 +213,19 @@ class AIEnrichmentService:
 
             if cancel and cancel.is_cancelled():
                 raise ParseCancelled()
+            # Проверка потолка и резерв вызова — одной секцией: иначе параллельные
+            # потоки (ai.concurrency > 1) проскакивали бы потолок.
             with self.stats._lock:
-                self.stats.calls += 1
+                limit = self._ai.max_posts_per_run
+                limit_hit = limit > 0 and self.stats.calls >= limit
+                if limit_hit:
+                    self.stats.skipped_limit += 1
+                else:
+                    self.stats.calls += 1
+            if limit_hit:
+                record_enrich_event("skipped_limit")
+                # primary без ответа LLM пост не сохраняет — он потерян, прогон неполный.
+                return vacancy if self._ai.mode == "assist" else None
             self._log_llm_progress(vacancy, phase="запрос API")
             try:
                 extraction, usage = self._client.extract_with_fallback(

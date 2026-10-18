@@ -289,3 +289,100 @@ def test_import_job_rq_timeout_grows_with_texts():
     base = get_settings().llm_rq_job_timeout_seconds
     assert rq_job_timeout("match", None) == base
     assert rq_job_timeout("import", {"texts": ["a"] * 50}) == base + 50 * IMPORT_SECONDS_PER_TEXT
+
+
+@pytest.fixture
+def broken_ai(monkeypatch, default_test_config) -> None:
+    """ai.enabled, но LLM не запускается (например, нет ключа)."""
+    from tg_jobs_parser.config.loader import load_config
+
+    real_cfg = load_config(default_test_config)
+    ai_cfg = real_cfg.model_copy(update={"ai": real_cfg.ai.model_copy(update={"enabled": True})})
+    monkeypatch.setattr(import_service, "load_config", lambda *a, **k: ai_cfg)
+
+    def broken(*args, **kwargs):
+        raise ValueError("OPENROUTER_API_KEY не задан")
+
+    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", broken)
+
+
+def test_import_job_fails_when_llm_does_not_start(api_client, broken_ai):
+    """Сбой запуска LLM — задача error, тексты не сохраняются правилами."""
+    from sqlalchemy import func, select
+
+    from backend.db.models import VacancyRow
+    from backend.db.session import session_scope
+
+    token = _register(api_client, "imp@example.com")
+    r = _import(api_client, token, [VACANCY_TEXT])
+    assert r.status_code == 202, r.text
+
+    job = await_llm_job(api_client, token, r)
+
+    assert job["status"] == "error", job
+    assert "OPENROUTER_API_KEY не задан" in job["error_message"]
+    with session_scope() as session:
+        assert session.scalar(select(func.count()).select_from(VacancyRow)) == 0
+
+
+def test_import_job_without_llm_keeps_partial_result_and_quota(api_client, broken_ai):
+    """Ретрай, на котором LLM не стартовал: ошибка, итог прошлой попытки цел, квота не списана."""
+    from sqlalchemy import func, select
+
+    from backend.db.models import LlmUserUsageRow, VacancyRow
+    from backend.db.session import session_scope
+    from tg_jobs_parser.ai.enricher import LlmUnavailableError
+
+    done_item = {"index": 0, "status": "not_vacancy", "message": "LLM: текст не похож на вакансию"}
+    partial = {"total": 2, "ai_enabled": True, "warning": None, "items": [done_item]}
+    job_id, user_id = _running_import_job([NOT_VACANCY_TEXT, VACANCY_TEXT], result=partial)
+
+    with pytest.raises(LlmUnavailableError, match="OPENROUTER_API_KEY не задан"):
+        import_service.run_import_job(
+            job_id, user_id=user_id, params=_job_row(job_id).params, result=partial, lease_owner="owner-1"
+        )
+
+    assert _job_row(job_id).result["items"] == [done_item]
+    with session_scope() as session:
+        assert session.scalar(select(func.count()).select_from(VacancyRow)) == 0
+        assert session.scalar(select(func.count()).select_from(LlmUserUsageRow)) == 0
+
+
+def test_import_text_over_max_posts_per_run_in_primary_is_error(api_client, monkeypatch, default_test_config):
+    """primary, потолок 1: второй текст не разобран LLM — итог error с причиной, не сохранён."""
+    from sqlalchemy import func, select
+
+    from backend.db.models import VacancyRow
+    from backend.db.session import session_scope
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
+    from tg_jobs_parser.ai.schema import VacancyAIExtraction
+    from tg_jobs_parser.config.loader import load_config
+
+    real_cfg = load_config(default_test_config)
+    ai_cfg = real_cfg.model_copy(
+        update={
+            "ai": real_cfg.ai.model_copy(
+                update={"enabled": True, "mode": "primary", "max_posts_per_run": 1, "use_cache": False}
+            )
+        }
+    )
+    monkeypatch.setattr(import_service, "load_config", lambda *a, **k: ai_cfg)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(
+        OpenRouterClient,
+        "extract_with_fallback",
+        lambda self, *, text, search_context: (VacancyAIExtraction(is_job_post=True, confidence=0.9), LLMUsage()),
+    )
+    job_id, user_id = _running_import_job([VACANCY_TEXT, "Вакансия: QA-инженер, удалёнка, Selenium и pytest."])
+
+    ok = import_service.run_import_job(
+        job_id, user_id=user_id, params=_job_row(job_id).params, result=None, lease_owner="owner-1"
+    )
+
+    assert ok is True
+    first, second = _job_row(job_id).result["items"]
+    assert first["status"] == "created"
+    assert second["status"] == "error"
+    assert "ai.max_posts_per_run" in second["message"]
+    with session_scope() as session:
+        assert session.scalar(select(func.count()).select_from(VacancyRow)) == 1

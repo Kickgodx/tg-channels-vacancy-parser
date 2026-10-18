@@ -268,6 +268,35 @@ def test_llm_worker_runs_import_with_llm(fake_redis, worker_process, monkeypatch
     assert len(llm_calls) == 1
 
 
+def test_llm_worker_fails_import_when_llm_does_not_start(fake_redis, worker_process, monkeypatch, default_test_config):
+    """RQ-путь: LLM в воркере не запустился — импорт-задача error, текст не сохранён правилами."""
+    from backend.services import import_service
+    from backend.services.llm_job_service import KIND_IMPORT
+    from tg_jobs_parser.config.loader import load_config
+
+    cfg = load_config(default_test_config)
+    ai_cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True})})
+    monkeypatch.setattr(import_service, "load_config", lambda *a, **k: ai_cfg)
+
+    def broken(*args, **kwargs):
+        raise ValueError("OPENROUTER_API_KEY не задан")
+
+    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", broken)
+    with session_scope() as session:
+        user_id = new_user(session)
+    job_id = llm_job_runner.enqueue(
+        user_id=user_id, kind=KIND_IMPORT, params=import_service.job_params(["Вакансия: Python-разработчик"], None)
+    ).job_id
+
+    llm_worker.main()
+
+    with session_scope() as session:
+        row = lj.get_llm_job(session, job_id)
+        assert row.status == "error"
+        assert "OPENROUTER_API_KEY не задан" in row.error_message
+        assert session.query(VacancyRow).count() == 0
+
+
 def test_hh_worker_runs_queued_sync_job(fake_redis, worker_process, monkeypatch):
     seen: dict = {}
 

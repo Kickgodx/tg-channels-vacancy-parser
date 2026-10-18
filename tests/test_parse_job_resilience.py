@@ -195,3 +195,50 @@ def test_incomplete_run_is_partial_and_keeps_vacancies(monkeypatch, run_id):
     with session_scope() as session:
         assert session.get(VacancyRow, vacancy.id) is not None
         assert pr.has_active_parse_run(session) is False
+
+
+def test_primary_run_without_llm_fails_before_telegram(monkeypatch, default_test_config):
+    """primary + LLM не запустился → failed до вычитки, без вакансий, чекпоинтов и ретрая."""
+    import tg_jobs_parser.parse_runner as parse_runner
+    from backend.db.models import TelegramChannelCheckpointRow
+    from backend.workers.recover_parse import recover_stuck_parse_runs
+
+    cfg = load_config(default_test_config)
+    cfg = cfg.model_copy(
+        update={
+            "ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"}),
+            "sources": cfg.sources.model_copy(update={"channels": ["chan"]}),
+        }
+    )
+    with session_scope() as session:
+        rid = pr.create_parse_run(session, config_snapshot=cfg.model_dump(mode="json")).id
+
+    def broken(*args, **kwargs):
+        raise ValueError("OPENROUTER_API_KEY не задан")
+
+    fetches: list[object] = []
+
+    class _Parser:
+        def __init__(self) -> None:
+            self.cancellation = None
+            self.new_checkpoints: dict = {}
+
+        def stream_posts_many(self, channels, on_channel):
+            fetches.append(channels)
+
+    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", broken)
+    monkeypatch.setattr(parse_runner, "_channel_parser", lambda config, cancellation=None: _Parser())
+
+    run_parse_job(str(rid))
+    recover_stuck_parse_runs()
+
+    with session_scope() as session:
+        row = pr.get_parse_run(session, rid)
+        assert row.status == "failed"
+        assert "OPENROUTER_API_KEY не задан" in row.error_message
+        assert "primary" in row.error_message
+        assert row.posts_fetched == 0
+        assert row.attempts == 1
+        assert session.scalar(select(VacancyRow.id).limit(1)) is None
+        assert session.scalar(select(TelegramChannelCheckpointRow.channel).limit(1)) is None
+    assert fetches == []
