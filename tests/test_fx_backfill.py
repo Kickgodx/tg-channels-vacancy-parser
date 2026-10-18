@@ -203,3 +203,56 @@ def test_backfill_fills_salary_without_currency(db_session, monkeypatch):
 
     assert stats.updated == 1
     assert row.detected_salary_avg_rub == pytest.approx(150_000.0)
+
+
+def _usd_vacancy(i: int, amount: float = 1_000) -> Vacancy:
+    text = f"Go developer #{i}, {amount:.0f} USD"
+    return Vacancy(
+        id=vacancy_content_id(text),
+        source_post_key=f"ch-usd-{i}",
+        source_channel="ch",
+        source_url="https://t.me/s/ch",
+        raw_text=text,
+        cleaned_text=text,
+        detected_salary_avg=amount,
+        salary_currency="USD",
+        post_date=datetime(2026, 5, 1, tzinfo=UTC),
+    )
+
+
+def test_backfill_includes_archived_vacancies(db_session):
+    fx_cfg = FxConfig(enabled=True)
+    fx_repo.upsert_rates(db_session, date(2026, 5, 19), {"RUB": 1.0, "USD": 80.0})
+    db_session.commit()
+    v = _usd_vacancy(1)
+    row = _saved(db_session, v, fx_cfg)
+    assert row.detected_salary_avg_rub == pytest.approx(80_000.0)
+    row.archived_at = datetime(2026, 6, 1, tzinfo=UTC)
+    fx_repo.upsert_rates(db_session, date(2026, 5, 20), {"RUB": 1.0, "USD": 90.0})
+    db_session.commit()
+
+    stats = backfill_vacancies_salary_rub(db_session, fx_cfg, db_rates_only=True)
+    db_session.commit()
+    db_session.refresh(row)
+
+    assert stats.processed == 1
+    assert row.detected_salary_avg_rub == pytest.approx(90_000.0)
+
+
+def test_cbr_down_on_empty_db_is_asked_once_per_batch(db_session, monkeypatch):
+    calls = []
+
+    def _cbr_down(*_a, **_k):
+        calls.append(1)
+        raise ConnectionError("cbr down")
+
+    monkeypatch.setattr(fx_repo, "fetch_cbr_rates", _cbr_down)
+    batch = [_usd_vacancy(i) for i in range(30)]
+
+    upsert_vacancies(db_session, batch, parse_run_id=new_parse_run(db_session), fx_config=FxConfig(enabled=True))
+    db_session.commit()
+
+    assert len(calls) == 1
+    rows = db_session.scalars(select(VacancyRow)).all()
+    assert len(rows) == 30
+    assert all(r.detected_salary_avg_rub is None for r in rows)

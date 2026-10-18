@@ -21,7 +21,7 @@ from backend.observability import (
 from backend.services.hh_sync_window import ResolvedHhSearchWindow
 from backend.settings import Settings
 from tg_jobs_parser.config.schema import AppConfig, HhConfig
-from tg_jobs_parser.hh.client import HHApiError, HHClient, HHClientConfig
+from tg_jobs_parser.hh.client import HH_VACANCIES_DEPTH_LIMIT, HHApiError, HHClient, HHClientConfig
 from tg_jobs_parser.hh.dedup import DedupedVacancy, dedupe_vacancies
 from tg_jobs_parser.hh.mapper import (
     detail_to_vacancy,
@@ -65,6 +65,7 @@ class HhSyncResult:
     pages: int = 0
     flush_batches: int = 0
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     duration_seconds: float = 0.0
     window: str = "all"
     period: int | None = None
@@ -155,7 +156,9 @@ def run_hh_sync(
                     span.set_attribute("hh.date_from", resolved.date_from)
                 if resolved.date_to:
                     span.set_attribute("hh.date_to", resolved.date_to)
-                shorts, pages, stopped = _collect_shorts(client, hh, resolved, should_stop=stop_requested)
+                shorts, pages, stopped = _collect_shorts(
+                    client, hh, resolved, should_stop=stop_requested, warnings=result.warnings
+                )
                 result.pages = pages
                 result.searched = len(shorts)
                 span.set_attribute("hh.searched", result.searched)
@@ -289,8 +292,13 @@ def _collect_shorts(
     search_window: ResolvedHhSearchWindow | None = None,
     *,
     should_stop: Callable[[], bool] | None = None,
+    warnings: list[str] | None = None,
 ) -> tuple[list[VacancyShort], int, bool]:
-    """Страницы поиска; третий элемент — остановлено ли по ``should_stop`` (следующая страница не запрошена)."""
+    """Страницы поиска; третий элемент — остановлено ли по ``should_stop`` (следующая страница не запрошена).
+
+    Если HH нашёл больше, чем отдаёт его лимит глубины, в ``warnings`` — предупреждение:
+    остаток выдачи иначе терялся бы молча.
+    """
     resolved = search_window or ResolvedHhSearchWindow(window="all")
     params = VacancySearchParams(
         text=hh.search.text,
@@ -302,15 +310,22 @@ def _collect_shorts(
     )
     shorts: list[VacancyShort] = []
     pages = 0
+    found = 0
     if should_stop is not None and should_stop():
         return shorts, pages, True
     with _TRACER.start_as_current_span("hh.search"):
         for page in client.iter_vacancy_pages(params):
             pages += 1
+            found = max(found, int(page.found or 0))
             shorts.extend(page.items)
             # Генератор запрашивает следующую страницу только на следующем шаге цикла.
             if should_stop is not None and should_stop():
                 return shorts, pages, True
+    if warnings is not None and found > HH_VACANCIES_DEPTH_LIMIT and found > len(shorts):
+        warnings.append(
+            f"HH нашёл {found} вакансий, прочитано {len(shorts)} (лимит глубины HH — "
+            f"{HH_VACANCIES_DEPTH_LIMIT}): сузьте окно sync или поисковый запрос."
+        )
     return shorts, pages, False
 
 
@@ -475,6 +490,16 @@ def _fetch_into_buffer(
         msg = f"detail {short.id}: HTTP {exc.status_code}"
         result.errors.append(msg)
         _LOG.warning("HH %s", msg)
+        existing = hh_repo.get_vacancy_by_source_post_key(session, hh_source_post_key(short.id))
+        if existing is not None:
+            # Повторная загрузка не удалась: сохранённая карточка остаётся (upsert HH перезаписал
+            # бы полный текст короткой выдачей). Детали не отмечены — следующий sync попробует снова.
+            v = row_to_vacancy(existing)
+            v.is_duplicate = is_duplicate
+            v.duplicate_group_id = duplicate_group_id
+            v.duplicate_reason = duplicate_reason
+            buffer.append(v)
+            return
         buffer.append(
             short_to_vacancy(
                 short,

@@ -54,3 +54,10 @@ def test_parse_date_unchanged():
 def test_resolve_search_date_to_invalid():
     with pytest.raises(ValueError):
         resolve_search_date_to("not-a-date")
+
+
+def test_clamp_range_days_keeps_newest_days():
+    from tg_jobs_parser.utils.dates import clamp_range_days
+
+    assert clamp_range_days(date(2026, 1, 1), date(2026, 10, 19), 30) == (date(2026, 9, 20), date(2026, 10, 19))
+    assert clamp_range_days(date(2026, 10, 1), date(2026, 10, 19), 30) == (date(2026, 10, 1), date(2026, 10, 19))

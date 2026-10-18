@@ -12,6 +12,7 @@ from backend.db.models import HhListingRow, VacancyRow
 from backend.services import hh_sync_service
 from backend.settings import Settings
 from tg_jobs_parser.config.schema import AppConfig, HhConfig, HhSearchConfig
+from tg_jobs_parser.hh.client import HHApiError
 from tg_jobs_parser.hh.dedup import DedupedVacancy
 from tg_jobs_parser.hh.mapper import hh_source_post_key, stable_vacancy_id
 from tg_jobs_parser.hh.models import VacancyShort
@@ -140,6 +141,56 @@ def test_duplicate_does_not_overwrite_existing_detail_vacancy(db_session):
         assert len(buffer) == 1
         assert "full detail body" in buffer[0].cleaned_text
         assert buffer[0].is_duplicate is True
+
+
+def _saved_detail_vacancy(session, vid: str) -> None:
+    session.add(
+        VacancyRow(
+            id=stable_vacancy_id(vid),
+            source_post_key=hh_source_post_key(vid),
+            source_channel="hh",
+            source_url="https://hh.ru",
+            post_url=f"https://hh.ru/vacancy/{vid}",
+            raw_text="<p>full detail body</p>",
+            cleaned_text="full detail body",
+            extraction_source="hh_api",
+            vacancy_score=100,
+            parsed_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+
+
+def test_failed_detail_refetch_keeps_saved_card(db_session):
+    vid = "77"
+    with db_session as session:
+        _saved_detail_vacancy(session, vid)
+        client = MagicMock()
+        client.get_vacancy.side_effect = HHApiError("unavailable", status_code=503)
+        buffer: list = []
+        result = hh_sync_service.HhSyncResult()
+
+        hh_sync_service._fetch_into_buffer(client, session, _short(vid), result, buffer, is_duplicate=False)
+
+        assert len(buffer) == 1
+        assert buffer[0].cleaned_text == "full detail body"
+        assert buffer[0].is_duplicate is False
+        assert result.errors == [f"detail {vid}: HTTP 503"]
+        assert result.details_fetched == 0
+
+
+def test_failed_detail_of_new_vacancy_falls_back_to_short(db_session):
+    with db_session as session:
+        client = MagicMock()
+        client.get_vacancy.side_effect = HHApiError("unavailable", status_code=503)
+        buffer: list = []
+        result = hh_sync_service.HhSyncResult()
+
+        hh_sync_service._fetch_into_buffer(client, session, _short("78"), result, buffer, is_duplicate=False)
+
+        assert len(buffer) == 1
+        assert "QA Automation Engineer" in buffer[0].cleaned_text
+        assert result.errors == ["detail 78: HTTP 503"]
 
 
 def test_mid_group_flush_when_duplicates_exceed_batch(monkeypatch):

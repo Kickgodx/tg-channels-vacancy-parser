@@ -154,3 +154,19 @@ def test_short_to_vacancy_duplicate_flags():
     )
     assert v.is_duplicate is True
     assert v.duplicate_reason == "hh_multicity"
+
+
+def test_vacancy_without_roles_has_no_specializations():
+    detail = VacancyDetail.model_validate(
+        {
+            "id": "55",
+            "name": "Инженер",
+            "description": "<p>Без ролей</p>",
+            "alternate_url": "https://hh.ru/vacancy/55",
+            "published_at": "2026-10-01T12:00:00+0300",
+        }
+    )
+    short = VacancyShort.model_validate({"id": "56", "name": "Инженер", "alternate_url": "https://hh.ru/vacancy/56"})
+
+    assert detail_to_vacancy(detail).detected_specializations == []
+    assert short_to_vacancy(short).detected_specializations == []

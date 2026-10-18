@@ -478,3 +478,58 @@ def test_hh_sync_cancel_during_search_stops_paging(client: TestClient, monkeypat
     assert job["status"] == "cancelled"
     assert pages_requested == [1]
     assert (job["result"]["pages"], job["result"]["details_fetched"]) == (1, 0)
+
+
+def _pages(found: int, sizes: list[int]):
+    for n, size in enumerate(sizes):
+        yield MagicMock(found=found, items=[_short(f"9{n}{i:03d}", f"AQA {n}-{i}", f"Co{n}-{i}") for i in range(size)])
+
+
+def test_collect_shorts_warns_when_hh_found_more_than_depth_limit():
+    from backend.services.hh_sync_service import _collect_shorts
+    from tg_jobs_parser.config.schema import HhConfig
+
+    client = MagicMock()
+    client.iter_vacancy_pages.return_value = _pages(5000, [100] * 20)
+    warnings: list[str] = []
+
+    shorts, pages, stopped = _collect_shorts(client, HhConfig(), warnings=warnings)
+
+    assert (len(shorts), pages, stopped) == (2000, 20, False)
+    assert len(warnings) == 1
+    assert "5000" in warnings[0] and "2000" in warnings[0]
+
+
+def test_collect_shorts_within_limit_has_no_warning():
+    from backend.services.hh_sync_service import _collect_shorts
+    from tg_jobs_parser.config.schema import HhConfig
+
+    client = MagicMock()
+    client.iter_vacancy_pages.return_value = _pages(150, [100, 50])
+    warnings: list[str] = []
+
+    shorts, pages, _ = _collect_shorts(client, HhConfig(), warnings=warnings)
+
+    assert (len(shorts), pages) == (150, 2)
+    assert warnings == []
+
+
+def test_hh_sync_result_carries_depth_warning(client: TestClient, monkeypatch):
+    _hh_token(monkeypatch)
+    short = _short("401", "AQA Python", "ACME")
+
+    class FakeClient(_EmptyClient):
+        def iter_vacancy_pages(self, *a, **k):
+            yield MagicMock(found=5000, items=[short])
+
+        def get_vacancy(self, vacancy_id: str):
+            return _detail(short)
+
+    monkeypatch.setattr("backend.services.hh_sync_service.HHClient", FakeClient)
+    admin = _register(client, "admin40@example.com")
+
+    job = _sync(client, admin)
+
+    assert job["status"] == "completed", job
+    assert len(job["result"]["warnings"]) == 1
+    assert "5000" in job["result"]["warnings"][0]

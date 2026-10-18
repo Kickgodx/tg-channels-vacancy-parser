@@ -94,6 +94,7 @@ class HhSyncResponse(BaseModel):
     pages: int = 0
     flush_batches: int = 0
     errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     duration_seconds: float
     window: str = "all"
     period: int | None = None

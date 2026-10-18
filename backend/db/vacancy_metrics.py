@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from sqlalchemy import func, lateral, select, true
 from sqlalchemy.orm import Session
 
@@ -49,7 +47,8 @@ def _prepare_fx(session: Session) -> SalaryDisplayMeta:
     rate_date = None
     if cfg.fx.enabled:
         rate_date, _ = fx_repo.get_latest_rates(session)
-    rates_as_of = rate_date.isoformat() if rate_date is not None else datetime.now(UTC).date().isoformat()
+    # Без курсов — None: сегодняшняя дата выдавала бы отсутствие курсов за свежие курсы.
+    rates_as_of = rate_date.isoformat() if rate_date is not None else None
     return SalaryDisplayMeta(
         display_currency=cfg.fx.display_currency,
         rates_as_of=rates_as_of,

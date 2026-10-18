@@ -45,7 +45,7 @@ def backfill_vacancies_salary_rub(
     db_rates_only: bool = False,
 ) -> SalaryRubBackfillStats:
     """
-    Пересчитывает RUB-колонку для всех вакансий с указанной зарплатой.
+    Пересчитывает RUB-колонку для всех уникальных вакансий с указанной зарплатой, включая архивные.
 
     ``db_rates_only=True`` — только последний снимок из ``exchange_rates``, без запросов к ЦБ.
     """
@@ -58,10 +58,10 @@ def backfill_vacancies_salary_rub(
         if rate_date and rates:
             rates_cache = {rate_date: rates}
 
+    # Архивные тоже: их видно с include_archived, и сумма по старому курсу там врала бы.
     stmt = select(VacancyRow).where(
         _has_salary_condition(),
         VacancyRow.is_duplicate.is_(False),
-        VacancyRow.archived_at.is_(None),
     )
     processed = 0
     updated = 0

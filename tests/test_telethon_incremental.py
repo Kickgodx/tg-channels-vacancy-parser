@@ -140,9 +140,11 @@ def test_date_to_in_past_uses_offset_date_and_no_checkpoint():
 
 def test_scan_limit_hit_gives_no_checkpoint():
     parser = _parser(max_posts_per_channel=3)
-    posts, _ = _run(parser, FakeClient(MESSAGES))
+    posts, warn = _run(parser, FakeClient(MESSAGES))
     assert _ids(posts) == [8, 9, 10]
     assert parser.new_checkpoints == {}
+    assert warn is not None
+    assert "@chan" in warn and "max_posts_per_channel" in warn and "3 постов" in warn
 
 
 def test_short_flood_wait_is_waited_and_resumed(monkeypatch):
