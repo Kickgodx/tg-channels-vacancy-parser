@@ -254,7 +254,7 @@ class ResumeRow(Base):
 
 
 class VacancyMatchRow(Base):
-    """Оценка соответствия резюме вакансии. PK — и кэш матчинга (resume+vacancy+model)."""
+    """Оценка соответствия резюме вакансии. PK (resume+vacancy) — и кэш матчинга; одна строка на пару."""
 
     __tablename__ = "vacancy_matches"
 
@@ -270,12 +270,17 @@ class VacancyMatchRow(Base):
     missing_skills: Mapped[list | None] = mapped_column(JSON, nullable=True)
     strengths: Mapped[list | None] = mapped_column(JSON, nullable=True)
     risks: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Фактически ответившая модель (может быть fallback).
     model: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Настроенная модель матчинга и версия промпта на момент запроса — по ним
+    # ``backend.services.llm_result_freshness`` решает, устарела ли оценка.
+    requested_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 
 class CoverLetterRow(Base):
-    """Сгенерированное сопроводительное письмо. PK — и кэш генерации (resume+vacancy)."""
+    """Сгенерированное сопроводительное письмо. PK (resume+vacancy) — и кэш генерации; одна строка на пару."""
 
     __tablename__ = "cover_letters"
 
@@ -285,7 +290,11 @@ class CoverLetterRow(Base):
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
     tone: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Фактически ответившая модель (может быть fallback).
     model: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Настроенная модель писем и версия промпта на момент запроса (см. оценку выше).
+    requested_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 

@@ -18,12 +18,13 @@ import fakeredis
 import pytest
 from rq import Queue
 from tests.conftest import new_user
+from tests.llm_job_helpers import use_ai_config
 
 from backend.config_builder import build_config
 from backend.db import hh_sync_job_repository as hh_jobs
 from backend.db import llm_job_repository as lj
 from backend.db import parse_run_repository as pr
-from backend.db.models import ResumeRow, VacancyRow
+from backend.db.models import ResumeRow, VacancyMatchRow, VacancyRow
 from backend.db.session import session_scope
 from backend.queue import rq_conn
 from backend.schemas import RunCreateRequest
@@ -35,7 +36,8 @@ from backend.settings import get_settings
 from backend.workers import hh_sync_tasks, hh_worker, liveness, llm_worker, parse_tasks, parse_worker, runner
 from tg_jobs_parser.ai import cache_registry, rate_limit
 from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
+from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION
+from tg_jobs_parser.ai.schema import VacancyAIExtraction, VacancyMatchExtraction
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.parse_result import ParseResult
 
@@ -215,6 +217,43 @@ def test_llm_worker_runs_queued_match_job(fake_redis, worker_process, monkeypatc
         queue=rq_conn.LLM_QUEUE_NAME,
         metrics_port=get_settings().llm_worker_metrics_port,
     )
+
+
+def test_llm_worker_match_job_records_requested_model(fake_redis, worker_process, monkeypatch, tmp_path):
+    """Матч через RQ-воркер пишет запрошенную модель и версию промпта (основа ``stale``)."""
+    use_ai_config(monkeypatch, tmp_path, match_model="match/a")
+
+    class _FakeClient:
+        def match_with_fallback(self, *, resume_text, vacancy_text):
+            return VacancyMatchExtraction(confidence=80, explanation="ok"), LLMUsage(model="fallback/b")
+
+    monkeypatch.setattr(match_service, "get_interactive_client", lambda: _FakeClient())
+    with session_scope() as session:
+        user_id = new_user(session)
+        resume = ResumeRow(user_id=user_id, name="CV", text="Python")
+        session.add(resume)
+        session.add(
+            VacancyRow(
+                id="vac-stale",
+                source_post_key="ch-stale",
+                source_channel="ch",
+                source_url="https://t.me/s/ch",
+                raw_text="Python developer",
+                cleaned_text="Python developer",
+            )
+        )
+        session.flush()
+        resume_id = resume.id
+
+    job_id = llm_job_runner.enqueue(
+        user_id=user_id, kind=KIND_MATCH, resume_id=resume_id, vacancy_id="vac-stale"
+    ).job_id
+    llm_worker.main()
+
+    with session_scope() as session:
+        assert lj.get_llm_job(session, job_id).status == "done"
+        row = session.get(VacancyMatchRow, (resume_id, "vac-stale"))
+        assert (row.model, row.requested_model, row.prompt_version) == ("fallback/b", "match/a", MATCH_PROMPT_VERSION)
 
 
 def test_llm_worker_runs_import_with_llm(fake_redis, worker_process, monkeypatch, default_test_config):

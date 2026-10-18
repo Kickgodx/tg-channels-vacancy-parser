@@ -34,6 +34,7 @@ from backend.schemas import LlmJobOut
 from backend.services import import_service
 from backend.services.llm_job_events import channel_for
 from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_IMPORT, KIND_MATCH
+from backend.services.llm_result_freshness import current_ai_config
 from backend.services.pubsub_hub import PubSubUnavailable, get_pubsub_hub
 from backend.settings import get_settings
 
@@ -54,11 +55,11 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
         if row.kind == KIND_MATCH:
             m = repo.get_vacancy_match(db, resume_id=row.resume_id, vacancy_id=row.vacancy_id)
             if m is not None:
-                match_out = _match_to_out(m, cached=False)
+                match_out = _match_to_out(m, cached=False, ai=current_ai_config())
         elif row.kind == KIND_COVER_LETTER:
             c = repo.get_cover_letter(db, resume_id=row.resume_id, vacancy_id=row.vacancy_id)
             if c is not None:
-                letter_out = _letter_to_out(c, cached=False)
+                letter_out = _letter_to_out(c, cached=False, ai=current_ai_config())
 
     return LlmJobOut(
         id=row.id,

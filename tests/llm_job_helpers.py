@@ -26,3 +26,28 @@ def await_llm_job(client, token: str, post_response: Any, *, timeout: float = 5.
             return last
         time.sleep(0.05)
     raise AssertionError(f"LLM job {job_id} не завершилась: {last}")
+
+
+def use_ai_config(monkeypatch, tmp_path, **ai: Any):
+    """Подменить ``config.yaml`` тестов: базовый конфиг + поля ``ai`` (модели и т. п.)."""
+    import yaml
+    from tests.conftest import _TEST_CONFIG
+
+    from backend.settings import get_settings
+    from tg_jobs_parser.config.loader import load_config
+
+    raw = yaml.safe_load(_TEST_CONFIG)
+    raw["ai"].update(ai)
+    path = tmp_path / f"config_{len(list(tmp_path.glob('config_*.yaml')))}.yaml"
+    path.write_text(yaml.safe_dump(raw, allow_unicode=True), encoding="utf-8")
+    monkeypatch.setenv("CONFIG_PATH", str(path))
+    get_settings.cache_clear()
+    return load_config(path).ai
+
+
+def current_ai():
+    """``AiConfig`` текущего тестового конфига (как его видят роуты и воркер)."""
+    from backend.settings import get_settings
+    from tg_jobs_parser.config.loader import load_config
+
+    return load_config(get_settings().config_path).ai

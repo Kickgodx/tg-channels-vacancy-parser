@@ -23,6 +23,7 @@ from backend.schemas import (
 )
 from backend.services import export_service, idempotency, import_service
 from backend.services.llm_job_service import KIND_IMPORT, LlmJobUserLimitError, llm_job_runner
+from backend.services.llm_result_freshness import current_ai_config
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.vacancy import Vacancy
 
@@ -157,7 +158,8 @@ def list_vacancies(
             "resume_id": resume_id,
         }
     )
-    items, total = repo.list_vacancies(db, query)
+    match_ai = current_ai_config() if resume_id is not None else None
+    items, total = repo.list_vacancies(db, query, match_ai=match_ai)
     return VacancyListResponse(items=items, total=total, page=page, page_size=page_size)
 
 

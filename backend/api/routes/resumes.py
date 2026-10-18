@@ -27,7 +27,9 @@ from backend.services.llm_job_service import (
     LlmJobUserLimitError,
     llm_job_runner,
 )
+from backend.services.llm_result_freshness import cover_letter_is_stale, current_ai_config, match_is_stale
 from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
+from tg_jobs_parser.config.schema import AiConfig
 
 _LOG = logging.getLogger(__name__)
 
@@ -97,7 +99,7 @@ def delete_resume(
         raise HTTPException(status_code=404, detail="Resume not found")
 
 
-def _match_to_out(row: VacancyMatchRow, *, cached: bool) -> VacancyMatchOut:
+def _match_to_out(row: VacancyMatchRow, *, cached: bool, ai: AiConfig) -> VacancyMatchOut:
     return VacancyMatchOut(
         resume_id=row.resume_id,
         vacancy_id=row.vacancy_id,
@@ -112,6 +114,7 @@ def _match_to_out(row: VacancyMatchRow, *, cached: bool) -> VacancyMatchOut:
         model=row.model,
         created_at=row.created_at,
         cached=cached,
+        stale=match_is_stale(row, ai),
     )
 
 
@@ -127,7 +130,7 @@ def get_vacancy_match(
     row = repo.get_vacancy_match(db, resume_id=resume_id, vacancy_id=vacancy_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Match not found")
-    return _match_to_out(row, cached=True)
+    return _match_to_out(row, cached=True, ai=current_ai_config())
 
 
 @resumes_router.post(
@@ -145,16 +148,17 @@ def match_single_vacancy(
     db: Session = Depends(get_db),
     user: UserRow = Depends(get_current_user),
 ):
-    """Кэш без force → 200; иначе фоновая джоба → 202 ``{job_id}``."""
+    """Свежая оценка без force → 200; иначе (нет, устарела, force) фоновая джоба → 202 ``{job_id}``."""
     _get_own_resume(db, resume_id, user)
     vacancy = repo.get_vacancy_row(db, vacancy_id)
     if vacancy is None:
         raise HTTPException(status_code=404, detail="Vacancy not found")
     if not force:
         existing = repo.get_vacancy_match(db, resume_id=resume_id, vacancy_id=vacancy_id)
-        if existing is not None:
+        ai = current_ai_config()
+        if existing is not None and not match_is_stale(existing, ai):
             record_match(outcome="cached")
-            return _match_to_out(existing, cached=True)
+            return _match_to_out(existing, cached=True, ai=ai)
     try:
         result = llm_job_runner.enqueue(
             user_id=user.id,
@@ -175,7 +179,7 @@ def match_single_vacancy(
     return JSONResponse(status_code=202, content=body.model_dump(mode="json"))
 
 
-def _letter_to_out(row: CoverLetterRow, *, cached: bool) -> CoverLetterOut:
+def _letter_to_out(row: CoverLetterRow, *, cached: bool, ai: AiConfig) -> CoverLetterOut:
     return CoverLetterOut(
         resume_id=row.resume_id,
         vacancy_id=row.vacancy_id,
@@ -184,6 +188,7 @@ def _letter_to_out(row: CoverLetterRow, *, cached: bool) -> CoverLetterOut:
         model=row.model,
         created_at=row.created_at,
         cached=cached,
+        stale=cover_letter_is_stale(row, ai),
     )
 
 
@@ -199,7 +204,7 @@ def get_cover_letter(
     row = repo.get_cover_letter(db, resume_id=resume_id, vacancy_id=vacancy_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Cover letter not found")
-    return _letter_to_out(row, cached=True)
+    return _letter_to_out(row, cached=True, ai=current_ai_config())
 
 
 @resumes_router.post(
@@ -218,18 +223,19 @@ def generate_cover_letter(
     db: Session = Depends(get_db),
     user: UserRow = Depends(get_current_user),
 ):
-    """Кэш без force → 200; иначе фоновая джоба → 202 ``{job_id}``."""
+    """Свежее письмо того же тона без force → 200; иначе фоновая джоба → 202 ``{job_id}``."""
     _get_own_resume(db, resume_id, user)
     vacancy = repo.get_vacancy_row(db, vacancy_id)
     if vacancy is None:
         raise HTTPException(status_code=404, detail="Vacancy not found")
-    if not force:
-        existing = repo.get_cover_letter(db, resume_id=resume_id, vacancy_id=vacancy_id)
-        if existing is not None:
-            record_cover_letter(outcome="cached")
-            return _letter_to_out(existing, cached=True)
     tone = body.tone if body else "neutral"
     extra_notes = body.extra_notes if body else None
+    if not force:
+        existing = repo.get_cover_letter(db, resume_id=resume_id, vacancy_id=vacancy_id)
+        ai = current_ai_config()
+        if existing is not None and existing.tone == tone and not cover_letter_is_stale(existing, ai):
+            record_cover_letter(outcome="cached")
+            return _letter_to_out(existing, cached=True, ai=ai)
     try:
         result = llm_job_runner.enqueue(
             user_id=user.id,

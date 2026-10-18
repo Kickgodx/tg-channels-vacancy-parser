@@ -161,8 +161,14 @@ def upsert_vacancy_match(
     strengths: list | None,
     risks: list | None,
     model: str,
+    requested_model: str | None = None,
+    prompt_version: str | None = None,
 ) -> VacancyMatchRow:
-    """Записать/обновить оценку пары (resume, vacancy) — кэш матчинга по PK."""
+    """Записать/обновить оценку пары (resume, vacancy) — кэш матчинга по PK.
+
+    ``model`` — фактически ответившая модель, ``requested_model`` и ``prompt_version`` —
+    настроенная модель и версия промпта на момент запроса (по ним считается ``stale``).
+    """
     row = session.get(VacancyMatchRow, (resume_id, vacancy_id))
     if row is None:
         row = VacancyMatchRow(
@@ -177,6 +183,8 @@ def upsert_vacancy_match(
             strengths=strengths,
             risks=risks,
             model=model,
+            requested_model=requested_model,
+            prompt_version=prompt_version,
         )
         session.add(row)
     else:
@@ -189,6 +197,8 @@ def upsert_vacancy_match(
         row.strengths = strengths
         row.risks = risks
         row.model = model
+        row.requested_model = requested_model
+        row.prompt_version = prompt_version
         row.created_at = datetime.now(UTC)
     session.flush()
     return row
@@ -206,8 +216,10 @@ def upsert_cover_letter(
     text: str,
     tone: str,
     model: str,
+    requested_model: str | None = None,
+    prompt_version: str | None = None,
 ) -> CoverLetterRow:
-    """Записать/обновить письмо пары (resume, vacancy) — кэш генерации по PK."""
+    """Записать/обновить письмо пары (resume, vacancy) — кэш генерации по PK (см. оценку)."""
     row = session.get(CoverLetterRow, (resume_id, vacancy_id))
     if row is None:
         row = CoverLetterRow(
@@ -216,12 +228,16 @@ def upsert_cover_letter(
             text=text,
             tone=tone,
             model=model,
+            requested_model=requested_model,
+            prompt_version=prompt_version,
         )
         session.add(row)
     else:
         row.text = text
         row.tone = tone
         row.model = model
+        row.requested_model = requested_model
+        row.prompt_version = prompt_version
         row.created_at = datetime.now(UTC)
     session.flush()
     return row

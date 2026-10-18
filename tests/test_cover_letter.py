@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from tests.llm_job_helpers import await_llm_job
+from sqlalchemy import select
+from tests.llm_job_helpers import await_llm_job, current_ai, use_ai_config
 
 from backend.db.models import CoverLetterRow, VacancyRow
 from backend.db.session import get_session_factory, session_scope
 from backend.services import cover_letter_service
+from tg_jobs_parser.ai.prompts import COVER_LETTER_PROMPT_VERSION
 from tg_jobs_parser.config.schema import AiConfig
 
 
@@ -73,6 +75,8 @@ def stub_llm(monkeypatch):
                 text=f"Здравствуйте! Письмо #{len(calls)} под вашу вакансию.",
                 tone=tone,
                 model="letter/model",
+                requested_model=current_ai().resolved_cover_letter_model(),
+                prompt_version=COVER_LETTER_PROMPT_VERSION,
             )
 
     monkeypatch.setattr(cover_letter_service, "generate_single", _fake)
@@ -218,6 +222,32 @@ def test_cover_letter_end_to_end(api_client, monkeypatch):
     assert body["model"] == "m1"
 
 
+def test_generate_single_records_requested_model_and_prompt_version(api_client, monkeypatch, tmp_path):
+    """Ответила fallback-модель: ``model`` — она, ``requested_model`` — настроенная модель писем."""
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+
+    use_ai_config(monkeypatch, tmp_path, cover_letter_model="writer/a")
+
+    class _FakeClient:
+        def cover_letter_with_fallback(self, **_kwargs):
+            return "Письмо", LLMUsage(model="fallback/b")
+
+    monkeypatch.setattr(cover_letter_service, "get_interactive_client", lambda: _FakeClient())
+    token = _register(api_client, "a@example.com")
+    vid = _add_vacancy()
+    rid = _add_resume(api_client, token)
+    r = api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={})
+    assert await_llm_job(api_client, token, r)["status"] == "done"
+
+    with session_scope() as session:
+        row = session.get(CoverLetterRow, (rid, vid))
+        assert (row.model, row.requested_model, row.prompt_version) == (
+            "fallback/b",
+            "writer/a",
+            COVER_LETTER_PROMPT_VERSION,
+        )
+
+
 def test_cover_letter_model_falls_back_to_match_then_parse():
     assert AiConfig(model="parse/model").resolved_cover_letter_model() == "parse/model"
     assert (
@@ -300,3 +330,82 @@ def test_parse_cover_letter_strips_fence():
     assert _parse_cover_letter("```\nТекст письма\n```") == "Текст письма"
     with pytest.raises(ValueError):
         _parse_cover_letter("   ")
+
+
+# --- Актуальность сохранённого письма (модель писем / версия промпта / тон) ---
+
+
+@pytest.fixture
+def counting_letter_llm(monkeypatch):
+    """Реальный ``generate_single`` с подменённым клиентом: считает вызовы LLM."""
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+
+    tones: list[str] = []
+
+    class _FakeClient:
+        def cover_letter_with_fallback(self, *, tone, **_kwargs):
+            tones.append(tone)
+            return f"Письмо #{len(tones)}", LLMUsage(model="answered/model")
+
+    monkeypatch.setattr(cover_letter_service, "get_interactive_client", lambda: _FakeClient())
+    return tones
+
+
+def _letter_pair(client, tone: str = "neutral") -> tuple[str, int, str]:
+    token = _register(client, "a@example.com")
+    vid = _add_vacancy()
+    rid = _add_resume(client, token)
+    r = client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={"tone": tone})
+    assert await_llm_job(client, token, r)["status"] == "done"
+    return token, rid, vid
+
+
+def _letters(rid: int) -> list[tuple[str, str | None]]:
+    with session_scope() as session:
+        rows = session.scalars(select(CoverLetterRow).where(CoverLetterRow.resume_id == rid)).all()
+        return [(r.tone, r.requested_model) for r in rows]
+
+
+def test_same_tone_fresh_letter_served_from_cache(api_client, counting_letter_llm):
+    token, rid, vid = _letter_pair(api_client)
+
+    again = api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={})
+    assert again.status_code == 200
+    assert again.json()["stale"] is False
+    assert counting_letter_llm == ["neutral"]
+
+
+def test_other_tone_regenerates_letter_without_force(api_client, counting_letter_llm):
+    token, rid, vid = _letter_pair(api_client)
+
+    r = api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={"tone": "formal"})
+    assert r.status_code == 202
+    job = await_llm_job(api_client, token, r)
+    assert job["cover_letter"]["tone"] == "formal"
+    assert counting_letter_llm == ["neutral", "formal"]
+    assert [tone for tone, _ in _letters(rid)] == ["formal"]
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        pytest.param({"cover_letter_model": "writer/a"}, {"cover_letter_model": "writer/b"}, id="cover_letter_model"),
+        pytest.param({"match_model": "match/a"}, {"match_model": "match/b"}, id="via-match-model"),
+    ],
+)
+def test_letter_regenerated_after_model_change(api_client, counting_letter_llm, monkeypatch, tmp_path, before, after):
+    use_ai_config(monkeypatch, tmp_path, **before)
+    token, rid, vid = _letter_pair(api_client)
+    new_model = use_ai_config(monkeypatch, tmp_path, **after).resolved_cover_letter_model()
+
+    got = api_client.get(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token))
+    assert got.json()["stale"] is True
+
+    r = api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={})
+    assert r.status_code == 202
+    job = await_llm_job(api_client, token, r)
+    assert job["cover_letter"]["stale"] is False
+    assert len(counting_letter_llm) == 2
+    assert _letters(rid) == [("neutral", new_model)]
+    got = api_client.get(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token))
+    assert got.json()["stale"] is False

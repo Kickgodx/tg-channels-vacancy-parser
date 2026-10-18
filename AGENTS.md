@@ -37,7 +37,9 @@ cd frontend && npm run build                   # tsc -b + vite build
 
 - Версии: `EXTRACT_PROMPT_VERSION`, `MATCH_PROMPT_VERSION`,
   `COVER_LETTER_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py`.
-  Смысловое изменение промпта → **bump** версии (кэш ключуется версией).
+  Смысловое изменение промпта → **bump** версии: кэш extraction ключуется
+  версией, а сохранённые оценки и письма с прежней версией становятся `stale`
+  и пересчитываются при следующем запросе без `force`.
 - Golden extraction: `evals/golden/extraction.jsonl`. Новый кейс — новая
   строка JSONL + запись в `evals/fixtures/extraction_outputs.json` (для
   offline CI).

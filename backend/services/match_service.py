@@ -12,6 +12,7 @@ from backend.db.session import session_scope
 from backend.observability import record_match
 from backend.services.interactive_llm import get_interactive_client
 from backend.settings import get_settings
+from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION
 from tg_jobs_parser.ai.schema import calculate_overall_score
 from tg_jobs_parser.config.loader import load_config
 
@@ -30,6 +31,8 @@ def match_single(*, resume_text: str, vacancy_id: str, vacancy_text: str, resume
     ) as span:
         cfg = load_config(get_settings().config_path)
         max_chars = cfg.ai.max_input_chars
+        # С какой моделью и версией промпта спрашиваем — по ним потом решается, устарела ли оценка.
+        requested_model = cfg.ai.resolved_match_model()
         started = time.perf_counter()
         try:
             client = get_interactive_client()
@@ -70,4 +73,6 @@ def match_single(*, resume_text: str, vacancy_id: str, vacancy_text: str, resume
             strengths=extraction.strengths,
             risks=extraction.risks,
             model=usage.model,
+            requested_model=requested_model,
+            prompt_version=MATCH_PROMPT_VERSION,
         )

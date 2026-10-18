@@ -260,6 +260,15 @@ confidence оценки, пояснение и списки совпадающи
 - Оценка сохраняется парой `(resume_id, vacancy_id)`: повторное открытие
   карточки отдаёт её из БД, токены не тратятся. Кнопка «Переоценить резюме»
   (`force=true`) запускает LLM заново.
+- Вместе с оценкой хранятся запрошенная модель матчинга (настроенная, а не
+  ответившая fallback-модель — та остаётся в `model`) и версия промпта
+  (`MATCH_PROMPT_VERSION`). Если с тех пор сменили `ai.match_model` (пусто →
+  `ai.model`) или версию промпта, оценка **устарела**: ответы `GET`/`POST`, итог
+  LLM-задачи и элемент списка вакансий отдают `stale: true` / `match_stale: true`,
+  а `POST` без `force` пересчитывает её (202) вместо ответа из БД. В карточке у
+  такой оценки — пометка «переоцените»; колонка Match и сортировка по ней не
+  меняются. Оценки до миграции 030 по версии не устаревают (запрошенной
+  считается фактическая модель).
 - Посчитанные скоры видны в колонке **Match**, по ним же работает сортировка
   (`sort_by=match_score` при выбранном резюме).
 - Мэтчинг и письма — фоновые джобы (`llm_jobs`): кэш → 200; иначе 202 +
@@ -302,6 +311,11 @@ LLM пишет черновик отклика под конкретную ва�
   повторное открытие карточки отдаёт его из БД, токены не тратятся.
   «Перегенерировать письмо» (`force=true`) вызывает LLM заново;
   `DELETE` сбрасывает сохранённый вариант.
+- `POST` без `force` отдаёт сохранённое письмо, только если совпадает тон и
+  письмо не устарело; иначе генерирует заново (202) в запрошенном тоне.
+  Устаревание — как у оценки: сменилась модель писем (`ai.cover_letter_model` →
+  `match_model` → `model`) или `COVER_LETTER_PROMPT_VERSION`; тогда `stale: true`
+  и пометка «перегенерируйте» в карточке. Тон на `stale` не влияет.
 - Текст открывается в редактируемом поле — правки локальные, для кнопки
   «Копировать»; в БД остаётся исходный вариант LLM.
 - Модель — `ai.cover_letter_model` (пусто → `match_model` → `model`),
@@ -446,8 +460,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `GET` | `/analytics/salaries` \| `/sources` \| `/companies` | Зарплатные квантили, качество каналов, топ компаний |
 | `GET` `POST` `DELETE` | `/filters` | Пресеты фильтров (приватные) |
 | `GET` `POST` `PUT` `DELETE` | `/resumes` | Резюме пользователя |
-| `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Оценка: кэш → 200; иначе фоновая джоба → 202 `{job_id}` (`force=true` — пересчёт) |
-| `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Письмо: кэш → 200; иначе 202 `{job_id}` (`force`, `tone`/`extra_notes`) |
+| `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Оценка: свежая из БД → 200; нет / устарела (`stale`) → фоновая джоба → 202 `{job_id}` (`force=true` — пересчёт) |
+| `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Письмо: свежее того же тона → 200; иначе 202 `{job_id}` (`force`, `tone`/`extra_notes`) |
 | `GET` | `/llm-jobs/{job_id}` | Статус LLM-задачи; при `done` — payload match/letter |
 | `GET` | `/llm-jobs/{job_id}/events` | SSE статусов (`?ticket=` или Bearer); poll остаётся fallback |
 | `GET` | `/fx/rates`, `POST` `/fx/refresh` \| `/fx/recalculate-rub` | Курсы ЦБ и пересчёт зарплат в ₽ (`POST` — admin) |
@@ -517,8 +531,8 @@ lease и recover как у прогонов; в Docker — `hh-worker`, без R
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…029`, номера 005 нет; head —
-`029_parse_runs_drop_pending`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…030`, номера 005 нет; head —
+`030_llm_results_requested_model`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -530,9 +544,9 @@ lease и recover как у прогонов; в Docker — `hh-worker`, без R
 | `ai_extraction_cache` | Кэш ответов LLM при парсинге |
 | `saved_filters` | Пресеты фильтров (`user_id`) |
 | `resumes` | Резюме пользователя (`user_id`) |
-| `vacancy_matches` | Оценки соответствия, PK `(resume_id, vacancy_id)` — он же кэш матчинга |
+| `vacancy_matches` | Оценки соответствия, PK `(resume_id, vacancy_id)` — он же кэш матчинга; `requested_model` + `prompt_version` — для `stale` |
 | `llm_jobs` | Фоновые LLM-задачи: мэтчинг, письма, ручной импорт (`queued`/`running`/`done`/`error`) |
-| `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации |
+| `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации; `requested_model` + `prompt_version` — для `stale` |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 | `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
 | `llm_user_usage` | Вызовы LLM пользователя за сутки — квота `LLM_USER_DAILY_CALLS` |
@@ -572,7 +586,7 @@ tg_jobs_parser/
     workers/               — parse/llm/hh_worker (RQ, общий runner), *_tasks, recover*,
                              liveness (heartbeat + watchdog), healthcheck
     queue/                 — RQ Redis connection (очереди parse, llm, hh)
-  alembic/                 — миграции SQL (001…029)
+  alembic/                 — миграции SQL (001…030)
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes

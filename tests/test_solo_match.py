@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from tests.llm_job_helpers import await_llm_job
+from tests.llm_job_helpers import await_llm_job, current_ai, use_ai_config
 
-from backend.db.models import VacancyRow
+from backend.db.models import VacancyMatchRow, VacancyRow
 from backend.db.session import get_session_factory, session_scope
 from backend.services import match_service
+from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION
 from tg_jobs_parser.config.schema import AiConfig
 
 
@@ -85,6 +86,8 @@ def stub_llm(monkeypatch):
                 strengths=["Совпадает основной стек."],
                 risks=["Опыт с Kubernetes в резюме не указан."],
                 model="reasoning/model",
+                requested_model=current_ai().resolved_match_model(),
+                prompt_version=MATCH_PROMPT_VERSION,
             )
 
     monkeypatch.setattr(match_service, "match_single", _fake)
@@ -208,6 +211,37 @@ def test_match_single_end_to_end(api_client, monkeypatch):
     assert body["breakdown"]["skills_match"] == 70
     assert body["matching_skills"][0]["importance"] == "critical"
     assert body["explanation"] == "Кандидат соответствует роли, пробел — Kubernetes."
+
+
+def _fake_match_client(answered_by: str):
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+    from tg_jobs_parser.ai.schema import VacancyMatchExtraction
+
+    class _FakeClient:
+        def match_with_fallback(self, *, resume_text, vacancy_text):
+            return VacancyMatchExtraction(confidence=80, explanation="ok"), LLMUsage(model=answered_by)
+
+    return _FakeClient()
+
+
+def test_match_single_records_requested_model_and_prompt_version(api_client, monkeypatch, tmp_path):
+    """Ответила fallback-модель: ``model`` — она, ``requested_model`` — настроенная."""
+    use_ai_config(monkeypatch, tmp_path, match_model="configured/a")
+    monkeypatch.setattr(match_service, "get_interactive_client", lambda: _fake_match_client("fallback/b"))
+
+    token = _register(api_client, "a@example.com")
+    vid = _add_vacancy()
+    rid = api_client.post("/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}).json()["id"]
+    job = await_llm_job(api_client, token, api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token)))
+    assert job["status"] == "done", job
+
+    with session_scope() as session:
+        row = session.get(VacancyMatchRow, (rid, vid))
+        assert (row.model, row.requested_model, row.prompt_version) == (
+            "fallback/b",
+            "configured/a",
+            MATCH_PROMPT_VERSION,
+        )
 
 
 def test_solo_match_reports_llm_failure(api_client, monkeypatch):

@@ -122,6 +122,7 @@ def row_to_list_item(
     *,
     match_score: float | None = None,
     match_explanation: str | None = None,
+    match_stale: bool | None = None,
 ) -> VacancyListItem:
     return VacancyListItem(
         id=row.id,
@@ -157,6 +158,7 @@ def row_to_list_item(
         duplicate_reason=row.duplicate_reason,
         match_score=match_score,
         match_explanation=match_explanation,
+        match_stale=match_stale,
         parsed_at=row.parsed_at,
         archived_at=row.archived_at,
     )
