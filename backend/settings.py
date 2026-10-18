@@ -13,6 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _APP_ENV_ALIASES = {"": "dev", "development": "dev", "local": "dev", "production": "prod"}
 _MIN_JWT_SECRET_LENGTH = 32
+JobBackend = Literal["inprocess", "rq"]
 
 
 class Settings(BaseSettings):
@@ -90,14 +91,14 @@ class Settings(BaseSettings):
     hh_contact_email: str | None = Field(default=None, alias="HH_CONTACT_EMAIL")
 
     # LLM jobs: inprocess (ThreadPool в API) или rq (Redis Queue + llm-worker).
-    llm_job_backend: str = Field(default="inprocess", alias="LLM_JOB_BACKEND")
+    llm_job_backend: JobBackend = Field(default="inprocess", alias="LLM_JOB_BACKEND")
     redis_url: str | None = Field(default=None, alias="REDIS_URL")
     llm_worker_metrics_port: int = Field(default=9101, alias="LLM_WORKER_METRICS_PORT")
     llm_job_stuck_minutes: int = Field(default=15, alias="LLM_JOB_STUCK_MINUTES")
     llm_rq_job_timeout_seconds: int = Field(default=600, alias="LLM_RQ_JOB_TIMEOUT_SECONDS")
 
     # Parse jobs: inprocess (ThreadPool в API) или rq (Redis Queue + parse-worker).
-    parse_job_backend: str = Field(default="inprocess", alias="PARSE_JOB_BACKEND")
+    parse_job_backend: JobBackend = Field(default="inprocess", alias="PARSE_JOB_BACKEND")
     parse_worker_metrics_port: int = Field(default=9102, alias="PARSE_WORKER_METRICS_PORT")
     parse_job_stuck_minutes: int = Field(default=30, alias="PARSE_JOB_STUCK_MINUTES")
     parse_rq_job_timeout_seconds: int = Field(default=43200, alias="PARSE_RQ_JOB_TIMEOUT_SECONDS")
@@ -114,7 +115,7 @@ class Settings(BaseSettings):
     llm_job_max_attempts: int = Field(default=2, ge=1, alias="LLM_JOB_MAX_ATTEMPTS")
 
     # HH sync jobs: inprocess (поток в API) или rq (Redis Queue + hh-worker).
-    hh_sync_job_backend: str = Field(default="inprocess", alias="HH_SYNC_JOB_BACKEND")
+    hh_sync_job_backend: JobBackend = Field(default="inprocess", alias="HH_SYNC_JOB_BACKEND")
     hh_worker_metrics_port: int = Field(default=9103, alias="HH_WORKER_METRICS_PORT")
     hh_sync_rq_job_timeout_seconds: int = Field(default=3600, alias="HH_SYNC_RQ_JOB_TIMEOUT_SECONDS")
     hh_sync_job_lease_seconds: int = Field(default=120, alias="HH_SYNC_JOB_LEASE_SECONDS")
@@ -134,6 +135,16 @@ class Settings(BaseSettings):
             return value
         normalized = value.strip().lower()
         return _APP_ENV_ALIASES.get(normalized, normalized)
+
+    @field_validator("llm_job_backend", "parse_job_backend", "hh_sync_job_backend", mode="before")
+    @classmethod
+    def _normalize_job_backend(cls, value: Any) -> Any:
+        # Другое значение отклоняет Literal: опечатка не должна молча включать inprocess.
+        if value is None:
+            return "inprocess"
+        if not isinstance(value, str):
+            return value
+        return value.strip().lower() or "inprocess"
 
     @model_validator(mode="after")
     def _apply_app_env(self) -> Self:
@@ -170,19 +181,16 @@ class Settings(BaseSettings):
         return not _is_loopback(self.api_exposed_addr)
 
     @property
-    def llm_job_backend_normalized(self) -> str:
-        v = (self.llm_job_backend or "inprocess").strip().lower()
-        return v if v in ("inprocess", "rq") else "inprocess"
+    def llm_job_backend_normalized(self) -> JobBackend:
+        return self.llm_job_backend
 
     @property
-    def parse_job_backend_normalized(self) -> str:
-        v = (self.parse_job_backend or "inprocess").strip().lower()
-        return v if v in ("inprocess", "rq") else "inprocess"
+    def parse_job_backend_normalized(self) -> JobBackend:
+        return self.parse_job_backend
 
     @property
-    def hh_sync_job_backend_normalized(self) -> str:
-        v = (self.hh_sync_job_backend or "inprocess").strip().lower()
-        return v if v in ("inprocess", "rq") else "inprocess"
+    def hh_sync_job_backend_normalized(self) -> JobBackend:
+        return self.hh_sync_job_backend
 
     @property
     def cors_origin_list(self) -> list[str]:

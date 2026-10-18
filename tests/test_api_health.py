@@ -51,8 +51,17 @@ def test_health(client: TestClient):
     r = client.get("/api/v1/health")
     assert r.status_code == 200
     data = r.json()
-    assert data["status"] in ("ok", "degraded")
-    assert "database" in data
+    assert data == {"status": "ok", "database": True, "config_loaded": True}
+
+
+def test_health_degraded_when_config_does_not_load(client: TestClient, tmp_path):
+    (tmp_path / "config.yaml").write_text("fx:\n  enabeld: false\n", encoding="utf-8")
+
+    r = client.get("/api/v1/health")
+
+    assert r.status_code == 200
+    assert r.json() == {"status": "degraded", "database": True, "config_loaded": False}
+    assert "enabeld" not in r.text
 
 
 def test_prometheus_metrics(client: TestClient):

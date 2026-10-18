@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 import threading
+import typing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from tg_jobs_parser.ai.llm_models_registry import (
     LlmModelsLoadError,
@@ -22,6 +23,38 @@ from tg_jobs_parser.config.schema import AppConfig
 
 class ConfigLoadError(RuntimeError):
     """Ошибка чтения или валидации конфигурации."""
+
+
+# Устаревшие ключи, которые переносит ``AiConfig.migrate_fallback_model``.
+_LEGACY_KEYS = frozenset({"ai.models", "ai.fallback_model"})
+# Поля схемы, которые заполняет загрузчик, а не YAML: значение из файла молча перезаписалось бы.
+_LOADER_FIELDS = frozenset({"llm_model_catalog"})
+
+
+def _nested_model(annotation: Any) -> type[BaseModel] | None:
+    """Вложенная модель поля (в том числе ``Model | None``); поля-словари и списки не обходятся."""
+    for candidate in (annotation, *typing.get_args(annotation)):
+        if isinstance(candidate, type) and issubclass(candidate, BaseModel):
+            return candidate
+    return None
+
+
+def _unknown_keys(model: type[BaseModel], data: dict[str, Any], prefix: str = "") -> list[str]:
+    """Пути ключей YAML, которых нет в схеме: опечатка иначе молча оставила бы умолчание."""
+    out: list[str] = []
+    fields = model.model_fields
+    for key, value in data.items():
+        path = f"{prefix}{key}"
+        if path in _LEGACY_KEYS:
+            continue
+        field = fields.get(key) if isinstance(key, str) else None
+        if field is None or (not prefix and key in _LOADER_FIELDS):
+            out.append(path)
+            continue
+        nested = _nested_model(field.annotation)
+        if nested is not None and isinstance(value, dict):
+            out.extend(_unknown_keys(nested, value, f"{path}."))
+    return out
 
 
 @dataclass(frozen=True)
@@ -92,6 +125,9 @@ def _load_config_uncached(path: Path) -> tuple[AppConfig, str | None]:
         raw = {}
     if not isinstance(raw, dict):
         raise ConfigLoadError("Корень YAML должен быть объектом (mapping).")
+    unknown = _unknown_keys(AppConfig, raw)
+    if unknown:
+        raise ConfigLoadError(f"Неизвестные ключи config.yaml: {', '.join(unknown)}")
     try:
         ai_raw = raw.get("ai")
         ai_dict = dict(ai_raw) if isinstance(ai_raw, dict) else {}
@@ -104,7 +140,10 @@ def _load_config_uncached(path: Path) -> tuple[AppConfig, str | None]:
         except LlmModelsLoadError as e:
             raise ConfigLoadError(str(e)) from e
         raw = dict(raw)
-        raw["ai"] = apply_ai_defaults_from_registry(ai_dict, registry)
+        try:
+            raw["ai"] = apply_ai_defaults_from_registry(ai_dict, registry)
+        except LlmModelsLoadError as e:
+            raise ConfigLoadError(str(e)) from e
         cfg = AppConfig.model_validate(raw)
         explicit = str(explicit_models) if explicit_models else None
         return cfg.model_copy(update={"llm_model_catalog": registry.catalog()}), explicit

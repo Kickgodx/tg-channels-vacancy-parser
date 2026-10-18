@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter
 from sqlalchemy import text
@@ -9,6 +8,7 @@ from sqlalchemy import text
 from backend.db.session import get_engine
 from backend.schemas import HealthResponse
 from backend.settings import get_settings
+from tg_jobs_parser.config.loader import ConfigLoadError, load_config
 
 _LOG = logging.getLogger(__name__)
 
@@ -25,6 +25,13 @@ def health() -> HealthResponse:
             db_ok = True
     except Exception as e:
         _LOG.warning("health: БД недоступна: %s", e)
-    config_ok = Path(settings.config_path).is_file()
+    # Файл может существовать, но не загружаться (YAML, схема, ключи, модели).
+    # Причину — только в журнал: /health анонимный, а в тексте пути и id моделей.
+    config_ok = False
+    try:
+        load_config(settings.config_path)
+        config_ok = True
+    except ConfigLoadError as e:
+        _LOG.warning("health: конфигурация не загружается: %s", e)
     status = "ok" if db_ok and config_ok else "degraded"
     return HealthResponse(status=status, database=db_ok, config_loaded=config_ok)

@@ -188,18 +188,16 @@ def test_build_config_applies_whitelisted_overrides(default_test_config):
     assert cfg.telegram.telethon_session_file == base.telegram.telethon_session_file
 
 
-def test_build_config_accepts_fallbacks_from_server_config(tmp_path):
-    """Fallback из config.yaml (каталогом не проверяется) остаётся допустимым в override."""
+def test_build_config_rejects_server_fallback_outside_catalog(tmp_path):
+    """Запасная модель config.yaml вне каталога не загружается — и override её не узаконит."""
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
         "ai:\n  enabled: false\n  fallback_models: [custom/server-fallback]\nfx:\n  enabled: false\n",
         encoding="utf-8",
     )
     body = RunCreateRequest.model_validate({"ai": {"fallback_models": ["custom/server-fallback"]}})
-    assert build_config(cfg_path, body).ai.fallback_models == ["custom/server-fallback"]
-
-    with pytest.raises(ConfigLoadError, match="evil/other"):
-        build_config(cfg_path, RunCreateRequest.model_validate({"ai": {"model": "evil/other"}}))
+    with pytest.raises(ConfigLoadError, match="custom/server-fallback"):
+        build_config(cfg_path, body)
 
 
 _API_KEY = "test-api-key"

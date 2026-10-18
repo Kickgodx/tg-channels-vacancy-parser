@@ -12,6 +12,7 @@ from tg_jobs_parser.fx.convert import (
     currency_for_rate_lookup,
     is_ruble_currency,
     monthly_salary_amount,
+    normalize_currency,
 )
 from tg_jobs_parser.fx.vacancy_rub import effective_salary_amount_for_vacancy
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -45,7 +46,10 @@ def apply_salary_rub_for_vacancy(
     if monthly is None:
         v.detected_salary_avg_rub = None
         return
-    if is_ruble_currency(v.salary_currency):
+    # Зарплата без валюты считается в fx.default_currency_if_missing (как в метриках прогона);
+    # сохранённая salary_currency не меняется. Пустая настройка — валюту не подставлять.
+    currency = normalize_currency(v.salary_currency, default_if_missing=config.default_currency_if_missing)
+    if is_ruble_currency(currency):
         v.detected_salary_avg_rub = monthly
         return
     if not config.enabled:
@@ -57,7 +61,7 @@ def apply_salary_rub_for_vacancy(
             _, rates = fx_repo.get_latest_rates(session)
         else:
             _, rates = fx_repo.ensure_latest_rates(session, config)
-    lookup = currency_for_rate_lookup(v.salary_currency)
+    lookup = currency_for_rate_lookup(currency)
     rate = rates.get(lookup) if lookup and rates else None
     v.detected_salary_avg_rub = monthly * rate if rate is not None else None
 
