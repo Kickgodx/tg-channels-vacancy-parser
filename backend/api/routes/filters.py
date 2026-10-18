@@ -42,7 +42,7 @@ def create_filter(
 ) -> SavedFilterOut:
     row = repo.create_saved_filter(
         db,
-        name=body.name.strip(),
+        name=body.name,
         params=body.params.model_dump(mode="json"),
         user_id=user.id,
     )

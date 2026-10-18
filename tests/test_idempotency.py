@@ -9,7 +9,7 @@ from backend.db.session import session_scope
 from backend.settings import get_settings
 
 
-def test_idempotent_post_runs_returns_same_run_id(admin_client, monkeypatch):
+def _instant_runs(monkeypatch) -> None:
     monkeypatch.setenv("PARSE_JOB_BACKEND", "inprocess")
     get_settings.cache_clear()
 
@@ -28,18 +28,26 @@ def test_idempotent_post_runs_returns_same_run_id(admin_client, monkeypatch):
 
     monkeypatch.setattr("backend.workers.parse_tasks.run_parse", fake_run_parse)
 
+
+def _wait_finished(client, run_id: str, headers: dict | None = None) -> None:
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        st = client.get(f"/api/v1/runs/{run_id}", headers=headers).json()["status"]
+        if st in ("completed", "failed", "cancelled"):
+            return
+        time.sleep(0.05)
+
+
+def test_idempotent_post_runs_returns_same_run_id(admin_client, monkeypatch):
+    _instant_runs(monkeypatch)
+
     headers = {"Idempotency-Key": "parse-key-1"}
     r1 = admin_client.post("/api/v1/runs", json={}, headers=headers)
     assert r1.status_code == 202
     run_id = r1.json()["run_id"]
 
     # Дождаться завершения, чтобы второй ключ мог создать новый прогон.
-    deadline = time.monotonic() + 10.0
-    while time.monotonic() < deadline:
-        st = admin_client.get(f"/api/v1/runs/{run_id}").json()["status"]
-        if st in ("completed", "failed", "cancelled"):
-            break
-        time.sleep(0.05)
+    _wait_finished(admin_client, run_id)
 
     r2 = admin_client.post("/api/v1/runs", json={}, headers=headers)
     assert r2.status_code == 202
@@ -62,3 +70,30 @@ def test_idempotent_key_replays_conflict_without_second_run(admin_client, monkey
     assert r2.json()["detail"]["code"] == "CONFLICT_ACTIVE_RUN"
     with session_scope() as session:
         assert pr.has_active_parse_run(session) is True
+
+
+def test_same_key_of_another_admin_starts_its_own_run(admin_client, monkeypatch):
+    from sqlalchemy import update
+
+    from backend.db.models import UserRow
+
+    _instant_runs(monkeypatch)
+    r1 = admin_client.post("/api/v1/runs", json={}, headers={"Idempotency-Key": "k1"})
+    assert r1.status_code == 202
+    _wait_finished(admin_client, r1.json()["run_id"])
+
+    assert (
+        admin_client.post("/api/v1/auth/register", json={"email": "b@example.com", "password": "secret1"}).status_code
+        == 201
+    )
+    with session_scope() as session:
+        session.execute(update(UserRow).where(UserRow.email == "b@example.com").values(is_admin=True))
+    token = admin_client.post("/api/v1/auth/login", json={"email": "b@example.com", "password": "secret1"}).json()[
+        "access_token"
+    ]
+    b_headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "k1"}
+
+    r2 = admin_client.post("/api/v1/runs", json={}, headers=b_headers)
+
+    assert r2.status_code == 202, r2.text
+    assert r2.json()["run_id"] != r1.json()["run_id"]

@@ -547,7 +547,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  cancelRun: (id: string) => request<{ ok: boolean }>(`/runs/${id}/cancel`, { method: "POST" }),
+  cancelRun: (id: string) => request<RunDetail>(`/runs/${id}/cancel`, { method: "POST" }),
 
   getAiCacheStats: () => request<{ count: number }>("/ai-cache/stats"),
 

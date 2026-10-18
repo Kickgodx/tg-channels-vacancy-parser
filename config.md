@@ -134,9 +134,9 @@ HH sync (не yaml): `HH_SYNC_JOB_BACKEND=inprocess|rq`, `HH_SYNC_JOB_STUCK_MINU
 
 Liveness RQ-воркеров (не yaml): `WORKER_HEARTBEAT_MAX_AGE_SECONDS` (порог healthcheck, 180 с), `WORKER_STALL_EXIT_SECONDS` (watchdog завершает зависший воркер, 900 с; `0` — выключен).
 
-**Идемпотентность мутаций:** заголовок `Idempotency-Key` на `POST /runs`, `POST /hh/sync`, `POST /vacancies/import` (TTL 24ч). Повтор с тем же ключом возвращает сохранённый ответ.
+**Идемпотентность мутаций:** заголовок `Idempotency-Key` на `POST /runs`, `POST /hh/sync`, `POST /vacancies/import` (TTL 24ч). Ключ принадлежит пользователю; повтор с тем же ключом возвращает сохранённый ответ.
 
-**Ошибки API:** `detail` может быть объектом `{code, message, retryable}` (например `CONFLICT_ACTIVE_RUN`).
+**Ошибки API:** `detail` может быть объектом `{code, message, retryable}` (например `CONFLICT_ACTIVE_RUN`). Если этот файл не загружается, любой эндпоинт отвечает 500 `CONFIG_INVALID` с причиной и `retryable: false`; прочие непредвиденные ошибки — 500 `INTERNAL`, `retryable: true`.
 
 **Overrides прогона:** `POST /runs` принимает только whitelist полей (каналы, даты, фильтры, пороги score, `ai.enabled|model|fallback_models|use_cache`); остальное — включая `ai.base_url`, лимиты и `telegram.telethon_session_file` — меняется только в этом файле. Неизвестное поле → 422.
 

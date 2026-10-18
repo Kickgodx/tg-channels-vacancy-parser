@@ -67,3 +67,36 @@ def test_body_text_limits(admin_client):
         "/api/v1/vacancies/import", json={"texts": ["x" * (IMPORT_TEXT_MAX_LENGTH + 1)]}
     )
     assert too_long_import.status_code == 422
+
+
+def test_match_score_sort_requires_resume(admin_client):
+    from backend.db import parse_run_repository as pr
+    from backend.db.session import session_scope
+
+    with session_scope() as session:
+        rid = pr.create_parse_run(session, config_snapshot={}, status="completed").id
+    for url in (
+        "/api/v1/vacancies?sort_by=match_score",
+        "/api/v1/vacancies/export.xlsx?sort_by=match_score",
+        f"/api/v1/runs/{rid}/vacancies?sort_by=match_score",
+    ):
+        r = admin_client.get(url)
+        assert r.status_code == 422, (url, r.text)
+        assert r.json()["detail"]["code"] == "VALIDATION"
+        assert "resume_id" in r.json()["detail"]["message"]
+
+    resume_id = admin_client.post("/api/v1/resumes", json={"name": "CV", "text": "python"}).json()["id"]
+    assert admin_client.get(f"/api/v1/vacancies?sort_by=match_score&resume_id={resume_id}").status_code == 200
+
+
+def test_whitespace_only_names_are_rejected(admin_client):
+    assert admin_client.post("/api/v1/filters", json={"name": "   ", "params": {}}).status_code == 422
+    assert admin_client.get("/api/v1/filters").json()["items"] == []
+
+    assert admin_client.post("/api/v1/resumes", json={"name": "   ", "text": "python"}).status_code == 422
+    rid = admin_client.post("/api/v1/resumes", json={"name": "  CV  ", "text": "python"}).json()["id"]
+    assert admin_client.put(f"/api/v1/resumes/{rid}", json={"name": "   "}).status_code == 422
+    assert admin_client.get(f"/api/v1/resumes/{rid}").json()["name"] == "CV"
+
+    saved = admin_client.post("/api/v1/filters", json={"name": "  Remote  ", "params": {}})
+    assert (saved.status_code, saved.json()["name"]) == (201, "Remote")

@@ -35,7 +35,7 @@
 - **THEN** вакансия найдена, вакансии без этого слова — нет
 
 ### Requirement: Сортировка списка
-`sort_by` MUST принимать `post_date` (по умолчанию), `detected_salary_avg`, `detected_salary_avg_rub`, `work_format`, `detected_grade`, `salary_currency`, `vacancy_score` и `match_score` (см. `career/resume-matching`); другое значение — 422. `sort_order` — `asc` или `desc` (по умолчанию). Пустые значения SHALL идти в конце при любом направлении, равные — по `id`.
+`sort_by` MUST принимать `post_date` (по умолчанию), `detected_salary_avg`, `detected_salary_avg_rub`, `work_format`, `detected_grade`, `salary_currency`, `vacancy_score` и `match_score` (см. `career/resume-matching`); другое значение — 422. `match_score` без `resume_id` (в том числе в экспорте и списке вакансий прогона) SHALL давать 422 `VALIDATION`. `sort_order` — `asc` или `desc` (по умолчанию). Пустые значения идут в конце при любом направлении, равные — по `id`.
 
 #### Scenario: Зарплата в рублях по убыванию
 - **WHEN** у трёх вакансий рублёвая зарплата 300 000, пусто и 150 000, сортировка — `detected_salary_avg_rub`
@@ -44,6 +44,10 @@
 #### Scenario: Недопустимое поле
 - **WHEN** `sort_by=raw_text`
 - **THEN** ответ 422 `VALIDATION`
+
+#### Scenario: Сортировка по оценке без резюме
+- **WHEN** список запрошен с `sort_by=match_score` без `resume_id`
+- **THEN** ответ 422 `VALIDATION`, сообщение говорит, что нужен `resume_id`
 
 ### Requirement: Список листается до 10 000 позиций
 `page` MUST быть от 1, `page_size` — от 1 до 500 (по умолчанию 50). Страница дальше 10 000 позиций (`page × page_size`) SHALL давать 422 `VALIDATION` с советом уточнить фильтры. Ответ содержит `total` — число вакансий под фильтрами; страница за последней — пустая, с тем же `total`.

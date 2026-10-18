@@ -18,13 +18,17 @@ from tg_jobs_parser.config.schema import (
 )
 
 
+class RunOverrideError(ConfigLoadError):
+    """Override прогона недопустим (ошибка клиента, 400) — в отличие от сломанного config.yaml (500)."""
+
+
 def _reject_unknown_models(base: AppConfig, ai: dict[str, Any]) -> None:
     """Модели override — только из каталога ``llm_models.yaml`` или уже заданные в config.yaml."""
     allowed = {*catalog_model_ids(base.llm_model_catalog), base.ai.model, *base.ai.fallback_models}
     requested = [ai.get("model"), *(ai.get("fallback_models") or [])]
     unknown = sorted({m for m in requested if m and m not in allowed})
     if unknown:
-        raise ConfigLoadError(f"Модель не из llm_models.yaml: {', '.join(unknown)}")
+        raise RunOverrideError(f"Модель не из llm_models.yaml: {', '.join(unknown)}")
 
 
 def build_config(base_path: Path, body: RunCreateRequest) -> AppConfig:

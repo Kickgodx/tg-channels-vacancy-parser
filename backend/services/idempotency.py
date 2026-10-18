@@ -22,7 +22,6 @@ SCOPE_PARSE_RUN = "parse_run"
 SCOPE_HH_SYNC = "hh_sync"
 SCOPE_IMPORT = "import"
 
-ACTOR_API = "api"
 MAX_KEY_LEN = 128
 
 

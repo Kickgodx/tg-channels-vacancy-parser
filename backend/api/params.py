@@ -39,6 +39,12 @@ def check_list_depth(page: int, page_size: int) -> None:
         )
 
 
+def check_sort_needs_resume(sort_by: str, resume_id: int | None) -> None:
+    """422 для ``sort_by=match_score`` без резюме: иначе список молча сортировался бы по дате."""
+    if sort_by == "match_score" and resume_id is None:
+        raise http_error(422, CODE_VALIDATION, "Сортировка по оценке (match_score) требует resume_id.")
+
+
 def vacancy_filters(
     source_channel: Annotated[str | None, Query(max_length=128)] = None,
     grade: Annotated[str | None, Query(max_length=32)] = None,
