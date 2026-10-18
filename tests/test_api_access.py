@@ -200,3 +200,66 @@ def test_build_config_accepts_fallbacks_from_server_config(tmp_path):
 
     with pytest.raises(ConfigLoadError, match="evil/other"):
         build_config(cfg_path, RunCreateRequest.model_validate({"ai": {"model": "evil/other"}}))
+
+
+_API_KEY = "test-api-key"
+
+
+@pytest.fixture
+def keyed_client(api_client, monkeypatch):
+    """API с заданным ``API_KEY``: каждый запрос с JWT должен нести ``X-API-Key``."""
+    from backend.settings import get_settings
+
+    monkeypatch.setenv("API_KEY", _API_KEY)
+    get_settings.cache_clear()
+    return api_client
+
+
+def _finished_import_job(user_id: int) -> str:
+    from backend.db import llm_job_repository as lj
+
+    with session_scope() as session:
+        row = lj.create_llm_job(session, user_id=user_id, kind="import", params={"texts": ["x"]})
+        row.status = "error"
+        row.error_message = "test"
+        return str(row.id)
+
+
+def test_personal_endpoints_require_api_key(keyed_client):
+    owner = _register(keyed_client, "owner@example.com")
+    jwt = _auth(owner["access_token"])
+    keyed = {**jwt, "X-API-Key": _API_KEY}
+    job_id = _finished_import_job(owner["user"]["id"])
+    resume = {"name": "CV", "text": "Python developer"}
+
+    no_key = [
+        keyed_client.post("/api/v1/resumes", json=resume, headers=jwt),
+        keyed_client.get("/api/v1/filters", headers=jwt),
+        keyed_client.get(f"/api/v1/llm-jobs/{job_id}", headers=jwt),
+        keyed_client.post(f"/api/v1/llm-jobs/{job_id}/cancel", headers=jwt),
+    ]
+    for r in no_key:
+        assert r.status_code == 401, r.request.url
+        assert r.json()["detail"]["code"] == "NOT_AUTHENTICATED"
+    assert keyed_client.get("/api/v1/resumes", headers=keyed).json()["items"] == []
+
+    assert keyed_client.post("/api/v1/resumes", json=resume, headers=keyed).status_code == 201
+    assert keyed_client.get("/api/v1/filters", headers=keyed).status_code == 200
+    assert keyed_client.get(f"/api/v1/llm-jobs/{job_id}", headers=keyed).status_code == 200
+
+
+def test_llm_job_events_by_ticket_need_no_api_key(keyed_client):
+    owner = _register(keyed_client, "owner@example.com")
+    job_id = _finished_import_job(owner["user"]["id"])
+    headers = {**_auth(owner["access_token"]), "X-API-Key": _API_KEY}
+    ticket = keyed_client.post("/api/v1/auth/sse-ticket", headers=headers).json()["ticket"]
+
+    with keyed_client.stream("GET", f"/api/v1/llm-jobs/{job_id}/events?ticket={ticket}") as resp:
+        assert resp.status_code == 200
+        body = "".join(resp.iter_text())
+    assert "error" in body
+
+
+def test_personal_endpoints_without_api_key_setting(api_client):
+    token = _register(api_client, "owner@example.com")["access_token"]
+    assert api_client.get("/api/v1/filters", headers=_auth(token)).status_code == 200

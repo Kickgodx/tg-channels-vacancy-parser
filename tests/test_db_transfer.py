@@ -9,6 +9,7 @@ import pytest
 
 from backend.db.models import ExchangeRateRow, ParseRunRow, VacancyRow
 from backend.db.transfer import (
+    count_replace_losses,
     import_dump_file,
     load_dump_file,
     write_dump_file,
@@ -94,3 +95,53 @@ def test_load_dump_rejects_unknown_version(tmp_path):
     path.write_text('{"format_version": 99, "tables": {}}', encoding="utf-8")
     with pytest.raises(ValueError, match="версия"):
         load_dump_file(path)
+
+
+def seed_user_data(session) -> None:
+    """2 оценки, 1 письмо и 3 LLM-задачи по вакансиям + задача импорта без вакансии."""
+    from tests.conftest import new_user
+
+    from backend.db import llm_job_repository as lj
+    from backend.db import user_content_repository as uc
+
+    user_id = new_user(session)
+    resume = uc.create_resume(session, name="CV", text="Python", user_id=user_id)
+    for vid in ("u-1", "u-2"):
+        session.add(
+            VacancyRow(
+                id=vid,
+                source_post_key=f"ch-{vid}",
+                source_channel="ch",
+                source_url="https://t.me/s/ch",
+                raw_text=vid,
+                cleaned_text=vid,
+            )
+        )
+        session.flush()
+        uc.upsert_vacancy_match(
+            session,
+            resume_id=resume.id,
+            vacancy_id=vid,
+            overall_score=80,
+            confidence=70,
+            breakdown=None,
+            explanation=None,
+            matching_skills=None,
+            missing_skills=None,
+            strengths=None,
+            risks=None,
+            model="m",
+        )
+    uc.upsert_cover_letter(session, resume_id=resume.id, vacancy_id="u-1", text="Letter", tone="neutral", model="m")
+    for kind, vid in (("match", "u-1"), ("match", "u-2"), ("cover_letter", "u-1")):
+        lj.create_llm_job(session, user_id=user_id, kind=kind, resume_id=resume.id, vacancy_id=vid)
+    lj.create_llm_job(session, user_id=user_id, kind="import", params={"texts": ["x"]})
+    session.commit()
+
+
+def test_count_replace_losses(db_session):
+    seed_user_data(db_session)
+
+    losses = count_replace_losses(db_session)
+
+    assert (losses.vacancy_matches, losses.cover_letters, losses.llm_jobs) == (2, 1, 3)

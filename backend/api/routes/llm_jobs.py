@@ -13,7 +13,14 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from backend.api.deps import SseCredentials, authenticate_sse, get_current_user, get_db, sse_credentials
+from backend.api.deps import (
+    SseCredentials,
+    authenticate_sse,
+    get_current_user,
+    get_db,
+    sse_credentials,
+    verify_api_key,
+)
 from backend.api.routes.resumes import _letter_to_out, _match_to_out
 from backend.api.sse import (
     DB_POLL_INTERVAL_S,
@@ -41,6 +48,8 @@ from backend.settings import get_settings
 
 _LOG = logging.getLogger(__name__)
 
+# Поток событий — в этом же роутере, но ключ проверяет сам (тикет — без ключа):
+# X-API-Key ставится на маршруты, а не на весь роутер.
 router = APIRouter(prefix="/llm-jobs", tags=["llm-jobs"])
 
 
@@ -79,7 +88,7 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
     )
 
 
-@router.get("/{job_id}", response_model=LlmJobOut)
+@router.get("/{job_id}", response_model=LlmJobOut, dependencies=[Depends(verify_api_key)])
 def get_llm_job(
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
@@ -91,7 +100,7 @@ def get_llm_job(
     return _job_to_out(db, row)
 
 
-@router.post("/{job_id}/cancel", response_model=LlmJobOut)
+@router.post("/{job_id}/cancel", response_model=LlmJobOut, dependencies=[Depends(verify_api_key)])
 def cancel_llm_job(
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
