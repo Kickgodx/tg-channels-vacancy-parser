@@ -10,6 +10,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from tg_jobs_parser.config.loader import ConfigLoadError
+
 CODE_CONFLICT_ACTIVE_RUN = "CONFLICT_ACTIVE_RUN"
 CODE_RATE_LIMITED = "RATE_LIMITED"
 CODE_VALIDATION = "VALIDATION"
@@ -21,6 +23,7 @@ CODE_INTERNAL = "INTERNAL"
 CODE_IDEMPOTENCY_IN_PROGRESS = "IDEMPOTENCY_IN_PROGRESS"
 CODE_LLM_QUOTA_EXCEEDED = "LLM_QUOTA_EXCEEDED"
 CODE_EMAIL_TAKEN = "EMAIL_TAKEN"
+CODE_CONFIG_INVALID = "CONFIG_INVALID"
 
 _LOG = logging.getLogger(__name__)
 
@@ -124,6 +127,15 @@ async def validation_exception_handler(_request: Request, exc: RequestValidation
     )
 
 
+async def config_load_error_handler(_request: Request, exc: ConfigLoadError) -> JSONResponse:
+    """Незагружаемый config.yaml — одинаково для всех эндпоинтов; повтор не поможет, пока файл не исправят."""
+    _LOG.warning("config.yaml не загружается: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": error_detail(CODE_CONFIG_INVALID, str(exc), retryable=False)},
+    )
+
+
 async def unhandled_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
     _LOG.exception("Unhandled error: %s", exc)
     return JSONResponse(
@@ -142,4 +154,5 @@ def register_exception_handlers(app: Any) -> None:
     app.add_exception_handler(AppError, app_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(ConfigLoadError, config_load_error_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

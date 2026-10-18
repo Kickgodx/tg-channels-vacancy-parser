@@ -273,12 +273,29 @@ def test_cancel_queued_run(admin_client):
         rid = pr.create_parse_run(session, config_snapshot={}).id
     r = admin_client.post(f"/api/v1/runs/{rid}/cancel")
     assert r.status_code == 200
-    assert r.json()["ok"] is True
+    assert (r.json()["id"], r.json()["status"]) == (str(rid), "cancelled")
     got = admin_client.get(f"/api/v1/runs/{rid}")
     assert got.status_code == 200
     body = got.json()
     assert body["status"] == "cancelled"
     assert body["cancel_requested"] is True
+
+
+def test_cancel_finished_run_returns_its_state(admin_client):
+    with session_scope() as session:
+        rid = pr.create_parse_run(session, config_snapshot={}, status="completed").id
+
+    r = admin_client.post(f"/api/v1/runs/{rid}/cancel")
+
+    assert r.status_code == 200, r.text
+    assert (r.json()["status"], r.json()["cancel_requested"]) == ("completed", False)
+
+
+def test_cancel_missing_run_is_404(admin_client):
+    r = admin_client.post(f"/api/v1/runs/{uuid.uuid4()}/cancel")
+
+    assert r.status_code == 404
+    assert r.json()["detail"]["code"] == "NOT_FOUND"
 
 
 def test_cancel_running_sets_flag():

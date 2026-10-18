@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from backend.api.deps import get_current_user, verify_api_key
 from backend.settings import get_settings
@@ -9,7 +9,7 @@ from tg_jobs_parser.ai.llm_models_registry import (
     resolve_llm_models_path,
 )
 from tg_jobs_parser.ai.models_catalog import catalog_model_ids, label_for_model_id
-from tg_jobs_parser.config.loader import ConfigLoadError, load_config
+from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 from tg_jobs_parser.utils.dates import resolve_search_date_from, resolve_search_date_to
@@ -32,11 +32,8 @@ WORK_FORMAT_OPTIONS = [
 
 @router.get("")
 def get_config() -> dict:
-    settings = get_settings()
-    try:
-        cfg = load_config(settings.config_path)
-    except ConfigLoadError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    # Ошибку загрузки отвечает общий обработчик: 500 CONFIG_INVALID.
+    cfg = load_config(get_settings().config_path)
     data = cfg.to_serializable_dict()
     data.pop("llm_model_catalog", None)
     return data
@@ -45,11 +42,7 @@ def get_config() -> dict:
 @router.get("/defaults")
 def get_config_defaults() -> dict:
     """Значения по умолчанию для формы запуска в React UI."""
-    settings = get_settings()
-    try:
-        cfg = load_config(settings.config_path)
-    except ConfigLoadError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    cfg = load_config(get_settings().config_path)
 
     df = resolve_search_date_from(cfg.search.date_from)
     dt = resolve_search_date_to(cfg.search.date_to)

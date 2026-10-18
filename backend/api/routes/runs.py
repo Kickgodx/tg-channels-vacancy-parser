@@ -21,7 +21,7 @@ from backend.api.deps import (
     sse_credentials,
     verify_api_key,
 )
-from backend.api.params import Page, PageSize, check_list_depth
+from backend.api.params import Page, PageSize, check_list_depth, check_sort_needs_resume
 from backend.api.sse import (
     DB_POLL_INTERVAL_S,
     HEARTBEAT_INTERVAL_S,
@@ -33,7 +33,7 @@ from backend.api.sse import (
     Ticker,
     sse_event,
 )
-from backend.config_builder import build_config
+from backend.config_builder import RunOverrideError, build_config
 from backend.db import repository as repo
 from backend.db.models import UserRow
 from backend.db.repository import metrics_from_run
@@ -59,7 +59,6 @@ from backend.services import export_service, idempotency, run_service
 from backend.services.parse_run_events import channel_for
 from backend.services.pubsub_hub import PubSubUnavailable, get_pubsub_hub
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import ConfigLoadError
 from tg_jobs_parser.exporters.json_exporter import export_json_bytes
 from tg_jobs_parser.models.parse_result import ParseResult
 
@@ -96,7 +95,8 @@ def create_run(
     admin: UserRow = Depends(require_admin),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RunCreateResponse | JSONResponse:
-    actor = idempotency.ACTOR_API
+    # Ключ принадлежит администратору, как у HH sync и импорта: чужой ключ не вернёт чужой ответ.
+    actor = idempotency.actor_for_user(admin.id)
     scope = idempotency.SCOPE_PARSE_RUN
     req_hash = idempotency.request_fingerprint(body.model_dump(mode="json"))
     begun = idempotency.begin(key=idempotency_key, scope=scope, actor=actor, request_hash=req_hash)
@@ -114,7 +114,8 @@ def create_run(
     try:
         try:
             config = build_config(settings.config_path, body)
-        except ConfigLoadError as e:
+        except RunOverrideError as e:
+            # Override клиента — 400; незагружаемый config.yaml уходит в общий обработчик (500 CONFIG_INVALID).
             raise http_error(400, CODE_VALIDATION, str(e)) from e
         run_id = run_service.start_parse_run(config, body)
     except Exception:
@@ -156,6 +157,10 @@ def get_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> RunDetail:
     row = repo.get_parse_run(db, run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    return _row_to_detail(row)
+
+
+def _row_to_detail(row) -> RunDetail:
     summary = _row_to_summary(row)
     return RunDetail(
         **summary.model_dump(),
@@ -169,12 +174,20 @@ def get_run(run_id: uuid.UUID, db: Session = Depends(get_db)) -> RunDetail:
     )
 
 
-@router.post("/{run_id}/cancel")
-def cancel_run(run_id: uuid.UUID, admin: UserRow = Depends(require_admin)) -> dict:
-    if not run_service.cancel_run(run_id):
-        raise HTTPException(status_code=404, detail="Run not cancellable or not found")
-    _LOG.info("Прогон %s: отмена запрошена через API (user=%s)", run_id, admin.id)
-    return {"ok": True, "run_id": str(run_id)}
+@router.post("/{run_id}/cancel", response_model=RunDetail)
+def cancel_run(
+    run_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    admin: UserRow = Depends(require_admin),
+) -> RunDetail:
+    """Отменить прогон; ответ — его текущее состояние (и для уже завершённого, как у LLM и HH)."""
+    if run_service.cancel_run(run_id):
+        _LOG.info("Прогон %s: отмена запрошена через API (user=%s)", run_id, admin.id)
+    db.expire_all()
+    row = repo.get_parse_run(db, run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return _row_to_detail(row)
 
 
 @router.get("/{run_id}/vacancies", response_model=VacancyListResponse)
@@ -187,6 +200,7 @@ def run_vacancies(
     db: Session = Depends(get_db),
 ) -> VacancyListResponse:
     check_list_depth(page, page_size)
+    check_sort_needs_resume(sort_by, None)  # у списка прогона резюме нет
     if repo.get_parse_run(db, run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     q = VacancyQuery(page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order)

@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 
 from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
 from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
@@ -277,8 +277,12 @@ class CompanyAnalytics(BaseModel):
     items: list[CompanyStats] = Field(default_factory=list)
 
 
+# Имя обрезается до проверки длины: иначе «   » проходило min_length и сохранялось пустым.
+UserItemName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+
+
 class SavedFilterCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: UserItemName
     params: VacancyQuery = Field(default_factory=VacancyQuery)
 
 
@@ -301,12 +305,12 @@ IMPORT_TEXT_MAX_LENGTH = 30_000
 
 
 class ResumeCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: UserItemName
     text: str = Field(min_length=1, max_length=RESUME_TEXT_MAX_LENGTH)
 
 
 class ResumeUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
+    name: UserItemName | None = None
     text: str | None = Field(default=None, min_length=1, max_length=RESUME_TEXT_MAX_LENGTH)
 
 

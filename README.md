@@ -273,7 +273,7 @@ confidence оценки, пояснение и списки совпадающи
   меняются. Оценки до миграции 030 по версии не устаревают (запрошенной
   считается фактическая модель).
 - Посчитанные скоры видны в колонке **Match**, по ним же работает сортировка
-  (`sort_by=match_score` при выбранном резюме).
+  (`sort_by=match_score` при выбранном резюме; без `resume_id` — 422).
 - Мэтчинг и письма — фоновые джобы (`llm_jobs`): кэш → 200; иначе 202 +
   `job_id`. В Docker: Redis Queue (RQ) + сервис `llm-worker` (тот же образ,
   `tg-jobs-llm-worker`). UI ждёт через SSE `GET /llm-jobs/{id}/events`
@@ -453,7 +453,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `POST` | `/runs` | Постановка прогона в очередь (admin; `queued` → parse-worker / inprocess) |
 | `GET` | `/runs` \| `/runs/{id}` | История прогонов / статус, метрики и durable `progress` (admin) |
 | `GET` | `/runs/{id}/events` | SSE: прогресс (admin; Redis pub/sub или DB poll); после F5 — resume; `?ticket=` или Bearer |
-| `POST` | `/runs/{id}/cancel` | Отмена (admin; флаг в БД; работает после рестарта API) |
+| `POST` | `/runs/{id}/cancel` | Отмена (admin; флаг в БД; работает после рестарта API); ответ — состояние прогона, и для уже завершённого |
 | `GET` | `/runs/{id}/vacancies` | Вакансии прогона (admin; `sort_by`, `sort_order`): все, что прогон встретил, — и новые, и уже известные; повторная встреча в следующем прогоне их из старого не убирает (связка `parse_run_vacancies`), архивные по TTL тоже остаются — с пометкой «архив» у даты |
 | `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта (admin) |
 | `GET` | `/vacancies` | Глобальный список (slim: `preview` без полных текстов; фильтры, сортировка, пагинация, `resume_id`) |

@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db, require_admin, verify_api_key
-from backend.api.params import Page, PageSize, check_list_depth, vacancy_filters
+from backend.api.params import Page, PageSize, check_list_depth, check_sort_needs_resume, vacancy_filters
 from backend.db import repository as repo
 from backend.db.aggregate_cache import cached_aggregate
 from backend.db.models import UserRow
@@ -111,6 +111,7 @@ def export_vacancies_xlsx(
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """Excel вакансий в БД с учётом фильтров (как в списке), не больше ``EXPORT_MAX_ROWS`` строк."""
+    check_sort_needs_resume(sort_by, None)  # резюме у экспорта нет
     query = filters.model_copy(update={"sort_by": sort_by, "sort_order": sort_order})
     limit = export_service.export_row_limit()
     total = counted_vacancies(db, query)
@@ -145,6 +146,7 @@ def list_vacancies(
     user: UserRow = Depends(get_current_user),
 ) -> VacancyListResponse:
     check_list_depth(page, page_size)
+    check_sort_needs_resume(sort_by, resume_id)
     if resume_id is not None:
         resume = repo.get_resume(db, resume_id)
         if resume is None or resume.user_id != user.id:

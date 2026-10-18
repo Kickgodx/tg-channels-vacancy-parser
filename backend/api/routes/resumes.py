@@ -62,7 +62,7 @@ def create_resume(
     db: Session = Depends(get_db),
     user: UserRow = Depends(get_current_user),
 ) -> ResumeOut:
-    row = repo.create_resume(db, name=body.name.strip(), text=body.text, user_id=user.id)
+    row = repo.create_resume(db, name=body.name, text=body.text, user_id=user.id)
     return _to_out(row)
 
 
@@ -82,8 +82,7 @@ def update_resume(
     db: Session = Depends(get_db),
     user: UserRow = Depends(get_current_user),
 ) -> ResumeOut:
-    name = body.name.strip() if body.name is not None else None
-    row = repo.update_resume(db, resume_id, user_id=user.id, name=name, text=body.text)
+    row = repo.update_resume(db, resume_id, user_id=user.id, name=body.name, text=body.text)
     if row is None:
         raise HTTPException(status_code=404, detail="Resume not found")
     return _to_out(row)
