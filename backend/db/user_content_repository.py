@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
+from backend.db.llm_job_repository import refund_queued_llm_jobs_of_resume
 from backend.db.models import (
     CoverLetterRow,
     ResumeRow,
@@ -137,6 +138,9 @@ def delete_resume(session: Session, resume_id: int, user_id: int | None = None) 
     row = session.get(ResumeRow, resume_id)
     if row is None or (user_id is not None and row.user_id != user_id):
         return False
+    # Задачи в очереди уйдут каскадом до вызова модели — их вызовы возвращаются в квоту.
+    # По задачам в работе модель уже вызвана: их вызов не возвращается.
+    refund_queued_llm_jobs_of_resume(session, resume_id)
     _delete_resume_llm_results(session, resume_id)
     session.delete(row)
     session.flush()

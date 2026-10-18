@@ -286,9 +286,16 @@ class AIEnrichmentService:
             return None
 
         merged = merge_rules_and_ai(vacancy, extraction, self._config)
-        threshold = self._config.parser.vacancy_score_threshold
-        if merged.vacancy_score < threshold:
-            merged = merged.model_copy(update={"vacancy_score": threshold})
+        # Вердикт LLM «вакансия» главнее эвристик правил: оценки поднимаются до порогов
+        # пост-фильтра, иначе оплаченный ответ отбросил бы порог правил.
+        parser = self._config.parser
+        raised = {}
+        if merged.vacancy_score < parser.vacancy_score_threshold:
+            raised["vacancy_score"] = parser.vacancy_score_threshold
+        if merged.vacancy_substantive_score < parser.vacancy_min_substantive_score:
+            raised["vacancy_substantive_score"] = parser.vacancy_min_substantive_score
+        if raised:
+            merged = merged.model_copy(update=raised)
         record_enrich_event("merged")
         return merged
 

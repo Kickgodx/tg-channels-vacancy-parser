@@ -304,3 +304,80 @@ def test_admin_is_exempt_from_daily_quota(api_client, monkeypatch):
     admin = _register(api_client, "owner@example.com")
 
     assert [r.status_code for r in _match_three_times(api_client, admin)] == [202, 202, 202]
+
+
+# --- исчерпанный бюджет при постановке ---
+
+
+def test_budget_exhaustion_check_does_not_spend(budget_limiter):
+    assert rate_limit.interactive_daily_budget_exhausted(2) is False
+    budget_limiter.acquire()
+    budget_limiter.acquire()
+    assert rate_limit.interactive_daily_budget_exhausted(2) is True
+    assert rate_limit.interactive_daily_budget_exhausted(0) is False
+
+
+def test_budget_exhaustion_check_reads_shared_counter():
+    server = fakeredis.FakeStrictRedis()
+    gate = RedisWindowRateGate(lambda: server)
+    register_global_rate_gate(gate)
+    try:
+        assert gate.take_daily(rate_limit._GLOBAL_RATE_KEY, 1)
+        assert rate_limit.interactive_daily_budget_exhausted(1) is True
+        assert rate_limit.interactive_daily_budget_exhausted(2) is False
+    finally:
+        register_global_rate_gate(None)
+
+
+def test_budget_exhaustion_check_counts_locally_when_gate_fails(budget_limiter):
+    class _BrokenGate:
+        def wait_seconds(self, key, per_minute):
+            return 0.0
+
+        def take_daily(self, key, budget):
+            raise ConnectionError("redis down")
+
+        def daily_used(self, key):
+            raise ConnectionError("redis down")
+
+    register_global_rate_gate(_BrokenGate())
+    budget_limiter.acquire()
+    budget_limiter.acquire()
+    assert rate_limit.interactive_daily_budget_exhausted(2) is True
+
+
+def test_exhausted_budget_rejects_new_pair_before_quota(api_client, monkeypatch, tmp_path):
+    from sqlalchemy import func, select
+    from tests.llm_job_helpers import use_ai_config
+
+    from backend.db.models import LlmJobRow, UserRow
+
+    monkeypatch.setenv("LLM_USER_DAILY_CALLS", "5")
+    use_ai_config(monkeypatch, tmp_path, interactive_daily_request_budget=1)
+    monkeypatch.setattr(rate_limit, "_local_daily_budget", rate_limit._LocalDailyBudget())
+    monkeypatch.setattr(match_service, "match_single", _fake_match)
+    for i in range(2):
+        _add_vacancy(f"q-{i}")
+    _register(api_client, "owner@example.com")  # первый — admin
+    user = _register(api_client, "guest@example.com")
+    rid = api_client.post("/api/v1/resumes", headers=_auth(user), json={"name": "CV", "text": "python"}).json()["id"]
+    assert (
+        await_llm_job(api_client, user, api_client.post(f"/api/v1/resumes/{rid}/match/q-0", headers=_auth(user)))[
+            "status"
+        ]
+        == "done"
+    )
+    assert rate_limit._local_daily_budget.take(1)  # бюджет съеден: 1 из 1
+
+    cached = api_client.post(f"/api/v1/resumes/{rid}/match/q-0", headers=_auth(user))
+    rejected = api_client.post(f"/api/v1/resumes/{rid}/match/q-1", headers=_auth(user))
+
+    assert cached.status_code == 200
+    assert rejected.status_code == 429
+    detail = rejected.json()["detail"]
+    assert (detail["code"], detail["retryable"]) == ("LLM_QUOTA_EXCEEDED", False)
+    assert "бюджет" in detail["message"]
+    with session_scope() as session:
+        user_id = session.scalar(select(UserRow.id).where(UserRow.email == "guest@example.com"))
+        assert session.scalar(select(func.count()).select_from(LlmJobRow)) == 1
+        assert llm_calls_today(session, user_id=user_id) == 1

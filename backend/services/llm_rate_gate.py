@@ -55,6 +55,11 @@ class RedisWindowRateGate:
         used, _ = pipe.execute()
         return int(used) <= budget
 
+    def daily_used(self, key: str) -> int:
+        day = int(time.time() // _DAY_S)
+        used = self._connection_factory().get(f"{_DAILY_PREFIX}:{key}:{day}")
+        return int(used or 0)
+
 
 def register_redis_rate_gate() -> bool:
     """Включить общий лимит, если задан ``REDIS_URL``. Вызывать в каждом entrypoint с LLM."""

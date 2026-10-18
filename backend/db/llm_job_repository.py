@@ -152,6 +152,39 @@ def patch_llm_job_result(
     return (updated.rowcount or 0) == 1
 
 
+def refund_llm_job_quota(session: Session, job_id: uuid.UUID) -> bool:
+    """Вернуть вызов квоты, списанный за задачу при постановке. False — не списывался или уже возвращён.
+
+    ``FOR UPDATE`` и обнуление ``quota_day`` в одной транзакции: воркер, отмена и
+    recover, завершая задачу одновременно, вернут вызов ровно один раз.
+    """
+    from backend.db.llm_usage_repository import refund_llm_calls
+
+    row = session.execute(
+        select(LlmJobRow.user_id, LlmJobRow.quota_day)
+        .where(LlmJobRow.id == job_id, LlmJobRow.quota_day.is_not(None))
+        .with_for_update()
+    ).first()
+    if row is None:
+        return False
+    session.execute(
+        update(LlmJobRow)
+        .where(LlmJobRow.id == job_id)
+        .values(quota_day=None)
+        .execution_options(synchronize_session=False)
+    )
+    refund_llm_calls(session, user_id=row.user_id, day=row.quota_day)
+    return True
+
+
+def refund_queued_llm_jobs_of_resume(session: Session, resume_id: int) -> int:
+    """Перед удалением резюме: вернуть вызовы его задач в очереди (модель по ним не вызывалась)."""
+    ids = session.scalars(
+        select(LlmJobRow.id).where(LlmJobRow.resume_id == resume_id, LlmJobRow.status == "queued")
+    ).all()
+    return sum(1 for job_id in ids if refund_llm_job_quota(session, job_id))
+
+
 def attempts_exhausted_message(attempts: int) -> str:
     return f"Превышено число попыток ({attempts}): воркер не довёл задачу до конца (падение процесса или потеря lease)."
 
@@ -173,6 +206,8 @@ def _reclaim_running_llm_job(session: Session, job_id: uuid.UUID, ts: datetime, 
         .execution_options(synchronize_session=False)
     )
     if (cancelled.rowcount or 0) == 1:
+        # Воркер пропал: ответа модели пользователь не получил.
+        refund_llm_job_quota(session, job_id)
         session.expire_all()
         return "cancelled"
 
@@ -188,6 +223,7 @@ def _reclaim_running_llm_job(session: Session, job_id: uuid.UUID, ts: datetime, 
         .execution_options(synchronize_session=False)
     )
     if (exhausted.rowcount or 0) == 1:
+        refund_llm_job_quota(session, job_id)
         session.expire_all()
         return "error"
 
@@ -273,7 +309,9 @@ def request_llm_job_cancel(session: Session, job_id: uuid.UUID) -> LlmJobRow | N
         )
         .execution_options(synchronize_session=False)
     )
-    if (cancelled.rowcount or 0) != 1:
+    if (cancelled.rowcount or 0) == 1:
+        refund_llm_job_quota(session, job_id)
+    else:
         session.execute(
             update(LlmJobRow)
             .where(LlmJobRow.id == job_id, LlmJobRow.status == "running")

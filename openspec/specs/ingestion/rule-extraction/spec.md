@@ -25,10 +25,18 @@
 - **THEN** `vacancy_substantive_score` равен 0: контакт учитывается только в `vacancy_score`
 
 ### Requirement: Пост прогона Telegram проходит порог оценки и пост-фильтры
-Пост прогона Telegram MUST отбрасываться, если `vacancy_score` ниже `parser.vacancy_score_threshold` (3) или `vacancy_substantive_score` ниже `parser.vacancy_min_substantive_score` (0) — и с LLM, и без него. Затем пост SHALL проходить пост-фильтры: специализации, исключающие слова, формат работы, локация. Ручной импорт порог и пост-фильтры не применяет.
+Пост прогона Telegram, не прошедший через LLM, MUST отбрасываться, если `vacancy_score` ниже `parser.vacancy_score_threshold` (3) или `vacancy_substantive_score` ниже `parser.vacancy_min_substantive_score` (0). Пост, который LLM признал вакансией, SHALL NOT отбрасываться этими порогами: обе оценки поднимаются до порогов. Затем каждый пост проходит пост-фильтры: специализации, исключающие слова, формат работы, локация. Ручной импорт порог и пост-фильтры не применяет.
 
 #### Scenario: Низкая оценка без AI
 - **WHEN** AI выключен, а `vacancy_score` поста ниже порога
+- **THEN** пост не сохраняется
+
+#### Scenario: Вакансия по мнению LLM
+- **WHEN** `parser.vacancy_min_substantive_score: 1`, у поста содержательная оценка 0, а LLM признал его вакансией
+- **THEN** пост проходит пороги, его `vacancy_score` и `vacancy_substantive_score` не ниже порогов
+
+#### Scenario: Пост-фильтр после LLM
+- **WHEN** LLM признал пост вакансией, но в нём есть исключающее слово
 - **THEN** пост не сохраняется
 
 #### Scenario: Ручной импорт

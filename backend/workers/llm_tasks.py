@@ -64,13 +64,14 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                 resume = repo.get_resume(session, job.resume_id) if job.resume_id is not None else None
                 vacancy = repo.get_vacancy_row(session, job.vacancy_id) if job.vacancy_id is not None else None
                 if kind != KIND_IMPORT and (resume is None or vacancy is None):
-                    repo.set_llm_job_status(
+                    if repo.set_llm_job_status(
                         session,
                         jid,
                         "error",
                         error_message="Resume or vacancy not found",
                         lease_owner=lease_owner,
-                    )
+                    ):
+                        llm_jobs.refund_llm_job_quota(session, jid)
                     publish_llm_job_event(jid, status="error", kind=kind, error_message="Resume or vacancy not found")
                     record_llm_job(
                         outcome="error",
@@ -167,6 +168,9 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                 return
             with session_scope() as session:
                 wrote = repo.set_llm_job_status(session, jid, "cancelled", lease_owner=lease_owner)
+                # Отмена до ответа модели — вызов не оплачен, возвращаем его в квоту.
+                if wrote is not None and not e.model_answered:
+                    llm_jobs.refund_llm_job_quota(session, jid)
             if wrote is None:
                 _LOG.warning("LLM job %s: cancelled no-op (fencing)", jid)
                 return
@@ -182,6 +186,9 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                         wrote = repo.set_llm_job_status(
                             session, jid, "error", error_message=str(e), lease_owner=lease_owner
                         )
+                        # Ответа модели пользователь не получил (отказ, бюджет, лимит провайдера).
+                        if wrote is not None:
+                            llm_jobs.refund_llm_job_quota(session, jid)
                     if wrote is None:
                         lease_lost.set()
                 except Exception:

@@ -70,7 +70,7 @@ def match_single(
         usage.model,
     )
     if is_cancelled is not None and is_cancelled():
-        raise LlmJobCancelled("Оценка отменена — ответ модели не сохранён")
+        raise LlmJobCancelled("Оценка отменена — ответ модели не сохранён", model_answered=True)
     with session_scope() as session:
         return repo.upsert_vacancy_match(
             session,

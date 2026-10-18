@@ -6,16 +6,18 @@ import logging
 import threading
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 
 from backend.db import repository as repo
-from backend.db.llm_job_repository import lock_user_llm_enqueue
+from backend.db.llm_job_repository import lock_user_llm_enqueue, refund_llm_job_quota
 from backend.db.session import session_scope
 from backend.observability import record_llm_job, record_llm_job_enqueue
 from backend.settings import get_settings
 from backend.tracing import current_traceparent
+from tg_jobs_parser.ai.rate_limit import interactive_daily_budget_exhausted
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.utils.thread_pool import DaemonThreadPoolExecutor
 
@@ -43,30 +45,41 @@ class LlmJobUserLimitError(RuntimeError):
 
 
 class LlmJobCancelled(RuntimeError):
-    """Владелец отменил выполняемую задачу: воркер записывает ``cancelled``, результат не сохраняется."""
+    """Владелец отменил выполняемую задачу: воркер записывает ``cancelled``, результат не сохраняется.
+
+    ``model_answered`` — отмена пришла уже после ответа модели: вызов оплачен, квота не
+    возвращается. Без ответа модели вызов возвращается в квоту.
+    """
+
+    def __init__(self, message: str, *, model_answered: bool = False) -> None:
+        super().__init__(message)
+        self.model_answered = model_answered
 
 
 class LlmDailyQuotaError(RuntimeError):
     """Пользователь исчерпал суточную квоту вызовов LLM (``LLM_USER_DAILY_CALLS``)."""
 
 
-def reserve_user_llm_calls(session, *, user_id: int, calls: int) -> None:
+def reserve_user_llm_calls(session, *, user_id: int, calls: int) -> date | None:
     """Списать вызовы из суточной квоты пользователя; админ и квота 0 — без ограничений.
 
     Квота защищает ключ OpenRouter владельца от остальных зарегистрированных
     пользователей. Списание — в транзакции вызывающего: откат запроса возвращает квоту.
+    Возвращает UTC-сутки списания (по ним вызов возвращают), ``None`` — не списано.
     """
     from backend.db.llm_usage_repository import try_reserve_llm_calls
     from backend.db.models import UserRow
 
     limit = get_settings().llm_user_daily_calls
     if limit <= 0:
-        return
+        return None
     user = session.get(UserRow, user_id)
     if user is not None and user.is_admin:
-        return
-    if not try_reserve_llm_calls(session, user_id=user_id, calls=calls, daily_limit=limit):
+        return None
+    day = datetime.now(UTC).date()
+    if not try_reserve_llm_calls(session, user_id=user_id, calls=calls, daily_limit=limit, day=day):
         raise LlmDailyQuotaError(f"Суточная квота LLM исчерпана ({limit} вызовов в сутки, сброс в 00:00 UTC).")
+    return day
 
 
 @dataclass(frozen=True)
@@ -155,9 +168,17 @@ class LlmJobRunner:
                     raise LlmJobUserLimitError(
                         f"Слишком много параллельных LLM-задач (лимит {per_user}). Дождитесь завершения."
                     )
+                quota_day = None
+                budget = cfg.ai.interactive_daily_request_budget
+                if kind != KIND_IMPORT and interactive_daily_budget_exhausted(budget):
+                    record_llm_job_enqueue(backend=backend, kind=kind, outcome="rejected_budget")
+                    raise LlmDailyQuotaError(
+                        f"Общий суточный бюджет LLM исчерпан ({budget} запросов в сутки): "
+                        "оценки и письма недоступны до 00:00 UTC."
+                    )
                 if kind != KIND_IMPORT:
                     try:
-                        reserve_user_llm_calls(session, user_id=user_id, calls=1)
+                        quota_day = reserve_user_llm_calls(session, user_id=user_id, calls=1)
                     except LlmDailyQuotaError:
                         record_llm_job_enqueue(backend=backend, kind=kind, outcome="rejected_quota")
                         raise
@@ -171,6 +192,7 @@ class LlmJobRunner:
                     force=force,
                     params=params,
                 )
+                row.quota_day = quota_day
                 job_id = row.id
 
             span.set_attribute("llm_job.id", str(job_id))
@@ -186,6 +208,7 @@ class LlmJobRunner:
                         "error",
                         error_message="Failed to enqueue job",
                     )
+                    refund_llm_job_quota(session, job_id)
                 raise
             record_llm_job_enqueue(backend=backend, kind=kind, outcome="queued")
             _LOG.info(

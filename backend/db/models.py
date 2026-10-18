@@ -408,6 +408,8 @@ class LlmJobRow(Base):
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     # Запрошена отмена (миграция 031): queued отменяется сразу, running — воркером.
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # UTC-сутки списания вызова квоты (миграция 032); пусто — не списан или уже возвращён.
+    quota_day: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 class IdempotencyKeyRow(Base):
