@@ -1,13 +1,32 @@
 schema: spec-driven
 
-# Project context (optional)
-# Add only constraints that should guide OpenSpec artifacts and workflows.
-# Include constraints an agent cannot infer by reading the code.
-# Keep general project documentation and discoverable codebase facts out.
-# Example:
-#   context: |
-#     Designs and tasks must cover Windows, macOS, and Linux
-#     Write all artifacts in Spanish
+# Project context: только ограничения, которые не выводятся из кода.
+context: |
+  Все артефакты OpenSpec (proposal, specs, design, tasks) пишутся на русском.
+  Ключевые слова требований — SHALL/MUST, имена полей, статусов и эндпоинтов — как в коде.
+
+  Спецификации описывают наблюдаемое поведение на уровне API, БД-инвариантов и
+  воркеров. Поведение UI (скрытые вкладки, тексты подсказок, вид страниц) в specs не
+  входит: для него позже появится отдельная группа openspec/specs/ui/.
+
+  Организация specs — по бизнес-возможностям, не по пакетам: identity/, ingestion/,
+  parse-runs/, sources/, catalog/, career/, platform/. Общий контракт фоновых задач
+  (claim, lease, attempts, recover, отмена, взаимозаменяемость rq и inprocess) живёт в
+  platform/durable-jobs; спецификации прогона, импорта, HH sync и LLM-задач ссылаются
+  на него, а не повторяют.
+
+  Правила извлечения фиксируются двумя уровнями: требование-результат (что проходит
+  порог, как нормализуется зарплата) и только устойчивые, заметные пользователю
+  эвристики (компоненты score и пороги, период зарплаты, маппинг грейдов). Словари и
+  регулярные выражения указываются ссылкой на модуль, не переписываются. Каждое число
+  или правило записано в одном месте; другие требования ссылаются на него.
+
+  Baseline-изменения (baseline-<область>) фиксируют уже реализованное поведение: только
+  ADDED-требования, без задач на код. tasks.md такого изменения — проверка: для
+  каждого сценария указан тест, который его подтверждает, или пометка «теста нет».
+  Неясное намерение — открытый вопрос в design.md, а не требование. Расхождение кода
+  с документацией или здравым смыслом не закрепляется в spec: оно выносится отдельным
+  изменением.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
