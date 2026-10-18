@@ -2,6 +2,8 @@
 
 Структура соответствует `tg_jobs_parser/config/schema.py`.
 
+Неизвестный ключ (опечатка вроде `fx.enabeld`) — ошибка загрузки конфигурации со списком путей всех таких ключей: `GET /config` отвечает 500, прогон не создаётся, `GET /health` — `degraded`. Устаревшие `ai.models` и `ai.fallback_model` (= `ai.fallback_models: [<модель>]`) принимаются. Свободные ключи словарей (`dictionaries.specializations` и т. п.) не проверяются.
+
 ---
 
 ## `telegram` — доступ к каналам
@@ -119,11 +121,15 @@
 | Исчерпан `max_posts_per_run` (ответа нет в кэше) | пост — с полями правил | пост не разбирается, прогон `partial` |
 | LLM не запустился (нет ключа, неизвестная модель…) | прогон идёт на правилах, `completed` с предупреждением «AI не запущен» | прогон `failed` до чтения Telegram, причина — в `error_message` |
 
+**Модели:** `model`, `fallback_models`, `match_model` и `cover_letter_model` — id из `llm_models.yaml`. Модель вне каталога — ошибка загрузки конфигурации, которая называет поле и модель (иначе запрос падал бы только у провайдера, а стоимость считалась бы нулевой).
+
 Env (не yaml): `LLM_JOB_BACKEND=inprocess|rq`, `REDIS_URL`, `LLM_WORKER_METRICS_PORT`, `LLM_JOB_STUCK_MINUTES`, `LLM_JOB_LEASE_SECONDS`, `LLM_RQ_JOB_TIMEOUT_SECONDS`, `LLM_JOB_MAX_ATTEMPTS`, `JOB_RECOVER_INTERVAL_SECONDS` — см. `.env.example`.
 
 Прогоны парсинга (не yaml): `PARSE_JOB_BACKEND=inprocess|rq`, `PARSE_JOB_STUCK_MINUTES`, `PARSE_JOB_LEASE_SECONDS`, `PARSE_JOB_MAX_ATTEMPTS`, `PARSE_RQ_JOB_TIMEOUT_SECONDS`, `PARSE_WORKER_METRICS_PORT` — в Docker Compose по умолчанию `rq` + сервис `parse-worker`; см. `.env.example` и README.
 
 HH sync (не yaml): `HH_SYNC_JOB_BACKEND=inprocess|rq`, `HH_SYNC_JOB_STUCK_MINUTES`, `HH_SYNC_JOB_LEASE_SECONDS`, `HH_SYNC_JOB_MAX_ATTEMPTS`, `HH_SYNC_RQ_JOB_TIMEOUT_SECONDS`, `HH_WORKER_METRICS_PORT` — в Docker Compose `rq` + сервис `hh-worker`.
+
+`*_JOB_BACKEND` принимает только `inprocess` или `rq` (регистр и пробелы не важны, пусто — `inprocess`); другое значение — процесс не стартует, ошибка называет переменную.
 
 Liveness RQ-воркеров (не yaml): `WORKER_HEARTBEAT_MAX_AGE_SECONDS` (порог healthcheck, 180 с), `WORKER_STALL_EXIT_SECONDS` (watchdog завершает зависший воркер, 900 с; `0` — выключен).
 
@@ -134,6 +140,18 @@ Liveness RQ-воркеров (не yaml): `WORKER_HEARTBEAT_MAX_AGE_SECONDS` (п
 **Overrides прогона:** `POST /runs` принимает только whitelist полей (каналы, даты, фильтры, пороги score, `ai.enabled|model|fallback_models|use_cache`); остальное — включая `ai.base_url`, лимиты и `telegram.telethon_session_file` — меняется только в этом файле. Неизвестное поле → 422.
 
 **Frontend при `API_KEY`:** задайте `VITE_API_KEY` (тот же секрет) — UI шлёт его заголовком `X-API-Key`; SSE ключ не нужен — он проверяется при выдаче тикета (`POST /auth/sse-ticket`). Ключ попадает в JS-бандл, поэтому это дополнительный слой поверх JWT, а не защита сам по себе.
+
+---
+
+## `fx` — курсы ЦБ и зарплата в рублях
+
+| Поле | Назначение |
+|------|------------|
+| **`enabled`** | Загружать курсы ЦБ. `false` — рублёвая сумма считается только для рублёвых зарплат. |
+| **`default_currency_if_missing`** | В какой валюте считать зарплату без валюты — при записи вакансии, пересчёте (`POST /fx/recalculate-rub`) и в метриках прогона; `salary_currency` в базе остаётся пустой. По умолчанию `RUB` (курс не нужен); пусто — не подставлять, рублёвой суммы нет. |
+| **`display_currency`** | Валюта отображения в `salary_display`. |
+| **`sync_days_on_startup`** | Сколько последних дней курсов догрузить при старте API (`0` — не грузить). |
+| **`request_timeout_seconds`** | Таймаут запроса к ЦБ. |
 
 ---
 

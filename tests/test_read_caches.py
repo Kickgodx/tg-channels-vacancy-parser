@@ -61,6 +61,52 @@ def test_load_config_errors_are_not_cached(tmp_path):
     assert load_config(cfg_file).parser.vacancy_score_threshold == 4
 
 
+def test_unknown_keys_are_rejected_with_paths(tmp_path):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("fx:\n  enabeld: false\nparser:\n  vacancy_score_treshold: 7\n", encoding="utf-8")
+
+    with pytest.raises(loader.ConfigLoadError) as exc:
+        load_config(cfg_file)
+
+    assert "fx.enabeld" in str(exc.value)
+    assert "parser.vacancy_score_treshold" in str(exc.value)
+
+
+def test_unknown_root_key_and_loader_field_are_rejected(tmp_path):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("llm_model_catalog: []\nsearh: {}\n", encoding="utf-8")
+
+    with pytest.raises(loader.ConfigLoadError) as exc:
+        load_config(cfg_file)
+
+    assert "llm_model_catalog" in str(exc.value)
+    assert "searh" in str(exc.value)
+
+
+def test_legacy_fallback_model_key_still_loads(tmp_path):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        "ai:\n  model: anthropic/claude-haiku-5.5\n  fallback_model: google/gemini-3.1-flash-lite\n  models: []\n",
+        encoding="utf-8",
+    )
+
+    assert load_config(cfg_file).ai.fallback_models == ["google/gemini-3.1-flash-lite"]
+
+
+def test_free_form_dictionary_keys_are_accepted(tmp_path):
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        "dictionaries:\n  specializations:\n    MyOwnSpec: [myspec]\n  work_format_synonyms:\n    remote: [home]\n",
+        encoding="utf-8",
+    )
+
+    assert "MyOwnSpec" in load_config(cfg_file).merged_specializations()
+
+
+def test_project_config_has_no_unknown_keys():
+    load_config("config.yaml")
+
+
 @pytest.fixture
 def db(monkeypatch, pg_db):
     get_settings.cache_clear()

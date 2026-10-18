@@ -132,3 +132,74 @@ def test_backfill_converts_annual_jpy_to_monthly(db_session, monkeypatch):
     assert row2 is not None
     assert row2.detected_salary_avg == pytest.approx(750_000.0)
     assert row2.detected_salary_avg_rub == pytest.approx(750_000.0 * 0.54)
+
+
+def _no_currency_vacancy(amount: float) -> Vacancy:
+    text = f"Python developer, зарплата {amount:.0f}"
+    return Vacancy(
+        id=vacancy_content_id(text),
+        source_post_key="ch-nocur",
+        source_channel="ch",
+        source_url="https://t.me/s/ch",
+        raw_text=text,
+        cleaned_text=text,
+        detected_salary_avg=amount,
+        salary_currency=None,
+        post_date=datetime(2026, 5, 1, tzinfo=UTC),
+    )
+
+
+def _saved(db_session, v: Vacancy, fx_cfg: FxConfig) -> VacancyRow:
+    upsert_vacancies(db_session, [v], parse_run_id=new_parse_run(db_session), fx_config=fx_cfg)
+    db_session.commit()
+    row = db_session.scalar(select(VacancyRow).where(VacancyRow.id == v.id))
+    assert row is not None
+    return row
+
+
+def test_salary_without_currency_counts_as_default_rub(db_session, monkeypatch):
+    def _forbid(*_a, **_k):
+        raise AssertionError("рублю курс не нужен")
+
+    monkeypatch.setattr(fx_repo, "ensure_latest_rates", _forbid)
+
+    row = _saved(db_session, _no_currency_vacancy(200_000), FxConfig(enabled=False))
+
+    assert row.detected_salary_avg_rub == pytest.approx(200_000.0)
+    assert row.salary_currency is None
+
+
+def test_salary_without_currency_uses_non_ruble_default(db_session, monkeypatch):
+    d = date(2026, 5, 19)
+    monkeypatch.setattr(fx_repo, "ensure_latest_rates", lambda *_a, **_k: (d, {"RUB": 1.0, "USD": 80.0}))
+
+    row = _saved(db_session, _no_currency_vacancy(2_000), FxConfig(enabled=True, default_currency_if_missing="USD"))
+
+    assert row.detected_salary_avg_rub == pytest.approx(160_000.0)
+    assert row.salary_currency is None
+
+
+def test_empty_default_currency_leaves_no_rub_sum(db_session, monkeypatch):
+    d = date(2026, 5, 19)
+    monkeypatch.setattr(fx_repo, "ensure_latest_rates", lambda *_a, **_k: (d, {"RUB": 1.0, "USD": 80.0}))
+
+    row = _saved(db_session, _no_currency_vacancy(200_000), FxConfig(enabled=True, default_currency_if_missing=""))
+
+    assert row.detected_salary_avg_rub is None
+
+
+def test_backfill_fills_salary_without_currency(db_session, monkeypatch):
+    d = date(2026, 5, 19)
+    fx_repo.upsert_rates(db_session, d, {"RUB": 1.0, "USD": 80.0})
+    db_session.commit()
+    monkeypatch.setattr(fx_repo, "ensure_latest_rates", lambda *_a, **_k: (d, {"RUB": 1.0, "USD": 80.0}))
+    # Записана до исправления: рублёвой суммы нет.
+    row = _saved(db_session, _no_currency_vacancy(150_000), FxConfig(enabled=True, default_currency_if_missing=""))
+    assert row.detected_salary_avg_rub is None
+
+    stats = backfill_vacancies_salary_rub(db_session, FxConfig(enabled=True), db_rates_only=True)
+    db_session.commit()
+    db_session.refresh(row)
+
+    assert stats.updated == 1
+    assert row.detected_salary_avg_rub == pytest.approx(150_000.0)

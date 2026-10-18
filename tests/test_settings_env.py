@@ -18,6 +18,9 @@ _ENV_KEYS = (
     "ALLOW_PUBLIC_DEV",
     "DATABASE_URL",
     "POSTGRES_PASSWORD",
+    "PARSE_JOB_BACKEND",
+    "LLM_JOB_BACKEND",
+    "HH_SYNC_JOB_BACKEND",
 )
 
 
@@ -102,6 +105,30 @@ def test_unknown_app_env_is_rejected(make_settings):
     # Опечатка не должна молча включать dev-умолчания.
     with pytest.raises(ValidationError):
         make_settings(APP_ENV="staging", JWT_SECRET=_PROD_SECRET)
+
+
+def test_unknown_job_backend_is_rejected(make_settings):
+    # Опечатка не должна молча переводить задачи в процесс API.
+    with pytest.raises(ValidationError) as exc:
+        make_settings(LLM_JOB_BACKEND="redis-queue")
+    assert "LLM_JOB_BACKEND" in str(exc.value)
+    assert "redis-queue" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(" RQ ", "rq"), ("Inprocess", "inprocess"), ("", "inprocess"), ("  ", "inprocess")],
+)
+def test_job_backend_ignores_case_and_spaces(make_settings, raw, expected):
+    s = make_settings(PARSE_JOB_BACKEND=raw, LLM_JOB_BACKEND=raw, HH_SYNC_JOB_BACKEND=raw)
+    assert s.parse_job_backend_normalized == expected
+    assert s.llm_job_backend_normalized == expected
+    assert s.hh_sync_job_backend_normalized == expected
+
+
+def test_job_backend_defaults_to_inprocess(make_settings):
+    s = make_settings()
+    assert (s.parse_job_backend, s.llm_job_backend, s.hh_sync_job_backend) == ("inprocess",) * 3
 
 
 def test_dev_on_loopback_starts(make_settings):

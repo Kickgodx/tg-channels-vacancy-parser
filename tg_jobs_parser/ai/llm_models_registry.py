@@ -107,18 +107,38 @@ def apply_ai_defaults_from_registry(
     ai_data: dict[str, Any],
     registry: LlmModelsRegistry,
 ) -> dict[str, Any]:
-    """Подставить ``model`` / ``fallback_models`` из реестра, если не заданы в config.yaml."""
+    """Подставить ``model`` / ``fallback_models`` из реестра, если не заданы в config.yaml.
+
+    Все модели конфигурации (основная, запасные, матчинга, писем) должны быть в каталоге:
+    иначе запрос к модели падает только у провайдера, а стоимость считается нулевой.
+    """
     data = dict(ai_data)
     if data.get("models") is not None:
         data.pop("models", None)
     ids = registry.ids()
+
+    def require_in_catalog(field: str, model_id: str) -> None:
+        if model_id not in ids:
+            raise LlmModelsLoadError(
+                f"{field} '{model_id}' отсутствует в llm_models.yaml. Доступные id: {', '.join(sorted(ids)[:8])}…"
+            )
+
     if not (data.get("model") or "").strip():
         data["model"] = registry.default_model
     model = str(data["model"]).strip()
-    if model not in ids:
-        raise LlmModelsLoadError(
-            f"ai.model '{model}' отсутствует в llm_models.yaml. Доступные id: {', '.join(sorted(ids)[:8])}…"
-        )
+    require_in_catalog("ai.model", model)
     if not data.get("fallback_models"):
-        data["fallback_models"] = [m for m in registry.default_fallbacks if m in ids and m != model]
+        legacy = data.pop("fallback_model", None)
+        if legacy:
+            # Устаревший ключ: иначе его молча заменили бы запасные модели каталога.
+            data["fallback_models"] = [legacy] if isinstance(legacy, str) else list(legacy)
+        else:
+            data["fallback_models"] = [m for m in registry.default_fallbacks if m in ids and m != model]
+    for fallback in data["fallback_models"]:
+        if str(fallback or "").strip():
+            require_in_catalog("ai.fallback_models", str(fallback).strip())
+    for field in ("match_model", "cover_letter_model"):
+        value = str(data.get(field) or "").strip()
+        if value:
+            require_in_catalog(f"ai.{field}", value)
     return data

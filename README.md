@@ -237,7 +237,8 @@ JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(4
 - `GET /analytics/companies` — топ компаний.
 
 Зарплаты приводятся к рублям по курсам ЦБ (`exchange_rates`), метка
-`salary_display` показывает дату курса.
+`salary_display` показывает дату курса. Зарплата без валюты считается в
+`fx.default_currency_if_missing` (`RUB`).
 
 Агрегаты (`/vacancies/metrics`, `/analytics/*`) кэшируются в памяти API на `ANALYTICS_CACHE_SECONDS` (30 с) по набору фильтров; запись вакансий в том же процессе сбрасывает кэш сразу, запись из воркера видна не позже чем через TTL. Фильтр по специализации на Postgres идёт по GIN-индексу (`detected_specializations` — `JSONB`, миграция 019). `config.yaml` перечитывается только при изменении файла (кэш по mtime).
 
@@ -437,7 +438,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 
 | Метод | Путь | Назначение |
 |-------|------|------------|
-| `GET` | `/health` | Статус API и подключения к БД |
+| `GET` | `/health` | Статус API: `ok`, если БД отвечает и `config.yaml` загружается без ошибки, иначе `degraded` (причина — в журнале) |
 | `POST` | `/auth/register` / `/auth/login` | Регистрация / вход → JWT access-токен + refresh-cookie |
 | `POST` | `/auth/refresh` | Новый access-токен по refresh-cookie; cookie ротируется (401 — сессии нет) |
 | `POST` | `/auth/logout` | Отозвать текущую refresh-сессию, стереть cookie (204) |

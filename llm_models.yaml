@@ -1,5 +1,6 @@
 # Единый каталог LLM (OpenRouter). Редактируйте только этот файл.
-# config.yaml: ai.model и ai.fallback_models — только id из списка models ниже.
+# config.yaml: ai.model, ai.fallback_models, ai.match_model и ai.cover_letter_model —
+# только id из списка models ниже (иначе config.yaml не загрузится).
 #
 # cost: USD за 1M токенов (input/output), напр. "0.25/1.5"
 
