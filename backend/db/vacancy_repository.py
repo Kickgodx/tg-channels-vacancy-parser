@@ -35,9 +35,10 @@ from backend.fx.apply import (
 )
 from backend.observability import record_vacancies_archived, record_vacancy_upsert
 from backend.schemas import VacancyListItem, VacancyQuery, VacancySortField
+from backend.services.llm_result_freshness import match_is_stale
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import FxConfig
+from tg_jobs_parser.config.schema import AiConfig, FxConfig
 from tg_jobs_parser.models.vacancy import Vacancy
 
 
@@ -401,7 +402,18 @@ def _list_text_defer():
     return (defer(VacancyRow.raw_text), defer(VacancyRow.cleaned_text))
 
 
-def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[VacancyListItem], int]:
+def list_vacancies(
+    session: Session,
+    query: VacancyQuery,
+    *,
+    match_ai: AiConfig | None = None,
+) -> tuple[list[VacancyListItem], int]:
+    """Страница списка; с ``resume_id`` — плюс оценка пары.
+
+    ``match_ai`` — текущая AI-конфигурация (её передаёт роут): по ней элемент получает
+    ``match_stale``. Без неё ``match_stale`` не считается (None). На колонку оценки и
+    сортировку устаревание не влияет.
+    """
     offset = (query.page - 1) * query.page_size
     order = [*_vacancy_order_by(query), VacancyRow.id.asc()]
     preview = vacancy_preview_expr()
@@ -426,6 +438,7 @@ def list_vacancies(session: Session, query: VacancyQuery) -> tuple[list[VacancyL
                     prev or "",
                     match_score=mrow.overall_score if mrow is not None else None,
                     match_explanation=mrow.explanation if mrow is not None else None,
+                    match_stale=(match_is_stale(mrow, match_ai) if mrow is not None and match_ai is not None else None),
                 )
             )
         # На первой неполной странице total = len (без отдельного COUNT).

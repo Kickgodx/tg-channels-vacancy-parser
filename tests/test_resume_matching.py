@@ -6,10 +6,15 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
+from tests.llm_job_helpers import await_llm_job, use_ai_config
+from tests.test_solo_match import _add_vacancy, _auth, _register
 
 from backend.db import repository as repo
-from backend.db.models import VacancyRow
+from backend.db.models import VacancyMatchRow, VacancyRow
+from backend.db.session import session_scope
 from backend.schemas import VacancyQuery
+from backend.services import llm_result_freshness, match_service
 from tg_jobs_parser.ai.clients.openrouter import _parse_match
 from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION, build_match_messages
 
@@ -253,3 +258,100 @@ def test_calculate_overall_score_critical_penalty():
     # penalty не повышает низкий score
     weak = MatchBreakdown(role_match=20, skills_match=20, seniority_match=20)
     assert calculate_overall_score(weak, two_critical) == 17
+
+
+# --- Актуальность сохранённой оценки (модель матчинга / версия промпта) ---
+
+
+@pytest.fixture
+def counting_match_llm(monkeypatch):
+    """Реальный ``match_single`` с подменённым клиентом: считает вызовы LLM."""
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+    from tg_jobs_parser.ai.schema import VacancyMatchExtraction
+
+    calls: list[str] = []
+
+    class _FakeClient:
+        def match_with_fallback(self, *, resume_text, vacancy_text):
+            calls.append(vacancy_text)
+            return VacancyMatchExtraction(confidence=80, explanation="ok"), LLMUsage(model="answered/model")
+
+    monkeypatch.setattr(match_service, "get_interactive_client", lambda: _FakeClient())
+    return calls
+
+
+def _matched_pair(client) -> tuple[str, int, str]:
+    token = _register(client, "a@example.com")
+    vid = _add_vacancy()
+    rid = client.post("/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}).json()["id"]
+    job = await_llm_job(client, token, client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token)))
+    assert job["status"] == "done", job
+    return token, rid, vid
+
+
+def test_fresh_match_served_from_cache(api_client, counting_match_llm, monkeypatch, tmp_path):
+    use_ai_config(monkeypatch, tmp_path, match_model="match/a")
+    token, rid, vid = _matched_pair(api_client)
+
+    again = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
+    assert again.status_code == 200
+    assert again.json()["stale"] is False
+    assert len(counting_match_llm) == 1
+
+
+def test_match_recomputed_after_match_model_change(api_client, counting_match_llm, monkeypatch, tmp_path):
+    use_ai_config(monkeypatch, tmp_path, match_model="match/a")
+    token, rid, vid = _matched_pair(api_client)
+    use_ai_config(monkeypatch, tmp_path, match_model="match/b")
+
+    got = api_client.get(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
+    assert got.json()["stale"] is True
+
+    r = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
+    assert r.status_code == 202
+    job = await_llm_job(api_client, token, r)
+    assert job["status"] == "done", job
+    assert job["match"]["stale"] is False
+    assert len(counting_match_llm) == 2
+
+    got = api_client.get(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
+    assert got.json()["stale"] is False
+    with session_scope() as session:
+        rows = session.scalars(select(VacancyMatchRow).where(VacancyMatchRow.resume_id == rid)).all()
+        assert [(r.requested_model, r.model) for r in rows] == [("match/b", "answered/model")]
+
+
+def test_match_recomputed_after_prompt_version_bump(api_client, counting_match_llm, monkeypatch):
+    token, rid, vid = _matched_pair(api_client)
+    monkeypatch.setattr(llm_result_freshness, "MATCH_PROMPT_VERSION", "match-v999")
+    monkeypatch.setattr(match_service, "MATCH_PROMPT_VERSION", "match-v999")
+
+    assert api_client.get(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token)).json()["stale"] is True
+    r = api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token))
+    assert r.status_code == 202
+    job = await_llm_job(api_client, token, r)
+    assert job["match"]["stale"] is False
+    assert len(counting_match_llm) == 2
+
+
+def test_vacancy_list_marks_stale_match_without_changing_score_or_order(
+    api_client, counting_match_llm, monkeypatch, tmp_path
+):
+    use_ai_config(monkeypatch, tmp_path, match_model="match/a")
+    token, rid, vid = _matched_pair(api_client)
+    _add_vacancy("vac-2", "Нужен Go-разработчик")
+
+    def _list() -> list[tuple]:
+        r = api_client.get(
+            "/api/v1/vacancies",
+            headers=_auth(token),
+            params={"resume_id": rid, "sort_by": "match_score"},
+        )
+        assert r.status_code == 200, r.text
+        return [(i["id"], i["match_score"], i["match_stale"]) for i in r.json()["items"]]
+
+    before = _list()
+    assert before == [(vid, before[0][1], False), ("vac-2", None, None)]
+
+    use_ai_config(monkeypatch, tmp_path, match_model="match/b")
+    assert _list() == [(vid, before[0][1], True), ("vac-2", None, None)]

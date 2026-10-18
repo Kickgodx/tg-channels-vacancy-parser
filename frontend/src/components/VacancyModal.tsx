@@ -109,6 +109,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
           model: "",
           created_at: "",
           cached: true,
+          stale: listItem.match_stale ?? false,
         }
       : null,
   );
@@ -352,7 +353,14 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
                   {expandMatchM.isPending ? "Загрузка…" : "Подробнее"}
                 </button>
               ))}
-            {match.cached && !matchM.isSuccess && (
+            {match.stale && (
+              <p className="caption">
+                <span className="warning">
+                  Оценка получена другой моделью или версией промпта — переоцените резюме.
+                </span>
+              </p>
+            )}
+            {match.cached && !match.stale && !matchM.isSuccess && (
               <p className="caption">
                 Сохранённая оценка — «Переоценить резюме» запустит LLM заново.
               </p>
@@ -374,6 +382,13 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
               onChange={(e) => setDraftOverride(e.target.value)}
               rows={12}
             />
+            {letter.stale && (
+              <p className="caption">
+                <span className="warning">
+                  Письмо получено другой моделью или версией промпта — перегенерируйте его.
+                </span>
+              </p>
+            )}
             {letter.cached && !letterM.isSuccess && (
               <p className="caption">
                 Сохранённый вариант — «Перегенерировать письмо» запустит LLM заново.

@@ -7,7 +7,7 @@ from datetime import date
 import fakeredis
 import pytest
 from tests.conftest import new_user
-from tests.llm_job_helpers import await_llm_job
+from tests.llm_job_helpers import await_llm_job, current_ai
 from tests.test_llm_jobs import _add_vacancy, _auth, _register
 
 from backend.db.llm_usage_repository import llm_calls_today, try_reserve_llm_calls
@@ -16,6 +16,7 @@ from backend.services import llm_rate_gate, match_service
 from backend.services.llm_rate_gate import RedisWindowRateGate
 from backend.settings import get_settings
 from tg_jobs_parser.ai import rate_limit
+from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION
 from tg_jobs_parser.ai.rate_limit import LlmQuotaExhausted, OpenRouterRateLimiter, register_global_rate_gate
 
 # --- общий лимит (Redis) ---
@@ -258,6 +259,8 @@ def _fake_match(*, resume_id, resume_text, vacancy_id, vacancy_text):
             strengths=[],
             risks=[],
             model="m",
+            requested_model=current_ai().resolved_match_model(),
+            prompt_version=MATCH_PROMPT_VERSION,
         )
 
 

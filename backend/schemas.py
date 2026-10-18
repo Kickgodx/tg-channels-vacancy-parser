@@ -131,6 +131,10 @@ class VacancyListItem(BaseModel):
 
     match_score: float | None = None
     match_explanation: str | None = None
+    match_stale: bool | None = Field(
+        default=None,
+        description="Оценка устарела (другая модель матчинга или версия промпта); None — оценки нет.",
+    )
 
     parsed_at: datetime
     archived_at: datetime | None = None
@@ -336,6 +340,13 @@ class VacancyMatchOut(BaseModel):
         default=False,
         description="True — оценка взята из БД, без нового вызова LLM.",
     )
+    stale: bool = Field(
+        default=False,
+        description=(
+            "True — оценка получена при другой настроенной модели матчинга или версии промпта; "
+            "POST без force пересчитает её."
+        ),
+    )
 
 
 CoverLetterTone = Literal["neutral", "friendly", "formal"]
@@ -364,6 +375,13 @@ class CoverLetterOut(BaseModel):
     cached: bool = Field(
         default=False,
         description="True — текст взят из БД, без нового вызова LLM.",
+    )
+    stale: bool = Field(
+        default=False,
+        description=(
+            "True — письмо получено при другой настроенной модели писем или версии промпта "
+            "(тон не учитывается); POST без force перегенерирует его."
+        ),
     )
 
 

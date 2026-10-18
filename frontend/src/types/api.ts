@@ -68,6 +68,8 @@ export interface VacancyListItem {
   ai_notes?: string | null;
   match_score?: number | null;
   match_explanation?: string | null;
+  /** Оценка получена другой моделью матчинга или версией промпта; null — оценки нет. */
+  match_stale?: boolean | null;
   archived_at?: string | null;
 }
 
@@ -359,6 +361,8 @@ export interface VacancyMatch {
   model: string;
   created_at: string;
   cached: boolean;
+  /** Получена другой моделью матчинга или версией промпта — POST без force пересчитает. */
+  stale: boolean;
 }
 
 export type CoverLetterTone = "neutral" | "friendly" | "formal";
@@ -371,6 +375,8 @@ export interface CoverLetter {
   model: string;
   created_at: string;
   cached: boolean;
+  /** Получено другой моделью писем или версией промпта (тон не учитывается). */
+  stale: boolean;
 }
 
 export type LlmJobKind = "match" | "cover_letter" | "import";

@@ -12,6 +12,7 @@ from backend.db.session import session_scope
 from backend.observability import record_cover_letter
 from backend.services.interactive_llm import get_interactive_client
 from backend.settings import get_settings
+from tg_jobs_parser.ai.prompts import COVER_LETTER_PROMPT_VERSION
 from tg_jobs_parser.config.loader import load_config
 
 _LOG = logging.getLogger(__name__)
@@ -53,6 +54,8 @@ def generate_single(
     ) as span:
         cfg = load_config(get_settings().config_path)
         max_chars = cfg.ai.max_input_chars
+        # С какой моделью и версией промпта спрашиваем — по ним потом решается, устарело ли письмо.
+        requested_model = cfg.ai.resolved_cover_letter_model()
         match_summary = _match_summary(resume_id=resume_id, vacancy_id=vacancy_id)
         span.set_attribute("cover_letter.has_match_summary", match_summary is not None)
         started = time.perf_counter()
@@ -87,4 +90,6 @@ def generate_single(
             text=text,
             tone=tone,
             model=usage.model,
+            requested_model=requested_model,
+            prompt_version=COVER_LETTER_PROMPT_VERSION,
         )

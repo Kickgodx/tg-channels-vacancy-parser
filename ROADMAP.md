@@ -19,7 +19,7 @@
 | 5 | `feature/llm-evals-match` | Golden/evals для match + cover letter | нет |
 
 **Про миграции:** цепочка инкрементальная — head сейчас
-`029_parse_runs_drop_pending`. Новые фичи просто продолжают её
+`030_llm_results_requested_model`. Новые фичи просто продолжают её
 (`alembic revision` → `upgrade head` на старте backend, без `down -v`).
 БД — только Postgres; constraint'ы (FK, индексы) — с явными именами.
 
