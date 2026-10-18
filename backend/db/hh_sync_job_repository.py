@@ -12,7 +12,7 @@ from backend.db.models import HhSyncJobRow
 from backend.settings import get_settings
 
 ACTIVE_STATUSES = frozenset({"queued", "running"})
-TERMINAL_STATUSES = frozenset({"completed", "failed"})
+TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
 def new_lease_owner() -> str:
@@ -112,7 +112,7 @@ def finish_hh_sync_job(
     result: dict | None,
     error_message: str | None = None,
 ) -> bool:
-    """running → completed|failed, только владельцем lease. False — lease перехвачен recover."""
+    """running → completed|failed|cancelled, только владельцем lease. False — lease перехвачен recover."""
     exec_result = session.execute(
         update(HhSyncJobRow)
         .where(*_owned_running(job_id, lease_owner))
@@ -128,6 +128,45 @@ def finish_hh_sync_job(
     )
     session.expire_all()
     return (exec_result.rowcount or 0) == 1
+
+
+def request_hh_sync_job_cancel(session: Session, job_id: uuid.UUID) -> HhSyncJobRow | None:
+    """Запросить отмену: ``queued`` → сразу ``cancelled``, ``running`` → флаг для воркера.
+
+    Завершённый sync не меняется. Перевод из ``queued`` — условным UPDATE: если воркер
+    успел взять sync, остаётся флаг, и останавливает его воркер. None — нет такого sync.
+    """
+    row = session.get(HhSyncJobRow, job_id)
+    if row is None:
+        return None
+    if row.status in TERMINAL_STATUSES:
+        return row
+    cancelled = session.execute(
+        update(HhSyncJobRow)
+        .where(HhSyncJobRow.id == job_id, HhSyncJobRow.status == "queued")
+        .values(
+            status="cancelled",
+            cancel_requested=True,
+            finished_at=datetime.now(UTC),
+            lease_owner=None,
+            lease_until=None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if (cancelled.rowcount or 0) != 1:
+        session.execute(
+            update(HhSyncJobRow)
+            .where(HhSyncJobRow.id == job_id, HhSyncJobRow.status == "running")
+            .values(cancel_requested=True)
+            .execution_options(synchronize_session=False)
+        )
+    session.flush()
+    session.expire_all()
+    return session.get(HhSyncJobRow, job_id)
+
+
+def is_hh_sync_job_cancel_requested(session: Session, job_id: uuid.UUID) -> bool:
+    return bool(session.scalar(select(HhSyncJobRow.cancel_requested).where(HhSyncJobRow.id == job_id)))
 
 
 def fail_hh_sync_job(session: Session, job_id: uuid.UUID, error_message: str) -> None:
@@ -166,13 +205,19 @@ def list_queued_hh_sync_jobs(session: Session, *, older_than: datetime | None) -
 
 
 def reclaim_expired_hh_sync_job(session: Session, job_id: uuid.UUID, *, now: datetime) -> str | None:
-    """Атомарно running(expired lease) → queued|failed. None — не удалось (lease продлён / уже не running)."""
+    """Атомарно running(expired lease) → queued|failed|cancelled. None — не удалось (lease продлён / уже не running).
+
+    ``cancelled`` — отмена запрошена до того, как воркер пропал: повтор не нужен.
+    """
     row = session.get(HhSyncJobRow, job_id)
     if row is None or row.status != "running" or row.lease_until is None:
         return None
     attempts = int(row.attempts or 0)
     base = {"rq_job_id": None, "lease_owner": None, "lease_until": None}
-    if attempts >= max(1, get_settings().hh_sync_job_max_attempts):
+    if row.cancel_requested:
+        outcome = "cancelled"
+        values = {**base, "status": "cancelled", "finished_at": now}
+    elif attempts >= max(1, get_settings().hh_sync_job_max_attempts):
         outcome = "failed"
         values = {**base, "status": "failed", "finished_at": now, "error_message": attempts_exhausted_message(attempts)}
     else:

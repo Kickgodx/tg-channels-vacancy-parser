@@ -42,6 +42,10 @@ class LlmJobUserLimitError(RuntimeError):
     """Пользователь исчерпал лимит параллельных LLM-джоб."""
 
 
+class LlmJobCancelled(RuntimeError):
+    """Владелец отменил выполняемую задачу: воркер записывает ``cancelled``, результат не сохраняется."""
+
+
 class LlmDailyQuotaError(RuntimeError):
     """Пользователь исчерпал суточную квоту вызовов LLM (``LLM_USER_DAILY_CALLS``)."""
 
@@ -218,3 +222,35 @@ class LlmJobRunner:
 
 
 llm_job_runner = LlmJobRunner()
+
+
+def cancel_llm_job(job_id: uuid.UUID, *, user_id: int) -> bool:
+    """Отмена задачи владельцем: ``queued`` — сразу, ``running`` — флагом для воркера.
+
+    False — задачи нет или она чужая. Завершённая задача не меняется (идемпотентно).
+    """
+    from backend.db import llm_job_repository as llm_jobs
+    from backend.services.llm_job_events import publish_llm_job_event
+
+    with session_scope() as session:
+        row = llm_jobs.get_llm_job(session, job_id)
+        if row is None or row.user_id != user_id:
+            return False
+        was_queued = row.status == "queued"
+        row = llm_jobs.request_llm_job_cancel(session, job_id)
+        status, kind, rq_job_id = row.status, row.kind, row.rq_job_id
+    if was_queued and status == "cancelled":
+        if rq_job_id:
+            try:
+                from rq.job import Job
+
+                from backend.queue.rq_conn import get_redis_connection
+
+                Job.fetch(rq_job_id, connection=get_redis_connection()).cancel()
+            except Exception as e:
+                # Не критично: воркер не возьмёт задачу — claim требует queued.
+                _LOG.debug("LLM job %s: RQ job не снята: %s", job_id, e)
+        publish_llm_job_event(job_id, status="cancelled", kind=kind)
+        record_llm_job(outcome="cancelled", kind=kind)
+    _LOG.info("LLM job %s: запрошена отмена (status=%s)", job_id, status)
+    return True

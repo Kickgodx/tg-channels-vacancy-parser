@@ -358,6 +358,8 @@ class HhSyncJobRow(Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Сколько раз джобу брали в работу (claim); лимит — HH_SYNC_JOB_MAX_ATTEMPTS.
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Запрошена отмена (миграция 031): queued отменяется сразу, running — воркером.
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
 
 
 class LlmJobRow(Base):
@@ -404,6 +406,8 @@ class LlmJobRow(Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Сколько раз джобу брали в работу (claim); лимит — LLM_JOB_MAX_ATTEMPTS.
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Запрошена отмена (миграция 031): queued отменяется сразу, running — воркером.
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
 
 
 class IdempotencyKeyRow(Base):

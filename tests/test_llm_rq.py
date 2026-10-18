@@ -55,7 +55,7 @@ def fake_redis(monkeypatch):
 
 
 def test_rq_enqueue_and_worker_burst(api_client, fake_redis, monkeypatch):
-    def _fake(*, resume_id, resume_text, vacancy_id, vacancy_text):
+    def _fake(*, resume_id, resume_text, vacancy_id, vacancy_text, **_kwargs):
         from backend.db import repository as repo
 
         with session_scope() as session:

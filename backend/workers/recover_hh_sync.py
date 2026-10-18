@@ -16,7 +16,8 @@ _LOG = logging.getLogger(__name__)
 
 
 def recover_stuck_hh_sync_jobs(*, requeue_all_queued: bool = False) -> int:
-    """``running`` с истёкшим lease → ``queued`` (или ``failed`` по лимиту попыток); старые ``queued`` → в очередь.
+    """``running`` с истёкшим lease → ``queued`` (``failed`` по лимиту попыток, ``cancelled`` при запрошенной
+    отмене); старые ``queued`` → в очередь.
 
     ``requeue_all_queued`` — поднять и свежие ``queued`` (старт API в режиме inprocess:
     потоков прошлого процесса уже нет). Возвращает число джоб, отправленных в очередь.
@@ -29,6 +30,7 @@ def recover_stuck_hh_sync_jobs(*, requeue_all_queued: bool = False) -> int:
     stuck_queued_after = now - timedelta(minutes=max(1, settings.hh_sync_job_stuck_minutes))
     to_requeue: list[UUID] = []
     failed: list[UUID] = []
+    cancelled: list[UUID] = []
 
     with session_scope() as session:
         for row in jobs.list_hh_sync_jobs_with_expired_lease(session, now=now):
@@ -40,6 +42,9 @@ def recover_stuck_hh_sync_jobs(*, requeue_all_queued: bool = False) -> int:
             elif outcome == "failed":
                 _LOG.error("HH sync %s: recover running→failed (исчерпан лимит попыток)", job_id)
                 failed.append(job_id)
+            elif outcome == "cancelled":
+                _LOG.warning("HH sync %s: recover running→cancelled (отмена запрошена)", job_id)
+                cancelled.append(job_id)
         older_than = None if requeue_all_queued else stuck_queued_after
         for row in jobs.list_queued_hh_sync_jobs(session, older_than=older_than):
             if row.id not in to_requeue:
@@ -48,6 +53,8 @@ def recover_stuck_hh_sync_jobs(*, requeue_all_queued: bool = False) -> int:
     # После commit: подписчик, получив событие, перечитывает уже финальный статус.
     for job_id in failed:
         publish_hh_sync_event(job_id, status="failed")
+    for job_id in cancelled:
+        publish_hh_sync_event(job_id, status="cancelled")
 
     redis_conn = None
     if rq_mode and to_requeue:

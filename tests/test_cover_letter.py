@@ -63,6 +63,7 @@ def stub_llm(monkeypatch):
         vacancy_text,
         tone="neutral",
         extra_notes=None,
+        **_kwargs,
     ):
         calls.append({"resume_id": resume_id, "vacancy_id": vacancy_id, "tone": tone})
         from backend.db import repository as repo
@@ -409,3 +410,28 @@ def test_letter_regenerated_after_model_change(api_client, counting_letter_llm, 
     assert _letters(rid) == [("neutral", new_model)]
     got = api_client.get(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token))
     assert got.json()["stale"] is False
+
+
+def test_cancel_during_generation_keeps_previous_letter(api_client, monkeypatch):
+    from tests.test_solo_match import _cancel_active_job
+
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+
+    state: dict = {}
+
+    class _Client:
+        def cover_letter_with_fallback(self, *, tone, **_kwargs):
+            if tone == "formal":
+                _cancel_active_job(state["rid"], state["vid"], kind="cover_letter")
+            return f"Письмо ({tone})", LLMUsage(model="m")
+
+    monkeypatch.setattr(cover_letter_service, "get_interactive_client", lambda: _Client())
+    token, rid, vid = _letter_pair(api_client)
+    state.update(rid=rid, vid=vid)
+
+    r = api_client.post(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token), json={"tone": "formal"})
+    job = await_llm_job(api_client, token, r)
+
+    assert job["status"] == "cancelled"
+    got = api_client.get(f"/api/v1/resumes/{rid}/cover-letter/{vid}", headers=_auth(token)).json()
+    assert (got["tone"], got["text"]) == ("neutral", "Письмо (neutral)")

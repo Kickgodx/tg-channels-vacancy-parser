@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 
 from opentelemetry import trace
 
@@ -11,6 +12,7 @@ from backend.db import repository as repo
 from backend.db.session import session_scope
 from backend.observability import record_cover_letter
 from backend.services.interactive_llm import get_interactive_client
+from backend.services.llm_job_service import LlmJobCancelled
 from backend.settings import get_settings
 from tg_jobs_parser.ai.prompts import COVER_LETTER_PROMPT_VERSION
 from tg_jobs_parser.config.loader import load_config
@@ -42,8 +44,13 @@ def generate_single(
     vacancy_text: str,
     tone: str = "neutral",
     extra_notes: str | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ):
-    """Генерация письма: LLM без удержания DB-сессии, затем upsert."""
+    """Генерация письма: LLM без удержания DB-сессии, затем upsert.
+
+    ``is_cancelled`` проверяется после ответа модели: отмена → ``LlmJobCancelled``,
+    прежнее письмо пары не перезаписывается.
+    """
     with _TRACER.start_as_current_span(
         "cover_letter.generate",
         attributes={
@@ -82,6 +89,8 @@ def generate_single(
         tone,
         usage.model,
     )
+    if is_cancelled is not None and is_cancelled():
+        raise LlmJobCancelled("Письмо отменено — ответ модели не сохранён")
     with session_scope() as session:
         return repo.upsert_cover_letter(
             session,

@@ -28,7 +28,7 @@ from backend.db.models import ResumeRow, VacancyMatchRow, VacancyRow
 from backend.db.session import session_scope
 from backend.queue import rq_conn
 from backend.schemas import RunCreateRequest
-from backend.services import hh_sync_job_service, match_service, run_service
+from backend.services import hh_sync_job_service, llm_job_service, match_service, run_service
 from backend.services.hh_sync_window import ResolvedHhSearchWindow
 from backend.services.llm_job_service import KIND_MATCH, llm_job_runner
 from backend.services.llm_rate_gate import RedisWindowRateGate
@@ -256,6 +256,72 @@ def test_llm_worker_match_job_records_requested_model(fake_redis, worker_process
         assert (row.model, row.requested_model, row.prompt_version) == ("fallback/b", "match/a", MATCH_PROMPT_VERSION)
 
 
+def _resume_and_vacancy(vacancy_id: str) -> tuple[int, int]:
+    with session_scope() as session:
+        user_id = new_user(session)
+        resume = ResumeRow(user_id=user_id, name="CV", text="Python")
+        session.add(resume)
+        session.add(
+            VacancyRow(
+                id=vacancy_id,
+                source_post_key=f"ch-{vacancy_id}",
+                source_channel="ch",
+                source_url="https://t.me/s/ch",
+                raw_text="Python developer",
+                cleaned_text="Python developer",
+            )
+        )
+        session.flush()
+        return user_id, resume.id
+
+
+def test_llm_worker_skips_job_cancelled_in_queue(fake_redis, worker_process, monkeypatch):
+    """Отменённая в очереди задача: RQ-джоба снята или воркер её не берёт — LLM не вызывается."""
+    calls: list[dict] = []
+    monkeypatch.setattr(match_service, "match_single", lambda **kwargs: calls.append(kwargs))
+    user_id, resume_id = _resume_and_vacancy("vac-cancel")
+    job_id = llm_job_runner.enqueue(
+        user_id=user_id, kind=KIND_MATCH, resume_id=resume_id, vacancy_id="vac-cancel"
+    ).job_id
+
+    assert llm_job_service.cancel_llm_job(job_id, user_id=user_id) is True
+    llm_worker.main()
+
+    with session_scope() as session:
+        assert lj.get_llm_job(session, job_id).status == "cancelled"
+    assert calls == []
+
+
+def test_llm_worker_stops_import_with_cancel_requested(fake_redis, worker_process, monkeypatch):
+    """Флаг отмены у выполняемого импорта: llm-worker останавливается перед следующим текстом.
+
+    AI в тестовом конфиге выключен — тексты разбираются правилами, точка проверки та же.
+    """
+    from backend.services import import_service
+    from backend.services.llm_job_service import KIND_IMPORT
+
+    with session_scope() as session:
+        user_id = new_user(session)
+    texts = [f"Вакансия: Python-разработчик #{i}. Удалёнка, от 200 000 руб." for i in range(3)]
+    job_id = llm_job_runner.enqueue(
+        user_id=user_id, kind=KIND_IMPORT, params=import_service.job_params(texts, None)
+    ).job_id
+    real_commit_vacancy = import_service.vacancy_repo.upsert_vacancies
+
+    def upsert_then_cancel(session, vacancies, **kwargs):
+        out = real_commit_vacancy(session, vacancies, **kwargs)
+        lj.request_llm_job_cancel(session, job_id)  # отмена пришла во время первого текста
+        return out
+
+    monkeypatch.setattr(import_service.vacancy_repo, "upsert_vacancies", upsert_then_cancel)
+    llm_worker.main()
+
+    with session_scope() as session:
+        row = lj.get_llm_job(session, job_id)
+        assert (row.status, row.cancel_requested) == ("cancelled", True)
+        assert [it["status"] for it in row.result["items"]] == ["created"]
+
+
 def test_llm_worker_runs_import_with_llm(fake_redis, worker_process, monkeypatch, default_test_config):
     """Импорт с LLM в llm-worker идёт через настоящий AIEnrichmentService (Postgres-кэш).
 
@@ -339,7 +405,7 @@ def test_llm_worker_fails_import_when_llm_does_not_start(fake_redis, worker_proc
 def test_hh_worker_runs_queued_sync_job(fake_redis, worker_process, monkeypatch):
     seen: dict = {}
 
-    def fake_sync(session, *, config, settings, search_window, progress_callback):
+    def fake_sync(session, *, config, settings, search_window, progress_callback, **_kwargs):
         seen["window"] = search_window
         result = hh_sync_tasks.HhSyncResult(searched=4, unique=3, window="7d", period=7)
         progress_callback("purge", result, 1, 1)

@@ -9,7 +9,7 @@ import uuid
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from tests.conftest import new_user
@@ -157,11 +157,18 @@ def test_migration_closes_existing_duplicates(pg_empty_db):
         resume = ResumeRow(user_id=user.id, name="CV", text="python")
         s.add_all([resume, _vacancy("v-0"), _vacancy("v-1")])
         s.flush()
+        # SQL, а не ORM: модель уже знает колонки более поздних миграций (031 cancel_requested).
+        insert_job = text(
+            "INSERT INTO llm_jobs (id, user_id, kind, resume_id, vacancy_id, status, force, created_at)"
+            " VALUES (:id, :u, 'match', :r, :v, :status, false, now() + make_interval(secs => :age))"
+        )
         # running старше queued: остаётся именно выполняющаяся
-        s.add(_job(user.id, resume.id, "v-0", status="running", id=running_id))
-        s.flush()
-        s.add(_job(user.id, resume.id, "v-0", id=queued_id))
-        s.add(_job(user.id, resume.id, "v-1", id=other_pair_id))
+        for job_id, vid, status, age in (
+            (running_id, "v-0", "running", 0),
+            (queued_id, "v-0", "queued", 1),
+            (other_pair_id, "v-1", "queued", 1),
+        ):
+            s.execute(insert_job, {"id": job_id, "u": user.id, "r": resume.id, "v": vid, "status": status, "age": age})
         s.commit()
 
     command.upgrade(cfg, "head")

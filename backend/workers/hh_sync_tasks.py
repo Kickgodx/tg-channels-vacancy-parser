@@ -26,6 +26,8 @@ _TRACER = trace.get_tracer(__name__)
 
 _LEASE_HEARTBEAT_S = 30.0
 _PROGRESS_MIN_INTERVAL_S = 1.0
+# Флаг отмены читается из БД не чаще раза в секунду (проверка — на каждой странице / группе).
+_CANCEL_CHECK_INTERVAL_S = 1.0
 _ERROR_MESSAGE_MAX = 500
 
 
@@ -142,6 +144,25 @@ def _run_traced(job_id: uuid.UUID, span) -> None:
             raise HhSyncLeaseLost("lease lost")
         publish_hh_sync_event(job_id, status="running")
 
+    cancel_seen = False
+    last_cancel_check = 0.0
+
+    def should_stop() -> bool:
+        nonlocal cancel_seen, last_cancel_check
+        if cancel_seen:
+            return True
+        now = time.monotonic()
+        if now - last_cancel_check < _CANCEL_CHECK_INTERVAL_S:
+            return False
+        last_cancel_check = now
+        try:
+            with session_scope() as session:
+                cancel_seen = jobs.is_hh_sync_job_cancel_requested(session, job_id)
+        except Exception as e:
+            # Транзиентный сбой БД не роняет sync: проверим на следующем шаге.
+            _LOG.debug("HH sync %s: флаг отмены не прочитан: %s", job_id, e)
+        return cancel_seen
+
     status = "failed"
     error: str | None = None
     try:
@@ -160,8 +181,11 @@ def _run_traced(job_id: uuid.UUID, span) -> None:
                 settings=settings,
                 search_window=window,
                 progress_callback=on_progress,
+                should_stop=should_stop,
             )
-        status = "completed"
+        status = "cancelled" if cancel_seen else "completed"
+        if cancel_seen:
+            _LOG.info("HH sync %s: отменён, итог до остановки сохранён", job_id)
     except HhSyncLeaseLost:
         _LOG.warning("HH sync %s: остановлен — lease перехвачен recover", job_id)
     except Exception as e:

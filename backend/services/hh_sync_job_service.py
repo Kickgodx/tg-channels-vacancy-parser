@@ -54,6 +54,34 @@ def enqueue_hh_sync_job(job_id: uuid.UUID, traceparent: str | None = None) -> No
         _LOG.info("HH sync %s запущен inprocess", job_id)
 
 
+def cancel_hh_sync_job(job_id: uuid.UUID) -> bool:
+    """Отмена sync: ``queued`` — сразу, ``running`` — флагом для воркера. False — sync нет.
+
+    Завершённый sync не меняется (идемпотентно).
+    """
+    with session_scope() as session:
+        row = jobs.get_hh_sync_job(session, job_id)
+        if row is None:
+            return False
+        was_queued = row.status == "queued"
+        row = jobs.request_hh_sync_job_cancel(session, job_id)
+        status, rq_job_id = row.status, row.rq_job_id
+    if was_queued and status == "cancelled":
+        if rq_job_id:
+            try:
+                from rq.job import Job
+
+                from backend.queue.rq_conn import get_redis_connection
+
+                Job.fetch(rq_job_id, connection=get_redis_connection()).cancel()
+            except Exception as e:
+                # Не критично: воркер не возьмёт sync — claim требует queued.
+                _LOG.debug("HH sync %s: RQ job не снята: %s", job_id, e)
+        publish_hh_sync_event(job_id, status="cancelled")
+    _LOG.info("HH sync %s: запрошена отмена (status=%s)", job_id, status)
+    return True
+
+
 def start_hh_sync_job(window: ResolvedHhSearchWindow, *, requested_by: int | None) -> uuid.UUID:
     """Создать джобу и поставить в очередь. 409, если sync уже активен."""
     params = {

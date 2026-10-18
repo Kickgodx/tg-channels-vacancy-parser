@@ -408,6 +408,10 @@ class LlmJobOut(BaseModel):
     match: VacancyMatchOut | None = None
     cover_letter: CoverLetterOut | None = None
     import_result: VacancyImportResponse | None = None
+    cancel_requested: bool = Field(
+        default=False,
+        description="Запрошена отмена; у running — воркер остановит задачу в ближайшей точке проверки.",
+    )
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None

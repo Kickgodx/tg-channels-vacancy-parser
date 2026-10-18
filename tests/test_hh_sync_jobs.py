@@ -93,7 +93,7 @@ def test_job_stops_without_finalizing_when_lease_is_lost(db, monkeypatch):
     with session_scope() as session:
         job_id = jobs.create_hh_sync_job(session, params={"window": "all"}, requested_by=None).id
 
-    def fake_sync(session, *, config, settings, search_window, progress_callback):
+    def fake_sync(session, *, config, settings, search_window, progress_callback, **_kwargs):
         progress_callback("search", hh_sync_tasks.HhSyncResult(), 0, 0)
         raise AssertionError("sync должен остановиться на потере lease")
 
@@ -113,7 +113,7 @@ def test_job_records_result_and_progress(db, monkeypatch):
         job_id = jobs.create_hh_sync_job(session, params={"window": "7d", "period": 7}, requested_by=None).id
     seen = {}
 
-    def fake_sync(session, *, config, settings, search_window, progress_callback):
+    def fake_sync(session, *, config, settings, search_window, progress_callback, **_kwargs):
         seen["window"] = search_window
         result = hh_sync_tasks.HhSyncResult(searched=3, unique=2, window="7d", period=7)
         progress_callback("details", result, 1, 2)
@@ -168,3 +168,38 @@ def test_enqueue_failure_marks_job_failed(api_client, monkeypatch):
     # Следующий запуск не упирается в 409.
     monkeypatch.setattr(hh_sync_job_service, "enqueue_hh_sync_job", lambda job_id, traceparent=None: None)
     hh_sync_job_service.start_hh_sync_job(ResolvedHhSearchWindow(window="all"), requested_by=None)
+
+
+# --- Отмена sync ---
+
+
+def test_cancel_queued_sync_is_immediate_and_frees_slot(db):
+    with session_scope() as session:
+        job_id = jobs.create_hh_sync_job(session, params={"window": "all"}, requested_by=None).id
+        row = jobs.request_hh_sync_job_cancel(session, job_id)
+        assert (row.status, row.cancel_requested) == ("cancelled", True)
+        assert jobs.has_active_hh_sync_job(session) is False
+        # Новый sync ставится сразу.
+        jobs.create_hh_sync_job(session, params={"window": "all"}, requested_by=None)
+    with session_scope() as session:
+        assert jobs.claim_hh_sync_job(session, job_id, lease_owner=jobs.new_lease_owner()) is None
+
+
+def test_cancel_running_sync_sets_flag(db):
+    job_id, _ = _running_job(attempts=1, lease_until=datetime.now(UTC) + timedelta(minutes=1))
+    with session_scope() as session:
+        row = jobs.request_hh_sync_job_cancel(session, job_id)
+        assert (row.status, row.cancel_requested) == ("running", True)
+        assert jobs.is_hh_sync_job_cancel_requested(session, job_id) is True
+
+
+def test_recover_cancels_stuck_sync_with_cancel_requested(db):
+    job_id, _ = _running_job(attempts=1, lease_until=datetime.now(UTC) - timedelta(minutes=1))
+    with session_scope() as session:
+        jobs.request_hh_sync_job_cancel(session, job_id)
+
+    assert recover_stuck_hh_sync_jobs() == 0
+
+    row = _row(job_id)
+    assert (row.status, row.lease_owner) == ("cancelled", None)
+    assert db == []

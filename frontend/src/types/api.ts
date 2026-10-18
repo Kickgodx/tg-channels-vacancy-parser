@@ -259,7 +259,7 @@ export interface HhSyncRequest {
   date_to?: string;
 }
 
-export type HhSyncJobStatus = "queued" | "running" | "completed" | "failed";
+export type HhSyncJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface HhSyncAccepted {
   job_id: string;
@@ -294,6 +294,8 @@ export interface HhSyncJob {
   result: HhSyncResult | null;
   error_message: string | null;
   attempts: number;
+  /** Запрошена отмена; у running — воркер остановит sync перед следующей страницей / группой. */
+  cancel_requested: boolean;
   created_at: string | null;
   started_at: string | null;
   finished_at: string | null;
@@ -380,7 +382,7 @@ export interface CoverLetter {
 }
 
 export type LlmJobKind = "match" | "cover_letter" | "import";
-export type LlmJobStatus = "queued" | "running" | "done" | "error";
+export type LlmJobStatus = "queued" | "running" | "done" | "error" | "cancelled";
 
 export interface LlmJobAccepted {
   job_id: string;
@@ -399,6 +401,8 @@ export interface LlmJob {
   cover_letter?: CoverLetter | null;
   /** Импорт: итог по уже обработанным текстам — растёт, пока джоба running. */
   import_result?: VacancyImportResponse | null;
+  /** Запрошена отмена; у running — воркер остановит задачу в ближайшей точке проверки. */
+  cancel_requested: boolean;
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;
@@ -422,6 +426,12 @@ export interface VacancyImportResponse {
   warning?: string | null;
   /** Текстов в запросе; у выполняемой джобы items короче — это прогресс. */
   total: number;
+}
+
+/** Итог `api.importVacancies` (только UI): отменённый импорт — итог по обработанным текстам. */
+export interface VacancyImportOutcome {
+  result: VacancyImportResponse;
+  cancelled: boolean;
 }
 
 export interface RunDetail {
