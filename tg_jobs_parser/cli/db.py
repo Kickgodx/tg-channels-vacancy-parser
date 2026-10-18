@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from backend.db.session import session_scope
-from backend.db.transfer import ImportMode, import_dump_file, write_dump_file
+from backend.db.transfer import ImportMode, count_replace_losses, import_dump_file, write_dump_file
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
 
 db_app = typer.Typer(help="Дамп и импорт данных PostgreSQL (перенос между инстансами).")
@@ -63,8 +63,13 @@ def import_cmd(
         )
         raise typer.Exit(2)
     if mode == "replace":
+        with session_scope() as session:
+            losses = count_replace_losses(session)
         typer.confirm(
-            "Режим replace удалит все прогоны, вакансии, курсы и кэш LLM в целевой БД. Продолжить?",
+            "Режим replace удалит все прогоны, вакансии, курсы и кэш LLM в целевой БД, "
+            f"а вместе с вакансиями — оценки соответствия ({losses.vacancy_matches}), "
+            f"сопроводительные письма ({losses.cover_letters}) и LLM-задачи по вакансиям "
+            f"({losses.llm_jobs}) пользователей: в дамп они не входят. Продолжить?",
             abort=True,
         )
     with session_scope() as session:

@@ -10,15 +10,18 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from backend.db.models import (
     AIExtractionCacheRow,
+    CoverLetterRow,
     ExchangeRateRow,
+    LlmJobRow,
     ParseRunRow,
     ParseRunVacancyRow,
+    VacancyMatchRow,
     VacancyRow,
     VacancySightingRow,
 )
@@ -162,6 +165,31 @@ def load_dump_file(path: Path) -> dict[str, Any]:
     if not isinstance(tables, dict):
         raise ValueError("В дампе отсутствует объект tables")
     return data
+
+
+@dataclass(frozen=True)
+class ReplaceLosses:
+    """Данные пользователей, которые ``replace`` удалит каскадом вместе с вакансиями."""
+
+    vacancy_matches: int = 0
+    cover_letters: int = 0
+    llm_jobs: int = 0
+
+
+def count_replace_losses(session: Session) -> ReplaceLosses:
+    """Сколько оценок, писем и LLM-задач с вакансией унесёт очистка ``vacancies``.
+
+    В дамп они не входят: после ``replace`` их не восстановить.
+    """
+
+    def _count(stmt) -> int:
+        return int(session.scalar(stmt) or 0)
+
+    return ReplaceLosses(
+        vacancy_matches=_count(select(func.count()).select_from(VacancyMatchRow)),
+        cover_letters=_count(select(func.count()).select_from(CoverLetterRow)),
+        llm_jobs=_count(select(func.count()).select_from(LlmJobRow).where(LlmJobRow.vacancy_id.is_not(None))),
+    )
 
 
 def _clear_tables(session: Session) -> None:

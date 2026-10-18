@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_current_user, get_db
+from backend.api.deps import get_current_user, get_db, verify_api_key
 from backend.db import repository as repo
 from backend.db.models import SavedFilterRow, UserRow
 from backend.schemas import (
@@ -13,7 +13,7 @@ from backend.schemas import (
     VacancyQuery,
 )
 
-router = APIRouter(prefix="/filters", tags=["filters"])
+router = APIRouter(prefix="/filters", tags=["filters"], dependencies=[Depends(verify_api_key)])
 
 
 def _to_out(row: SavedFilterRow) -> SavedFilterOut:

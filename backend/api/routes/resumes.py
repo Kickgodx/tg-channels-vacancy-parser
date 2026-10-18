@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_current_user, get_db
+from backend.api.deps import get_current_user, get_db, verify_api_key
 from backend.db import repository as repo
 from backend.db.models import CoverLetterRow, ResumeRow, UserRow, VacancyMatchRow
 from backend.observability import record_cover_letter, record_match
@@ -33,7 +33,7 @@ from tg_jobs_parser.config.schema import AiConfig
 
 _LOG = logging.getLogger(__name__)
 
-resumes_router = APIRouter(prefix="/resumes", tags=["resumes"])
+resumes_router = APIRouter(prefix="/resumes", tags=["resumes"], dependencies=[Depends(verify_api_key)])
 
 
 def _to_out(row) -> ResumeOut:
