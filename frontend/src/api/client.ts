@@ -24,6 +24,7 @@ import type {
   SseTicketResponse,
   TokenResponse,
   Vacancy,
+  VacancyImportOutcome,
   VacancyImportResponse,
   VacancyListItem,
   VacancyMatch,
@@ -265,7 +266,8 @@ const LLM_JOB_POLL_MS = 1000;
  */
 const LLM_JOB_WAIT_MS = 30 * 60 * 1000;
 const HH_SYNC_POLL_MS = 1500;
-const HH_SYNC_TERMINAL: ReadonlySet<HhSyncJob["status"]> = new Set(["completed", "failed"]);
+const HH_SYNC_TERMINAL: ReadonlySet<HhSyncJob["status"]> = new Set(["completed", "failed", "cancelled"]);
+const LLM_JOB_TERMINAL: ReadonlySet<LlmJob["status"]> = new Set(["done", "error", "cancelled"]);
 const RUN_POLL_MS = 2000;
 /** Как часто SSE переключается на poll при долгом молчании (не hard-fail). */
 const SSE_FALLBACK_IDLE_MS = 5 * 60 * 1000;
@@ -344,7 +346,7 @@ async function pollLlmJob(
   for (;;) {
     signal.throwIfAborted();
     const job = await request<LlmJob>(`/llm-jobs/${jobId}`, { signal });
-    if (job.status === "done" || job.status === "error") return job;
+    if (LLM_JOB_TERMINAL.has(job.status)) return job;
     onUpdate?.(job);
     await sleep(LLM_JOB_POLL_MS, signal);
   }
@@ -398,7 +400,7 @@ async function waitLlmJobSse(
     es.addEventListener("status", (ev) => {
       try {
         last = JSON.parse((ev as MessageEvent).data) as LlmJob;
-        if (last.status === "done" || last.status === "error") finish(last);
+        if (LLM_JOB_TERMINAL.has(last.status)) finish(last);
         else onUpdate?.(last);
       } catch {
         /* ignore parse */
@@ -406,7 +408,7 @@ async function waitLlmJobSse(
     });
 
     es.addEventListener("done", () => {
-      if (last && (last.status === "done" || last.status === "error")) {
+      if (last && LLM_JOB_TERMINAL.has(last.status)) {
         finish(last);
         return;
       }
@@ -446,12 +448,20 @@ async function awaitLlmJob(
  * POST мэтч/письмо/импорт: 200 готовый результат или 202 job → SSE (fallback poll).
  * `signal` отменяет и запрос, и ожидание джобы (закрыли модалку, ушли со страницы).
  */
+interface InteractiveLlmOptions<T> {
+  /** 202: id поставленной задачи — для её отмены (`api.cancelLlmJob`). */
+  onAccepted?: (jobId: string) => void;
+  /** Итог отменённой задачи; без него отмена — `ApiError` с кодом CANCELLED. */
+  pickCancelled?: (job: LlmJob) => T | null | undefined;
+}
+
 async function postInteractiveLlm<T>(
   path: string,
   init: RequestInit,
   pick: (job: LlmJob) => T | null | undefined,
   onUpdate?: LlmJobListener,
   signal?: AbortSignal,
+  options: InteractiveLlmOptions<T> = {},
 ): Promise<T> {
   const res = await authFetch(path, {
     ...init,
@@ -461,7 +471,13 @@ async function postInteractiveLlm<T>(
   if (res.status === 200) return (await res.json()) as T;
   if (res.status === 202) {
     const accepted = (await res.json()) as LlmJobAccepted;
+    options.onAccepted?.(accepted.job_id);
     const job = await awaitLlmJob(accepted.job_id, onUpdate, signal);
+    if (job.status === "cancelled") {
+      const partial = options.pickCancelled?.(job);
+      if (partial != null) return partial;
+      throw new ApiError("LLM: задача отменена", { status: 499, code: "CANCELLED" });
+    }
     if (job.status === "error") {
       throw new ApiError(job.error_message || "LLM: ошибка задачи", {
         status: 500,
@@ -668,13 +684,16 @@ export const api = {
 
   /** Ручной импорт: тексты вакансий → rules + LLM → запись в БД. */
   /** Без LLM — сразу 200; с LLM — 202 и джоба, `onProgress` получает частичный итог. */
-  importVacancies: (
+  /** Отменённый импорт резолвится итогом по уже обработанным текстам (`cancelled: true`). */
+  importVacancies: async (
     texts: string[],
     sourceUrl?: string,
     onProgress?: (partial: VacancyImportResponse) => void,
     signal?: AbortSignal,
-  ) =>
-    postInteractiveLlm<VacancyImportResponse>(
+    onAccepted?: (jobId: string) => void,
+  ): Promise<VacancyImportOutcome> => {
+    let cancelled = false;
+    const result = await postInteractiveLlm<VacancyImportResponse>(
       "/vacancies/import",
       { method: "POST", body: JSON.stringify({ texts, source_url: sourceUrl || null }) },
       (job) => job.import_result,
@@ -682,7 +701,19 @@ export const api = {
         if (job.import_result) onProgress?.(job.import_result);
       },
       signal,
-    ),
+      {
+        onAccepted,
+        pickCancelled: (job) => {
+          cancelled = true;
+          return job.import_result ?? { items: [], created: 0, existing: 0, rejected: 0, ai_enabled: true, total: texts.length };
+        },
+      },
+    );
+    return { result, cancelled };
+  },
+
+  /** Отмена своей LLM-задачи; ответ — её текущее состояние (и у уже завершённой). */
+  cancelLlmJob: (jobId: string) => request<LlmJob>(`/llm-jobs/${jobId}/cancel`, { method: "POST" }),
 
   hhStatus: () => request<HhStatus>("/hh/status"),
 
@@ -697,7 +728,11 @@ export const api = {
 
   hhSyncJob: (jobId: string) => request<HhSyncJob>(`/hh/sync-jobs/${jobId}`),
 
-  /** SSE со статусом sync до completed/failed; при обрыве — poll. Возвращает отписку. */
+  /** Отмена sync (admin); ответ — текущее состояние sync. */
+  cancelHhSyncJob: (jobId: string) =>
+    request<HhSyncJob>(`/hh/sync-jobs/${jobId}/cancel`, { method: "POST" }),
+
+  /** SSE со статусом sync до completed/failed/cancelled; при обрыве — poll. Возвращает отписку. */
   subscribeHhSyncJob(
     jobId: string,
     onUpdate: (job: HhSyncJob) => void,

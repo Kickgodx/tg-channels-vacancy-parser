@@ -12,6 +12,7 @@ from backend.db.models import LlmJobRow
 from backend.settings import get_settings
 
 _ACTIVE_LLM_STATUSES = ("queued", "running")
+TERMINAL_LLM_STATUSES = frozenset({"done", "error", "cancelled"})
 
 # Пространство ключей pg_advisory_xact_lock(int, int) постановки LLM-джоб; второй ключ — user_id.
 _ENQUEUE_LOCK_NS = 874_291_003
@@ -156,13 +157,24 @@ def attempts_exhausted_message(attempts: int) -> str:
 
 
 def _reclaim_running_llm_job(session: Session, job_id: uuid.UUID, ts: datetime, *lease_conditions) -> str | None:
-    """Зависший ``running`` → ``error`` (лимит попыток исчерпан) либо ``queued``.
+    """Зависший ``running`` → ``cancelled`` (отмена запрошена), ``error`` (лимит попыток
+    исчерпан) либо ``queued``.
 
-    Два условных UPDATE вместо чтения строки: исход определяется атомарно.
+    Условные UPDATE вместо чтения строки: исход определяется атомарно.
     """
     max_attempts = max(1, get_settings().llm_job_max_attempts)
     stuck = (LlmJobRow.id == job_id, LlmJobRow.status == "running", *lease_conditions)
     released = {"rq_job_id": None, "lease_owner": None, "lease_until": None}
+
+    cancelled = session.execute(
+        update(LlmJobRow)
+        .where(*stuck, LlmJobRow.cancel_requested.is_(True))
+        .values(status="cancelled", finished_at=ts, **released)
+        .execution_options(synchronize_session=False)
+    )
+    if (cancelled.rowcount or 0) == 1:
+        session.expire_all()
+        return "cancelled"
 
     exhausted = session.execute(
         update(LlmJobRow)
@@ -195,9 +207,10 @@ def reclaim_expired_llm_job(
     *,
     now: datetime | None = None,
 ) -> str | None:
-    """Атомарно running(expired lease) → queued|error. None — перехватить не удалось.
+    """Атомарно running(expired lease) → queued|error|cancelled. None — перехватить не удалось.
 
-    ``error`` — исчерпан лимит попыток (``LLM_JOB_MAX_ATTEMPTS``).
+    ``error`` — исчерпан лимит попыток (``LLM_JOB_MAX_ATTEMPTS``), ``cancelled`` — отмена
+    запрошена до того, как воркер пропал.
     """
     ts = now or datetime.now(UTC)
     return _reclaim_running_llm_job(
@@ -236,6 +249,46 @@ def find_active_llm_job(
     )
 
 
+def request_llm_job_cancel(session: Session, job_id: uuid.UUID) -> LlmJobRow | None:
+    """Запросить отмену: ``queued`` → сразу ``cancelled``, ``running`` → флаг для воркера.
+
+    Завершённая задача не меняется. Перевод из ``queued`` — условным UPDATE: если
+    воркер успел взять задачу, остаётся флаг, и задачу останавливает он. None — нет задачи.
+    """
+    row = session.get(LlmJobRow, job_id)
+    if row is None:
+        return None
+    if row.status in TERMINAL_LLM_STATUSES:
+        return row
+    now = datetime.now(UTC)
+    cancelled = session.execute(
+        update(LlmJobRow)
+        .where(LlmJobRow.id == job_id, LlmJobRow.status == "queued")
+        .values(
+            status="cancelled",
+            cancel_requested=True,
+            finished_at=now,
+            lease_owner=None,
+            lease_until=None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if (cancelled.rowcount or 0) != 1:
+        session.execute(
+            update(LlmJobRow)
+            .where(LlmJobRow.id == job_id, LlmJobRow.status == "running")
+            .values(cancel_requested=True)
+            .execution_options(synchronize_session=False)
+        )
+    session.flush()
+    session.expire_all()
+    return session.get(LlmJobRow, job_id)
+
+
+def is_llm_job_cancel_requested(session: Session, job_id: uuid.UUID) -> bool:
+    return bool(session.scalar(select(LlmJobRow.cancel_requested).where(LlmJobRow.id == job_id)))
+
+
 def count_active_llm_jobs(session: Session, *, user_id: int) -> int:
     return int(
         session.scalar(
@@ -260,7 +313,7 @@ def set_llm_job_status(
 ) -> LlmJobRow | None:
     """Сменить статус. С ``lease_owner`` на terminal — только если lease ещё наш."""
     now = datetime.now(UTC)
-    if lease_owner and status in ("done", "error"):
+    if lease_owner and status in TERMINAL_LLM_STATUSES:
         owner = lease_owner.strip()[:64]
         values: dict = {
             "status": status,
@@ -294,7 +347,7 @@ def set_llm_job_status(
         row.lease_until = _lease_deadline(now)
         if row.lease_owner is None:
             row.lease_owner = "worker"
-    if status in ("done", "error"):
+    if status in TERMINAL_LLM_STATUSES:
         row.finished_at = now
         row.lease_owner = None
         row.lease_until = None
@@ -352,7 +405,7 @@ def count_llm_jobs_by_status(session: Session) -> dict[str, int]:
 
 
 def purge_finished_llm_jobs(session: Session, *, older_than: datetime, limit: int = 1000) -> int:
-    """Удалить до ``limit`` завершённых (done/error) джоб, закончившихся раньше ``older_than``.
+    """Удалить до ``limit`` завершённых (done/error/cancelled) джоб, закончившихся раньше ``older_than``.
 
     Результат джобы хранится отдельно (``vacancy_matches`` / ``cover_letters``), строка
     джобы после завершения нужна только SSE/опросу статуса.
@@ -360,7 +413,7 @@ def purge_finished_llm_jobs(session: Session, *, older_than: datetime, limit: in
     finished = (
         select(LlmJobRow.id)
         .where(
-            LlmJobRow.status.in_(("done", "error")),
+            LlmJobRow.status.in_(TERMINAL_LLM_STATUSES),
             func.coalesce(LlmJobRow.finished_at, LlmJobRow.created_at) < older_than,
         )
         .limit(limit)

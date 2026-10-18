@@ -113,7 +113,15 @@ def run_hh_sync(
     settings: Settings,
     search_window: ResolvedHhSearchWindow | None = None,
     progress_callback: HhSyncProgressCallback | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> HhSyncResult:
+    """Поиск → детали групп → purge listings.
+
+    ``should_stop`` проверяется перед каждой следующей страницей поиска и группой
+    деталей: True → sync завершается досрочно — уже полученные вакансии дописываются,
+    purge пропускается, возвращается частичный итог (отмену фиксирует вызывающий).
+    """
+    stop_requested = should_stop or (lambda: False)
     thread_locked = _SYNC_LOCK.acquire(blocking=False)
     if not thread_locked:
         raise HhSyncConflict("HH sync already in progress")
@@ -147,7 +155,7 @@ def run_hh_sync(
                     span.set_attribute("hh.date_from", resolved.date_from)
                 if resolved.date_to:
                     span.set_attribute("hh.date_to", resolved.date_to)
-                shorts, pages = _collect_shorts(client, hh, resolved)
+                shorts, pages, stopped = _collect_shorts(client, hh, resolved, should_stop=stop_requested)
                 result.pages = pages
                 result.searched = len(shorts)
                 span.set_attribute("hh.searched", result.searched)
@@ -194,6 +202,9 @@ def run_hh_sync(
                     buffer.clear()
 
                 for done, group in enumerate(groups, 1):
+                    if stopped or stop_requested():
+                        stopped = True
+                        break
                     _process_group(
                         client,
                         session,
@@ -209,13 +220,18 @@ def run_hh_sync(
                     flush_buffer()
                     report("details", done, len(groups))
 
+                # И при отмене: детали в буфере уже оплачены запросами к HH.
                 flush_buffer(force=True)
-                report("purge", len(groups), len(groups))
+                if not stopped:
+                    report("purge", len(groups), len(groups))
                 groups.clear()
                 by_id.clear()
-
-                result.listings_purged = hh_repo.purge_expired_listings(session, ttl_days=hh.listing_ttl_days)
-                session.commit()
+                if stopped:
+                    outcome = "cancelled"
+                    _LOG.info("HH sync: остановлен по запросу отмены, purge listings пропущен")
+                else:
+                    result.listings_purged = hh_repo.purge_expired_listings(session, ttl_days=hh.listing_ttl_days)
+                    session.commit()
                 span.set_attribute("hh.details_fetched", result.details_fetched)
                 span.set_attribute("hh.details_skipped", result.details_skipped)
                 span.set_attribute("hh.flush_batches", result.flush_batches)
@@ -271,7 +287,10 @@ def _collect_shorts(
     client: HHClient,
     hh: HhConfig,
     search_window: ResolvedHhSearchWindow | None = None,
-) -> tuple[list[VacancyShort], int]:
+    *,
+    should_stop: Callable[[], bool] | None = None,
+) -> tuple[list[VacancyShort], int, bool]:
+    """Страницы поиска; третий элемент — остановлено ли по ``should_stop`` (следующая страница не запрошена)."""
     resolved = search_window or ResolvedHhSearchWindow(window="all")
     params = VacancySearchParams(
         text=hh.search.text,
@@ -283,11 +302,16 @@ def _collect_shorts(
     )
     shorts: list[VacancyShort] = []
     pages = 0
+    if should_stop is not None and should_stop():
+        return shorts, pages, True
     with _TRACER.start_as_current_span("hh.search"):
         for page in client.iter_vacancy_pages(params):
             pages += 1
             shorts.extend(page.items)
-    return shorts, pages
+            # Генератор запрашивает следующую страницу только на следующем шаге цикла.
+            if should_stop is not None and should_stop():
+                return shorts, pages, True
+    return shorts, pages, False
 
 
 def _stabilize_groups(

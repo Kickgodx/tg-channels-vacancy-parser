@@ -70,7 +70,7 @@ router = APIRouter(
 # EventSource не шлёт заголовки: API key и JWT — query-параметрами.
 sse_router = APIRouter(prefix="/hh", tags=["hh"])
 
-HhSyncJobStatus = Literal["queued", "running", "completed", "failed"]
+HhSyncJobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
 class HhSyncRequest(BaseModel):
@@ -132,6 +132,8 @@ class HhSyncJobOut(BaseModel):
     result: HhSyncResponse | None = None
     error_message: str | None = None
     attempts: int = 0
+    # Запрошена отмена; у running — воркер остановит sync перед следующей страницей / группой.
+    cancel_requested: bool = False
     created_at: datetime | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -162,6 +164,7 @@ def _job_to_out(row: HhSyncJobRow) -> HhSyncJobOut:
         result=HhSyncResponse.model_validate(row.result) if row.result else None,
         error_message=row.error_message,
         attempts=int(row.attempts or 0),
+        cancel_requested=bool(row.cancel_requested),
         created_at=row.created_at,
         started_at=row.started_at,
         finished_at=row.finished_at,
@@ -265,6 +268,19 @@ def get_hh_sync_job(
     if row is None:
         raise HTTPException(status_code=404, detail="HH sync job not found")
     return _job_to_out(row)
+
+
+@router.post("/sync-jobs/{job_id}/cancel", response_model=HhSyncJobOut)
+def cancel_hh_sync_job(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _admin: UserRow = Depends(require_admin),
+) -> HhSyncJobOut:
+    """Отменить sync; ответ — его текущее состояние (и для уже завершённого)."""
+    if not hh_sync_job_service.cancel_hh_sync_job(job_id):
+        raise HTTPException(status_code=404, detail="HH sync job not found")
+    db.expire_all()
+    return _job_to_out(hh_jobs.get_hh_sync_job(db, job_id))
 
 
 # --- SSE ----------------------------------------------------------------------

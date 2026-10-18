@@ -403,6 +403,7 @@ uvicorn backend.main:app --reload --port 8000
 Самовосстановление джоб (parse, LLM и HH sync устроены одинаково):
 
 - **Зависший `running`** (lease истёк — воркер упал или завис) recover-цикл возвращает в `queued` и запускает заново. В режиме `rq` цикл живёт в воркерах, в `inprocess` — в самом API: при старте он сразу поднимает `queued`, оставшиеся от прошлого процесса, а оборванный рестартом `running` — после истечения lease (до ~3 минут при настройках по умолчанию).
+- **Отмена.** Прогон, LLM-задача (мэтч, письмо, импорт) и HH sync отменяются флагом `cancel_requested` в БД: задача в очереди сразу получает `cancelled`, выполняемую воркер останавливает в ближайшей точке проверки — импорт перед следующим текстом, HH sync перед следующей страницей поиска или группой деталей (уже полученные вакансии сохраняются, purge listings пропускается), мэтч и письмо после ответа модели (ответ отбрасывается, прежний результат остаётся; если результат уже сохранён — задача `done`). Зависший `running` с запрошенной отменой recover закрывает `cancelled`, а не ставит на повтор. Квота LLM за уже поставленные мэтч/письмо не возвращается.
 - **Лимит попыток.** Каждый claim увеличивает `attempts`; прогон, который воркер не довёл до конца `PARSE_JOB_MAX_ATTEMPTS` раз (по умолчанию 3; для LLM-джоб — `LLM_JOB_MAX_ATTEMPTS`, 2; для HH sync — `HH_SYNC_JOB_MAX_ATTEMPTS`, 2), завершается `failed` / `error` с пояснением, а не уходит на очередной круг.
 - **Отказ LLM при парсинге.** Транзиентные сбои (5xx, таймаут) повторяются с backoff; после `ai.circuit_breaker_errors` (5) постов подряд с ошибкой срабатывает circuit breaker — LLM отключается до конца прогона, как при исчерпанной квоте, и остальные посты не ждут повторов. 429 определяется по HTTP-статусу ответа.
 - **Неполный прогон — `partial`.** Если в `ai.mode: primary` LLM отключился (лимит или circuit breaker), исчерпан потолок вызовов `ai.max_posts_per_run` или доля ошибок LLM выше `ai.max_error_ratio` (10%), часть постов не разобрана. Такой прогон получает статус `partial` с причиной в `error_message`; уже разобранные вакансии сохранены, чекпоинты остаются только у каналов, разобранных до первого потерянного поста, неразобранные посты не кэшируются — повторный прогон обработает их.
@@ -455,6 +456,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `POST` | `/hh/sync` | HH sync в фоне (admin): 202 `{job_id}`; 409, если sync уже идёт. Поиск → dedup → detail только для новых → БД |
 | `GET` | `/hh/sync-jobs` \| `/hh/sync-jobs/{id}` | Последние sync / один sync (admin): статус, прогресс, итог (у `failed` — частичный) |
 | `GET` | `/hh/sync-jobs/{id}/events` | SSE статуса HH sync (admin; `?ticket=` или Bearer) |
+| `POST` | `/hh/sync-jobs/{id}/cancel` | Отмена HH sync (admin): `queued` → `cancelled` сразу, `running` — флаг; ответ — текущий sync |
 | `GET` | `/vacancies/metrics` | Агрегаты для графиков по текущим фильтрам |
 | `GET` | `/vacancies/export.xlsx` | Excel всех вакансий в БД (те же фильтры, что у списка) |
 | `GET` | `/analytics/salaries` \| `/sources` \| `/companies` | Зарплатные квантили, качество каналов, топ компаний |
@@ -464,6 +466,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Письмо: свежее того же тона → 200; иначе 202 `{job_id}` (`force`, `tone`/`extra_notes`) |
 | `GET` | `/llm-jobs/{job_id}` | Статус LLM-задачи; при `done` — payload match/letter |
 | `GET` | `/llm-jobs/{job_id}/events` | SSE статусов (`?ticket=` или Bearer); poll остаётся fallback |
+| `POST` | `/llm-jobs/{job_id}/cancel` | Отмена своей LLM-задачи: `queued` → `cancelled` сразу, `running` — флаг; ответ — текущая задача |
 | `GET` | `/fx/rates`, `POST` `/fx/refresh` \| `/fx/recalculate-rub` | Курсы ЦБ и пересчёт зарплат в ₽ (`POST` — admin) |
 | `GET` | `/ai-cache/stats` | Число записей в кэше LLM |
 | `POST` | `/ai-cache/clear` | Полная очистка кэша LLM (admin) |
@@ -509,12 +512,18 @@ Query-параметры списка, метрик, аналитики и эк�
 правилами. В `ai.mode: primary` текст сверх `ai.max_posts_per_run` получает
 статус `error` с причиной и не сохраняется.
 
+Пока страница «Импорт» ждёт фоновую задачу, рядом с кнопкой разбора есть
+«Отменить» (`POST /llm-jobs/{id}/cancel`): импорт останавливается перед следующим
+текстом, уже разобранные тексты остаются в базе, страница показывает итог по ним
+и пометку об отмене; текст в поле не очищается.
+
 Вакансии с HH (`source_channel = "hh"`) появляются после admin-sync
 (`/hh` или `POST /hh/sync`). Sync — фоновая durable-джоба (`hh_sync_jobs`,
 lease и recover как у прогонов; в Docker — `hh-worker`, без Redis —
 `HH_SYNC_JOB_BACKEND=inprocess`): до ~2000 detail-запросов при 3 rps идут
 10+ минут, внутри HTTP-запроса их обрывал бы прокси. Страница `/hh` показывает
-ход и итог последнего sync и после перезагрузки. Поля берутся из API без LLM, дедуп мультигорода
+ход и итог последнего sync и после перезагрузки; идущий sync можно отменить
+кнопкой «Отменить» (`POST /hh/sync-jobs/{id}/cancel`) — итог до отмены сохраняется. Поля берутся из API без LLM, дедуп мультигорода
 как в MVP hhparser, TTL вакансий — общий `retention.vacancy_ttl_days`
 (soft-archive: строки остаются в БД для исторических метрик).
 Грейд HH мапится из `experience.id`: `noExperience`→`intern`,
@@ -531,21 +540,21 @@ lease и recover как у прогонов; в Docker — `hh-worker`, без R
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…030`, номера 005 нет; head —
-`030_llm_results_requested_model`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…031`, номера 005 нет; head —
+`031_jobs_cancel_requested`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
 | `parse_runs` | Журнал прогонов: статус, метрики, снимок конфигурации |
 | `vacancies` | Уникальные вакансии (`id` = content-hash или `sha256(hh:{id})` для HH), `archived_at` — TTL |
 | `hh_listings` | Кэш короткой выдачи HH + `detail_fetched_at` (anti-DDOS detail) |
-| `hh_sync_jobs` | Фоновые HH sync: статус, lease, прогресс, итог |
+| `hh_sync_jobs` | Фоновые HH sync: статус, lease, прогресс, итог, `cancel_requested` |
 | `exchange_rates` | Курсы ЦБ по датам |
 | `ai_extraction_cache` | Кэш ответов LLM при парсинге |
 | `saved_filters` | Пресеты фильтров (`user_id`) |
 | `resumes` | Резюме пользователя (`user_id`) |
 | `vacancy_matches` | Оценки соответствия, PK `(resume_id, vacancy_id)` — он же кэш матчинга; `requested_model` + `prompt_version` — для `stale` |
-| `llm_jobs` | Фоновые LLM-задачи: мэтчинг, письма, ручной импорт (`queued`/`running`/`done`/`error`) |
+| `llm_jobs` | Фоновые LLM-задачи: мэтчинг, письма, ручной импорт (`queued`/`running`/`done`/`error`/`cancelled`) |
 | `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации; `requested_model` + `prompt_version` — для `stale` |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 | `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
@@ -586,7 +595,7 @@ tg_jobs_parser/
     workers/               — parse/llm/hh_worker (RQ, общий runner), *_tasks, recover*,
                              liveness (heartbeat + watchdog), healthcheck
     queue/                 — RQ Redis connection (очереди parse, llm, hh)
-  alembic/                 — миграции SQL (001…030)
+  alembic/                 — миграции SQL (001…031)
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes

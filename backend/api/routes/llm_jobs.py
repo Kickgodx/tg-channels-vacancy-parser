@@ -27,11 +27,12 @@ from backend.api.sse import (
     sse_event,
 )
 from backend.db import repository as repo
+from backend.db.llm_job_repository import TERMINAL_LLM_STATUSES
 from backend.db.models import UserRow
 from backend.db.session import session_scope
 from backend.observability import LLM_JOB_SSE_CONNECTIONS
 from backend.schemas import LlmJobOut
-from backend.services import import_service
+from backend.services import import_service, llm_job_service
 from backend.services.llm_job_events import channel_for
 from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_IMPORT, KIND_MATCH
 from backend.services.llm_result_freshness import current_ai_config
@@ -71,6 +72,7 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
         match=match_out,
         cover_letter=letter_out,
         import_result=import_out,
+        cancel_requested=bool(row.cancel_requested),
         created_at=row.created_at,
         started_at=row.started_at,
         finished_at=row.finished_at,
@@ -89,7 +91,20 @@ def get_llm_job(
     return _job_to_out(db, row)
 
 
-_TERMINAL_JOB_STATUSES = frozenset({"done", "error"})
+@router.post("/{job_id}/cancel", response_model=LlmJobOut)
+def cancel_llm_job(
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: UserRow = Depends(get_current_user),
+) -> LlmJobOut:
+    """Отменить свою задачу; ответ — её текущее состояние (и для уже завершённой)."""
+    if not llm_job_service.cancel_llm_job(job_id, user_id=user.id):
+        raise HTTPException(status_code=404, detail="Job not found")
+    db.expire_all()
+    return _job_to_out(db, repo.get_llm_job(db, job_id))
+
+
+_TERMINAL_JOB_STATUSES = TERMINAL_LLM_STATUSES
 
 
 def _load_job_out(job_id: uuid.UUID, user_id: int) -> LlmJobOut | None:

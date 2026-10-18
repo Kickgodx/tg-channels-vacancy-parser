@@ -55,6 +55,8 @@ export default function ImportPage() {
   const [selected, setSelected] = useState<{ v: Vacancy; idx: number } | null>(null);
   // Частичный итог фоновой джобы (импорт с LLM), пока она идёт.
   const [progress, setProgress] = useState<VacancyImportResponse | null>(null);
+  // id фоновой задачи импорта — для кнопки «Отменить», пока ждём итог.
+  const [jobId, setJobId] = useState<string | null>(null);
 
   const recentQ = useQuery({
     queryKey: ["imported-vacancies"],
@@ -67,24 +69,34 @@ export default function ImportPage() {
       }),
   });
 
+  const cancelM = useMutation({
+    mutationFn: (id: string) => api.cancelLlmJob(id),
+  });
+
   const importM = useMutation({
     mutationFn: () => {
       setProgress(null);
+      setJobId(null);
+      cancelM.reset();
       return api.importVacancies(
         splitTexts(text),
         sourceUrl.trim() || undefined,
         setProgress,
         unmountSignal(),
+        setJobId,
       );
     },
-    onSuccess: () => {
-      setText("");
+    onSettled: () => setJobId(null),
+    onSuccess: (outcome) => {
+      // Отменённый импорт: текст оставляем — необработанные тексты можно отправить снова.
+      if (!outcome.cancelled) setText("");
       void queryClient.invalidateQueries({ queryKey: ["imported-vacancies"] });
       void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
     },
   });
 
-  const result = importM.data ?? (importM.isPending ? progress : null);
+  const done = importM.data?.result ?? null;
+  const result = done ?? (importM.isPending ? progress : null);
   const items: VacancyImportItem[] = result?.items ?? [];
   const canSubmit = splitTexts(text).length > 0 && !importM.isPending;
   const pendingLabel = progress
@@ -122,7 +134,18 @@ export default function ImportPage() {
           <button type="button" disabled={!canSubmit} onClick={() => importM.mutate()}>
             {importM.isPending ? pendingLabel : "Разобрать и сохранить"}
           </button>
+          {importM.isPending && jobId && (
+            <button
+              type="button"
+              className="secondary"
+              disabled={cancelM.isPending || cancelM.isSuccess}
+              onClick={() => cancelM.mutate(jobId)}
+            >
+              {cancelM.isPending || cancelM.isSuccess ? "Отмена…" : "Отменить"}
+            </button>
+          )}
         </div>
+        {cancelM.isError && <p className="error">{(cancelM.error as Error).message}</p>}
         {importM.isPending && progress && (
           <p className="caption">
             LLM-разбор идёт в фоне: со страницы можно уйти — вакансии всё равно сохранятся.
@@ -130,11 +153,16 @@ export default function ImportPage() {
         )}
         {importM.isError && <p className="error">{(importM.error as Error).message}</p>}
         {result?.warning && <p className="warning">{result.warning}</p>}
-        {importM.data && (
+        {importM.data?.cancelled && done && (
+          <p className="warning">
+            Импорт отменён: обработано {done.items.length} из {done.total}, остальные тексты не
+            разобраны.
+          </p>
+        )}
+        {done && (
           <p className="caption">
-            Итого: сохранено {importM.data.created}, уже были {importM.data.existing},
-            отклонено {importM.data.rejected}
-            {importM.data.ai_enabled ? "" : " (LLM выключен — только rules-разбор)"}
+            Итого: сохранено {done.created}, уже были {done.existing}, отклонено {done.rejected}
+            {done.ai_enabled ? "" : " (LLM выключен — только rules-разбор)"}
           </p>
         )}
         {items.length > 0 && (

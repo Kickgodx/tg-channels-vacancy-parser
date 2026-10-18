@@ -69,13 +69,13 @@ def _auth(token: str) -> dict:
 
 
 def _wait_job(client: TestClient, token: str, job_id: str, timeout: float = 10.0) -> dict:
-    """Sync идёт фоновым потоком (inprocess): ждём completed/failed."""
+    """Sync идёт фоновым потоком (inprocess): ждём completed/failed/cancelled."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         r = client.get(f"/api/v1/hh/sync-jobs/{job_id}", headers=_auth(token))
         assert r.status_code == 200, r.text
         body = r.json()
-        if body["status"] in ("completed", "failed"):
+        if body["status"] in ("completed", "failed", "cancelled"):
             return body
         time.sleep(0.05)
     raise AssertionError(f"HH sync {job_id} не завершился за {timeout} с")
@@ -335,3 +335,146 @@ def test_hh_sync_job_events_stream_status_then_done(client: TestClient, monkeypa
     assert "event: status" in text
     assert '"status":"completed"' in text
     assert text.rstrip().endswith("data: {}")  # завершающий event: done
+
+
+def _queued_sync_job() -> str:
+    from backend.db import hh_sync_job_repository as hh_jobs
+    from backend.db.session import session_scope
+
+    with session_scope() as session:
+        return str(hh_jobs.create_hh_sync_job(session, params={"window": "all"}, requested_by=None).id)
+
+
+def test_hh_sync_cancel_api(client: TestClient, monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "")
+    admin = _register(client, "admin11@example.com")
+    user = _register(client, "user11@example.com")
+    job_id = _queued_sync_job()
+
+    assert client.post(f"/api/v1/hh/sync-jobs/{job_id}/cancel", headers=_auth(user)).status_code == 403
+    r = client.post(f"/api/v1/hh/sync-jobs/{job_id}/cancel", headers=_auth(admin))
+    assert r.status_code == 200, r.text
+    assert (r.json()["status"], r.json()["cancel_requested"]) == ("cancelled", True)
+
+    ticket = client.post("/api/v1/auth/sse-ticket", headers=_auth(admin)).json()["ticket"]
+    with client.stream("GET", f"/api/v1/hh/sync-jobs/{job_id}/events?ticket={ticket}") as resp:
+        text = "".join(resp.iter_text())
+    assert '"status":"cancelled"' in text
+    assert text.rstrip().endswith("data: {}")
+
+
+def test_hh_sync_cancel_of_completed_job_returns_current_state(client: TestClient, monkeypatch):
+    _configure_hh(monkeypatch, _EmptyClient)
+    admin = _register(client, "admin12@example.com")
+    job = _sync(client, admin)
+
+    r = client.post(f"/api/v1/hh/sync-jobs/{job['id']}/cancel", headers=_auth(admin))
+
+    assert r.status_code == 200
+    assert (r.json()["status"], r.json()["cancel_requested"]) == ("completed", False)
+    assert (
+        client.post(
+            "/api/v1/hh/sync-jobs/00000000-0000-0000-0000-000000000000/cancel", headers=_auth(admin)
+        ).status_code
+        == 404
+    )
+
+
+def _short(hh_id: str, name: str, employer: str):
+    from tg_jobs_parser.hh.models import VacancyShort
+
+    return VacancyShort.model_validate(
+        {
+            "id": hh_id,
+            "name": name,
+            "alternate_url": f"https://hh.ru/vacancy/{hh_id}",
+            "area": {"name": "Москва"},
+            "employer": {"id": hh_id, "name": employer},
+            "snippet": {"requirement": "Python", "responsibility": "tests"},
+        }
+    )
+
+
+def _detail(short):
+    from tg_jobs_parser.hh.models import VacancyDetail
+
+    return VacancyDetail.model_validate(
+        {
+            **short.model_dump(mode="json"),
+            "description": f"<p>{short.name} — pytest</p>",
+            "published_at": "2026-10-01T10:00:00+0300",
+        }
+    )
+
+
+def _request_cancel_of_active_sync() -> None:
+    from backend.db import hh_sync_job_repository as hh_jobs
+    from backend.db.session import session_scope
+
+    with session_scope() as session:
+        active = next(j for j in hh_jobs.list_hh_sync_jobs(session, limit=5) if j.status == "running")
+        hh_jobs.request_hh_sync_job_cancel(session, active.id)
+
+
+def _hh_token(monkeypatch):
+    from backend.settings import get_settings
+    from backend.workers import hh_sync_tasks
+
+    monkeypatch.setenv("HH_API_TOKEN", "test-token")
+    monkeypatch.setenv("HH_CONTACT_EMAIL", "dev@example.com")
+    monkeypatch.setenv("REDIS_URL", "")
+    get_settings.cache_clear()
+    # Флаг отмены — на каждой проверке, без секундного троттлинга.
+    monkeypatch.setattr(hh_sync_tasks, "_CANCEL_CHECK_INTERVAL_S", 0.0)
+
+
+def test_hh_sync_cancel_during_details_keeps_fetched(client: TestClient, monkeypatch):
+    _hh_token(monkeypatch)
+    shorts = [_short("201", "AQA Python", "ACME"), _short("202", "Backend Go", "Globex")]
+    page = MagicMock(found=2, items=shorts)
+    fetched: list[str] = []
+
+    class FakeClient(_EmptyClient):
+        def iter_vacancy_pages(self, *a, **k):
+            yield page
+
+        def get_vacancy(self, vacancy_id: str):
+            fetched.append(vacancy_id)
+            _request_cancel_of_active_sync()  # отмена пришла, пока грузилась первая группа
+            return _detail(next(s for s in shorts if s.id == vacancy_id))
+
+    monkeypatch.setattr("backend.services.hh_sync_service.HHClient", FakeClient)
+    admin = _register(client, "admin13@example.com")
+
+    job = _sync(client, admin)
+
+    assert (job["status"], job["cancel_requested"]) == ("cancelled", True)
+    assert len(fetched) == 1  # детали второй группы не запрашивались
+    assert job["result"]["details_fetched"] == 1
+    assert job["result"]["vacancies_inserted"] == 1
+    assert job["result"]["listings_purged"] == 0
+
+
+def test_hh_sync_cancel_during_search_stops_paging(client: TestClient, monkeypatch):
+    _hh_token(monkeypatch)
+    pages_requested: list[int] = []
+
+    class FakeClient(_EmptyClient):
+        def iter_vacancy_pages(self, *a, **k):
+            for n in (1, 2, 3):
+                pages_requested.append(n)
+                if n == 1:
+                    _request_cancel_of_active_sync()
+                yield MagicMock(found=3, items=[_short(f"30{n}", f"AQA {n}", f"Co{n}")])
+
+        def get_vacancy(self, vacancy_id: str):
+            raise AssertionError("после отмены детали не запрашиваются")
+
+    monkeypatch.setattr("backend.services.hh_sync_service.HHClient", FakeClient)
+    admin = _register(client, "admin14@example.com")
+
+    job = _sync(client, admin)
+
+    assert job["status"] == "cancelled"
+    assert pages_requested == [1]
+    assert (job["result"]["pages"], job["result"]["details_fetched"]) == (1, 0)

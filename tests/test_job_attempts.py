@@ -178,6 +178,22 @@ def test_recover_does_not_requeue_poisoned_llm_job():
         assert lj.get_llm_job(session, jid).status == "error"
 
 
+def test_recover_cancels_stuck_llm_job_with_cancel_requested():
+    """Отмена запрошена, воркер пропал: recover закрывает задачу cancelled, а не ставит на повтор."""
+    jid = _llm_job()
+    with session_scope() as session:
+        assert lj.claim_llm_job(session, jid, lease_owner="dead-worker") is not None
+        lj.request_llm_job_cancel(session, jid)
+    with session_scope() as session:
+        session.get(lj.LlmJobRow, jid).lease_until = datetime.now(UTC) - timedelta(minutes=1)
+
+    assert recover_stuck_llm_jobs() == 0
+    with session_scope() as session:
+        row = lj.get_llm_job(session, jid)
+        assert (row.status, row.lease_owner) == ("cancelled", None)
+        assert row.finished_at is not None
+
+
 def _wait_for_status(run_id: uuid.UUID, expected: str, timeout: float = 10.0) -> str:
     deadline = time.monotonic() + timeout
     status = ""

@@ -386,3 +386,45 @@ def test_import_text_over_max_posts_per_run_in_primary_is_error(api_client, monk
     assert "ai.max_posts_per_run" in second["message"]
     with session_scope() as session:
         assert session.scalar(select(func.count()).select_from(VacancyRow)) == 1
+
+
+def test_cancelled_import_stops_between_texts(api_client, monkeypatch, fake_ai):
+    """Отмена после второго из пяти текстов: два разобраны и сохранены, остальные не тратят квоту."""
+    from datetime import UTC, datetime
+
+    from backend.db import llm_job_repository as lj
+    from backend.db.llm_usage_repository import llm_calls_today
+    from backend.db.models import UserRow, VacancyRow
+    from backend.db.session import session_scope
+    from backend.settings import get_settings
+    from backend.workers.llm_tasks import run_llm_job
+
+    monkeypatch.setenv("LLM_USER_DAILY_CALLS", "100")
+    get_settings.cache_clear()
+    texts = [f"{VACANCY_TEXT}\nВариант {i}." for i in range(5)]
+    with session_scope() as session:
+        user = UserRow(email="w@example.com", password_hash="x")
+        session.add(user)
+        session.flush()
+        row = lj.create_llm_job(session, user_id=user.id, kind="import", params=import_service.job_params(texts, None))
+        job_id, user_id = row.id, user.id
+
+    real_enrich = _FakeAI.enrich
+
+    def enrich_then_cancel(self, vacancy, *, cancel=None):
+        out = real_enrich(self, vacancy, cancel=cancel)
+        if len(_FakeAI.calls) == 2:
+            with session_scope() as session:
+                lj.request_llm_job_cancel(session, job_id)
+        return out
+
+    monkeypatch.setattr(_FakeAI, "enrich", enrich_then_cancel)
+    run_llm_job(str(job_id))
+
+    job = _job_row(job_id)
+    assert (job.status, job.cancel_requested) == ("cancelled", True)
+    assert [it["status"] for it in job.result["items"]] == ["created", "created"]
+    assert len(fake_ai) == 2
+    with session_scope() as session:
+        assert all(session.get(VacancyRow, it["vacancy_id"]) is not None for it in job.result["items"])
+        assert llm_calls_today(session, user_id=user_id, day=datetime.now(UTC).date()) == 2

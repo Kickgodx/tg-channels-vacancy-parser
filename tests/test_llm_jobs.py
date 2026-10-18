@@ -47,7 +47,7 @@ def test_llm_job_reuses_active_and_enforces_per_user_limit(api_client, monkeypat
     gate = threading.Event()
     release = threading.Event()
 
-    def _slow(*, resume_id, resume_text, vacancy_id, vacancy_text):
+    def _slow(*, resume_id, resume_text, vacancy_id, vacancy_text, **_kwargs):
         gate.set()
         release.wait(timeout=5)
         from backend.db import repository as repo
@@ -108,7 +108,7 @@ def test_llm_job_reuses_active_and_enforces_per_user_limit(api_client, monkeypat
 def test_sse_events_no_long_lived_get_db(api_client, monkeypatch):
     """SSE не держит Depends(get_db); smoke + access_token query."""
 
-    def _fast(*, resume_id, resume_text, vacancy_id, vacancy_text):
+    def _fast(*, resume_id, resume_text, vacancy_id, vacancy_text, **_kwargs):
         from backend.db import repository as repo
 
         with session_scope() as session:

@@ -95,8 +95,11 @@ pub/sub для SSE). Все три типа джоб устроены одина
   в режиме `rq` он живёт в воркерах, в `inprocess` — в lifespan API;
 - каждый claim увеличивает `attempts`; исчерпав `PARSE_JOB_MAX_ATTEMPTS` /
   `LLM_JOB_MAX_ATTEMPTS`, зависшая джоба уходит в `failed` / `error`, а не в requeue;
-- отмена прогона — флаг `cancel_requested` в БД, воркер его поллит (переживает
-  рестарт API);
+- отмена — флаг `cancel_requested` в БД у всех трёх типов (переживает рестарт API):
+  `queued` сразу становится `cancelled`, у `running` воркер проверяет флаг (прогон —
+  поток-поллер, импорт — перед каждым текстом, HH sync — перед страницей поиска и
+  группой деталей, мэтч/письмо — после ответа модели, результат отбрасывается);
+  зависший `running` с флагом recover закрывает `cancelled`, а не ставит на повтор;
 - прогресс прогона — колонка `parse_runs.progress`; SSE (`/runs/{id}/events`,
   `/llm-jobs/{id}/events`) читает Redis pub/sub с fallback на poll БД;
 - матчинг и письма: кэш в БД → 200, иначе `llm_jobs` + 202 `{job_id}`; ручной импорт

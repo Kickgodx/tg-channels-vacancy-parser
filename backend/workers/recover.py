@@ -33,6 +33,7 @@ def recover_stuck_llm_jobs(*, requeue_all_queued: bool = False) -> int:
     requeued = 0
     to_requeue: list[UUID] = []
     exhausted: list[tuple[UUID, str]] = []  # (id, kind) — ушли в error по лимиту попыток
+    cancelled: list[tuple[UUID, str]] = []  # (id, kind) — отмена запрошена до потери воркера
     seen: set[UUID] = set()
 
     def _finish_reclaimed(job_id: UUID, kind: str, outcome: str, *, legacy: bool = False) -> None:
@@ -42,6 +43,9 @@ def recover_stuck_llm_jobs(*, requeue_all_queued: bool = False) -> int:
         if outcome == "queued":
             _LOG.warning("LLM job %s: %s→queued%s", job_id, label, "" if legacy else " (lease expired)")
             to_requeue.append(job_id)
+        elif outcome == "cancelled":
+            _LOG.warning("LLM job %s: %s→cancelled (отмена запрошена)", job_id, label)
+            cancelled.append((job_id, kind))
         else:
             _LOG.error("LLM job %s: %s→error (исчерпан лимит попыток)", job_id, label)
             exhausted.append((job_id, kind))
@@ -87,6 +91,9 @@ def recover_stuck_llm_jobs(*, requeue_all_queued: bool = False) -> int:
         message = lj.attempts_exhausted_message(max(1, settings.llm_job_max_attempts))
         publish_llm_job_event(job_id, status="error", kind=kind, error_message=message)
         record_llm_job(outcome="error", kind=kind)
+    for job_id, kind in cancelled:
+        publish_llm_job_event(job_id, status="cancelled", kind=kind)
+        record_llm_job(outcome="cancelled", kind=kind)
 
     if not to_requeue:
         return 0

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 
 from opentelemetry import trace
 
@@ -11,6 +12,7 @@ from backend.db import repository as repo
 from backend.db.session import session_scope
 from backend.observability import record_match
 from backend.services.interactive_llm import get_interactive_client
+from backend.services.llm_job_service import LlmJobCancelled
 from backend.settings import get_settings
 from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION
 from tg_jobs_parser.ai.schema import calculate_overall_score
@@ -20,11 +22,19 @@ _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)
 
 
-def match_single(*, resume_text: str, vacancy_id: str, vacancy_text: str, resume_id: int):
+def match_single(
+    *,
+    resume_text: str,
+    vacancy_id: str,
+    vacancy_text: str,
+    resume_id: int,
+    is_cancelled: Callable[[], bool] | None = None,
+):
     """Оценка одной пары: LLM без удержания DB-сессии, затем upsert.
 
     ``overall_score`` считается здесь (детерминированно), LLM отдаёт только
-    breakdown-оценки и объяснение.
+    breakdown-оценки и объяснение. ``is_cancelled`` проверяется после ответа модели:
+    отмена → ``LlmJobCancelled``, прежняя оценка пары не перезаписывается.
     """
     with _TRACER.start_as_current_span(
         "vacancy.match", attributes={"resume.id": resume_id, "vacancy.id": vacancy_id}
@@ -59,6 +69,8 @@ def match_single(*, resume_text: str, vacancy_id: str, vacancy_text: str, resume
         extraction.confidence,
         usage.model,
     )
+    if is_cancelled is not None and is_cancelled():
+        raise LlmJobCancelled("Оценка отменена — ответ модели не сохранён")
     with session_scope() as session:
         return repo.upsert_vacancy_match(
             session,

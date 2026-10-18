@@ -187,7 +187,7 @@ def record_cover_letter(*, outcome: str, duration_seconds: float | None = None) 
 LLM_JOB_CALLS = Counter(
     "llm_jobs_total",
     "Фоновые LLM-задачи мэтчинга и писем",
-    labelnames=("outcome", "kind"),  # queued|done|error × match|cover_letter
+    labelnames=("outcome", "kind"),  # queued|done|error|cancelled × match|cover_letter|import
 )
 
 LLM_JOB_DURATION = Histogram(
@@ -220,7 +220,7 @@ LLM_RQ_QUEUE_JOBS = Gauge(
 LLM_WORKER_JOBS = Counter(
     "llm_worker_jobs_total",
     "Исполнение LLM-джоб на worker",
-    labelnames=("kind", "outcome"),  # started|done|error
+    labelnames=("kind", "outcome"),  # started|done|error|cancelled
 )
 
 LLM_WORKER_DURATION = Histogram(
@@ -311,7 +311,7 @@ def record_fx_fetch(outcome: str) -> None:
 HH_SYNCS = Counter(
     "hh_syncs_total",
     "Завершённые синхронизации HH",
-    labelnames=("outcome",),  # success | api_error | not_configured | error
+    labelnames=("outcome",),  # success | cancelled | api_error | not_configured | error
 )
 
 HH_SYNC_DURATION = Histogram(

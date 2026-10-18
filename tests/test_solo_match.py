@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
 from tests.llm_job_helpers import await_llm_job, current_ai, use_ai_config
 
-from backend.db.models import VacancyMatchRow, VacancyRow
+from backend.db.models import LlmJobRow, VacancyMatchRow, VacancyRow
 from backend.db.session import get_session_factory, session_scope
 from backend.services import match_service
 from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION
@@ -50,7 +51,7 @@ def stub_llm(monkeypatch):
     """Подменяет LLM-вызов: считает обращения, возвращает фиксированную оценку."""
     calls: list[dict] = []
 
-    def _fake(*, resume_id, resume_text, vacancy_id, vacancy_text):
+    def _fake(*, resume_id, resume_text, vacancy_id, vacancy_text, **_kwargs):
         calls.append({"resume_id": resume_id, "vacancy_id": vacancy_id})
         from backend.db import repository as repo
 
@@ -346,3 +347,76 @@ def test_match_retries_once_on_invalid_json(monkeypatch):
     monkeypatch.setattr(client, "_call_llm", _always_bad)
     with pytest.raises(ValueError):
         client.match(resume_text="python", vacancy_text="нужен python")
+
+
+def _cancel_active_job(rid: int, vid: str, kind: str = "match") -> None:
+    """Запросить отмену выполняемой задачи пары — как это сделал бы владелец через API."""
+    from backend.db import llm_job_repository as lj
+
+    with session_scope() as session:
+        job = session.scalars(
+            select(LlmJobRow)
+            .where(LlmJobRow.resume_id == rid, LlmJobRow.vacancy_id == vid, LlmJobRow.kind == kind)
+            .order_by(LlmJobRow.created_at.desc())
+            .limit(1)
+        ).one()
+        lj.request_llm_job_cancel(session, job.id)
+
+
+def test_cancel_during_model_answer_keeps_previous_match(api_client, monkeypatch):
+    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+    from tg_jobs_parser.ai.schema import VacancyMatchExtraction
+
+    state = {"cancel": False, "rid": None, "vid": None}
+
+    class _Client:
+        def match_with_fallback(self, *, resume_text, vacancy_text):
+            if state["cancel"]:
+                _cancel_active_job(state["rid"], state["vid"])
+                return VacancyMatchExtraction(confidence=10, explanation="new"), LLMUsage(model="m")
+            return VacancyMatchExtraction(confidence=90, explanation="old"), LLMUsage(model="m")
+
+    monkeypatch.setattr(match_service, "get_interactive_client", lambda: _Client())
+    token = _register(api_client, "a@example.com")
+    vid = _add_vacancy()
+    rid = api_client.post("/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}).json()["id"]
+    state.update(rid=rid, vid=vid)
+    assert (
+        await_llm_job(api_client, token, api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token)))[
+            "status"
+        ]
+        == "done"
+    )
+
+    state["cancel"] = True
+    job = await_llm_job(
+        api_client, token, api_client.post(f"/api/v1/resumes/{rid}/match/{vid}?force=true", headers=_auth(token))
+    )
+
+    assert job["status"] == "cancelled"
+    assert job["match"] is None
+    got = api_client.get(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token)).json()
+    assert (got["confidence"], got["explanation"]) == (90, "old")
+
+
+def test_cancel_after_match_saved_is_too_late(api_client, monkeypatch):
+    from backend.db import repository as repo
+
+    real_upsert = repo.upsert_vacancy_match
+
+    def upsert_then_cancel(session, **kwargs):
+        row = real_upsert(session, **kwargs)
+        session.commit()
+        _cancel_active_job(kwargs["resume_id"], kwargs["vacancy_id"])
+        return row
+
+    monkeypatch.setattr(match_service, "get_interactive_client", lambda: _fake_match_client("m"))
+    monkeypatch.setattr(match_service.repo, "upsert_vacancy_match", upsert_then_cancel)
+    token = _register(api_client, "a@example.com")
+    vid = _add_vacancy()
+    rid = api_client.post("/api/v1/resumes", headers=_auth(token), json={"name": "CV", "text": "python"}).json()["id"]
+
+    job = await_llm_job(api_client, token, api_client.post(f"/api/v1/resumes/{rid}/match/{vid}", headers=_auth(token)))
+
+    assert (job["status"], job["cancel_requested"]) == ("done", True)
+    assert job["match"]["confidence"] == 80

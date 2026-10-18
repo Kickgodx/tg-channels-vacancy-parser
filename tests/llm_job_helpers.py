@@ -11,7 +11,7 @@ def _auth(token: str) -> dict:
 
 
 def await_llm_job(client, token: str, post_response: Any, *, timeout: float = 5.0) -> dict:
-    """Дождаться done/error по 202; при 200 вернуть тело ответа как «готовый» результат."""
+    """Дождаться done/error/cancelled по 202; при 200 вернуть тело ответа как «готовый» результат."""
     if post_response.status_code == 200:
         return {"status": "done", "body": post_response.json(), "cached_response": True}
     assert post_response.status_code == 202, post_response.text
@@ -22,7 +22,7 @@ def await_llm_job(client, token: str, post_response: Any, *, timeout: float = 5.
         r = client.get(f"/api/v1/llm-jobs/{job_id}", headers=_auth(token))
         assert r.status_code == 200, r.text
         last = r.json()
-        if last["status"] in ("done", "error"):
+        if last["status"] in ("done", "error", "cancelled"):
             return last
         time.sleep(0.05)
     raise AssertionError(f"LLM job {job_id} не завершилась: {last}")

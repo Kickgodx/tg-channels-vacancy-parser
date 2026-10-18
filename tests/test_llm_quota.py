@@ -236,7 +236,7 @@ def test_reserve_respects_daily_limit(db):
         assert llm_calls_today(s, user_id=1, day=day) == 3  # отказ ничего не списал
 
 
-def _fake_match(*, resume_id, resume_text, vacancy_id, vacancy_text):
+def _fake_match(*, resume_id, resume_text, vacancy_id, vacancy_text, **_kwargs):
     from backend.db import repository as repo
 
     with session_scope() as session:

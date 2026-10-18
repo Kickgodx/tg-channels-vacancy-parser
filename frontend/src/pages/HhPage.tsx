@@ -16,6 +16,7 @@ const STATUS_LABEL: Record<HhSyncJob["status"], string> = {
   running: "выполняется",
   completed: "завершён",
   failed: "ошибка",
+  cancelled: "отменён",
 };
 
 const PHASE_LABEL: Record<HhSyncProgress["phase"], string> = {
@@ -76,6 +77,11 @@ export default function HhPage() {
       return api.hhSyncJob(accepted.job_id);
     },
     onSuccess: (created) => setLiveJob(created),
+  });
+
+  const cancelM = useMutation({
+    mutationFn: (id: string) => api.cancelHhSyncJob(id),
+    onSuccess: (updated) => setLiveJob(updated),
   });
 
   const status = statusQ.data;
@@ -187,9 +193,24 @@ export default function HhPage() {
           {isActive(job) ? "Синхронизация…" : "Запустить sync"}
         </button>
         {isActive(job) && (
+          <button
+            type="button"
+            className="secondary"
+            disabled={cancelM.isPending || job!.cancel_requested}
+            onClick={() => cancelM.mutate(job!.id)}
+          >
+            {cancelM.isPending || job!.cancel_requested ? "Отмена…" : "Отменить"}
+          </button>
+        )}
+        {isActive(job) && (
           <span className="muted">Идёт в фоне — страницу можно закрыть, итог сохранится.</span>
         )}
       </div>
+      {cancelM.isError && (
+        <p className="error" style={{ marginTop: "1rem" }}>
+          {(cancelM.error as Error).message}
+        </p>
+      )}
 
       {syncM.isError && (
         <p className="error" style={{ marginTop: "1rem" }}>
@@ -225,7 +246,13 @@ export default function HhPage() {
 
       {result && !isActive(job) && (
         <div style={{ marginTop: "1.25rem" }}>
-          <h3>{job?.status === "failed" ? "Итог до сбоя" : "Итог"}</h3>
+          <h3>
+            {job?.status === "failed"
+              ? "Итог до сбоя"
+              : job?.status === "cancelled"
+                ? "Итог до отмены"
+                : "Итог"}
+          </h3>
           <ul className="plain-list">
             <li>
               Окно: {result.window}

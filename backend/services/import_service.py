@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -31,7 +32,12 @@ from backend.db.vacancy_mapper import row_to_vacancy
 from backend.observability import record_import_item
 from backend.schemas import VacancyImportItemResult, VacancyImportResponse
 from backend.services.llm_job_events import publish_llm_job_event
-from backend.services.llm_job_service import KIND_IMPORT, LlmDailyQuotaError, reserve_user_llm_calls
+from backend.services.llm_job_service import (
+    KIND_IMPORT,
+    LlmDailyQuotaError,
+    LlmJobCancelled,
+    reserve_user_llm_calls,
+)
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import AppConfig
@@ -206,8 +212,12 @@ def run_import_job(
     params: dict,
     result: dict | None,
     lease_owner: str,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> bool:
     """Выполнить джобу импорта (LLM-воркер). False — lease потерян, итог не дописан.
+
+    ``is_cancelled`` проверяется перед каждым текстом: отмена → ``LlmJobCancelled``,
+    итог по уже обработанным текстам остаётся записанным.
 
     Текст за текстом и без долгой транзакции: проверка дубля и списание квоты —
     короткими сессиями, вызов LLM — вне транзакции, затем одной транзакцией запись
@@ -269,6 +279,9 @@ def run_import_job(
         for i, raw in enumerate(texts):
             if i in done:
                 continue
+            if is_cancelled is not None and is_cancelled():
+                _LOG.info("Импорт %s: отменён, обработано %s из %s", job_id, len(items), len(texts))
+                raise LlmJobCancelled("Импорт отменён")
             text = raw.strip()
             if not text:
                 if not _commit(_item_dict(i, "error", _MSG_EMPTY)):
