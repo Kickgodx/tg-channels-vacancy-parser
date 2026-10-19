@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { VacancyListItem } from "../types/api";
-import type { VacancySortField, VacancySortOrder } from "../types/sort";
-import { SORTABLE_COLUMNS } from "../types/sort";
+import type { VacancySortField, VacancySortOrder, VacancyThenSortField } from "../types/sort";
+import { SORTABLE_COLUMNS, thenSortPartner } from "../types/sort";
 import { cleanPostUrl } from "../utils/cleanPostUrl";
 import VacancyModal from "./VacancyModal";
 
@@ -20,6 +20,18 @@ const ALL_COLUMNS = [
   { key: "preview", label: "Текст", sortable: false },
 ] as const;
 type ColKey = (typeof ALL_COLUMNS)[number]["key"];
+
+/** Первый клик по числовой колонке — «больше сверху»: так же лежат индексы даты и зарплаты. */
+const DESC_FIRST: ReadonlySet<VacancySortField> = new Set([
+  "post_date",
+  "detected_salary_avg",
+  "detected_salary_avg_rub",
+  "vacancy_score",
+  "match_score",
+]);
+
+const flip = (o: VacancySortOrder): VacancySortOrder => (o === "asc" ? "desc" : "asc");
+const arrow = (o: VacancySortOrder) => (o === "asc" ? "↑" : "↓");
 
 function compareValues(a: unknown, b: unknown, order: VacancySortOrder): number {
   const mul = order === "asc" ? 1 : -1;
@@ -50,7 +62,17 @@ interface Props {
   title?: string;
   sortBy?: VacancySortField;
   sortOrder?: VacancySortOrder;
-  onSortChange?: (sortBy: VacancySortField, sortOrder: VacancySortOrder) => void;
+  /** Вторая ступень серверной сортировки (только при `multiSort`). */
+  thenBy?: VacancyThenSortField | null;
+  thenOrder?: VacancySortOrder;
+  onSortChange?: (
+    sortBy: VacancySortField,
+    sortOrder: VacancySortOrder,
+    thenBy: VacancyThenSortField | null,
+    thenOrder: VacancySortOrder,
+  ) => void;
+  /** Shift+клик по «Дата» / «Зарплата, ₽» добавляет вторую ступень (сортирует backend). */
+  multiSort?: boolean;
   /** Выбранное резюме — включает матчинг в карточке вакансии. */
   resumeId?: number | null;
 }
@@ -59,7 +81,10 @@ export default function VacancyTable({
   title,
   sortBy: sortByProp = "post_date",
   sortOrder: sortOrderProp = "desc",
+  thenBy: thenByProp = null,
+  thenOrder = "desc",
   onSortChange,
+  multiSort = false,
   resumeId,
 }: Props) {
   const [localSortBy, setLocalSortBy] = useState<VacancySortField>(sortByProp);
@@ -67,6 +92,9 @@ export default function VacancyTable({
 
   const sortBy = onSortChange ? sortByProp : localSortBy;
   const sortOrder = onSortChange ? sortOrderProp : localSortOrder;
+  const canMultiSort = multiSort && onSortChange != null;
+  const thenPartner = canMultiSort ? thenSortPartner(sortBy) : null;
+  const thenBy = thenPartner != null && thenByProp === thenPartner ? thenByProp : null;
 
   const [cols, setCols] = useState<ColKey[]>([
     "post_url",
@@ -101,20 +129,25 @@ export default function VacancyTable({
     });
   }, [items, sortBy, sortOrder, onSortChange]);
 
-  const handleSort = (key: ColKey) => {
+  const handleSort = (key: ColKey, additive: boolean) => {
     if (!SORTABLE_COLUMNS.includes(key as VacancySortField)) return;
     const field = key as VacancySortField;
-    let nextBy = field;
-    let nextOrder: VacancySortOrder = "desc";
-    if (sortBy === field) {
-      nextOrder = sortOrder === "asc" ? "desc" : "asc";
-    } else {
-      nextOrder = field === "post_date" ? "desc" : "asc";
+    if (onSortChange && canMultiSort && additive) {
+      if (field === sortBy) {
+        onSortChange(sortBy, flip(sortOrder), thenBy, thenOrder);
+        return;
+      }
+      if (field === thenPartner) {
+        onSortChange(sortBy, sortOrder, thenPartner, thenBy === field ? flip(thenOrder) : "desc");
+        return;
+      }
     }
+    const nextOrder: VacancySortOrder =
+      sortBy === field ? flip(sortOrder) : DESC_FIRST.has(field) ? "desc" : "asc";
     if (onSortChange) {
-      onSortChange(nextBy, nextOrder);
+      onSortChange(field, nextOrder, null, "desc");
     } else {
-      setLocalSortBy(nextBy);
+      setLocalSortBy(field);
       setLocalSortOrder(nextOrder);
     }
   };
@@ -137,7 +170,14 @@ export default function VacancyTable({
       case "source_channel":
         return `@${v.source_channel}`;
       case "post_date": {
-        const date = v.post_date ? new Date(v.post_date).toLocaleDateString() : "—";
+        // День — по UTC, как фильтры периода и сортировка «по дню»; точное время — в подсказке.
+        const date = v.post_date ? (
+          <span title={new Date(v.post_date).toLocaleString()}>
+            {new Date(v.post_date).toLocaleDateString(undefined, { timeZone: "UTC" })}
+          </span>
+        ) : (
+          "—"
+        );
         if (!v.archived_at) return date;
         return (
           <>
@@ -178,8 +218,62 @@ export default function VacancyTable({
   const visibleCols = useMemo(() => ALL_COLUMNS.filter((c) => shownCols.includes(c.key)), [shownCols]);
 
   const sortIndicator = (key: ColKey) => {
-    if (sortBy !== key) return "";
-    return sortOrder === "asc" ? " ↑" : " ↓";
+    if (sortBy === key) {
+      return thenBy ? (
+        <>
+          {" "}
+          {arrow(sortOrder)}
+          <sup>1</sup>
+        </>
+      ) : (
+        ` ${arrow(sortOrder)}`
+      );
+    }
+    if (thenBy === key) {
+      return (
+        <>
+          {" "}
+          {arrow(thenOrder)}
+          <sup>2</sup>
+        </>
+      );
+    }
+    return "";
+  };
+
+  const sortTitle = (key: ColKey) =>
+    canMultiSort && (key === "post_date" || key === "detected_salary_avg_rub")
+      ? "Клик — сортировка, Shift+клик — второй уровень (дата + зарплата ₽)"
+      : "Сортировка: клик — смена направления";
+
+  const sortSummary = () => {
+    if (!onSortChange || thenPartner == null) return null;
+    if (thenBy == null) {
+      return (
+        <p className="caption sort-hint">
+          <button
+            type="button"
+            className="btn-link"
+            onClick={() => onSortChange(sortBy, sortOrder, thenPartner, "desc")}
+          >
+            {sortBy === "post_date"
+              ? "+ внутри дня — по зарплате ₽"
+              : "+ при равной зарплате — по дате"}
+          </button>{" "}
+          (или Shift+клик по заголовку)
+        </p>
+      );
+    }
+    return (
+      <p className="caption sort-hint">
+        {sortBy === "post_date"
+          ? `Сортировка: по дню ${arrow(sortOrder)} (UTC), внутри дня — по зарплате ₽ ${arrow(thenOrder)}`
+          : `Сортировка: по зарплате ₽ ${arrow(sortOrder)}, при равной — по дате ${arrow(thenOrder)}`}{" "}
+        <button type="button" className="btn-link" onClick={() => onSortChange(sortBy, sortOrder, null, "desc")}>
+          убрать второй уровень
+        </button>
+      </p>
+    );
   };
 
   return (
@@ -212,6 +306,7 @@ export default function VacancyTable({
           </label>
         ))}
       </div>
+      {sortSummary()}
       <div className="table-wrap">
         <table>
           <thead>
@@ -222,8 +317,8 @@ export default function VacancyTable({
                   <th
                     key={c.key}
                     className="sortable-th"
-                    onClick={() => handleSort(c.key)}
-                    title="Сортировка: клик — смена направления"
+                    onClick={(e) => handleSort(c.key, e.shiftKey)}
+                    title={sortTitle(c.key)}
                   >
                     {c.label}
                     {sortIndicator(c.key)}

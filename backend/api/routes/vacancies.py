@@ -5,7 +5,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.api.deps import CurrentUser, get_current_user, get_db, require_admin, verify_api_key
-from backend.api.params import Page, PageSize, check_list_depth, check_sort_needs_resume, vacancy_filters
+from backend.api.params import (
+    Page,
+    PageSize,
+    check_list_depth,
+    check_sort_needs_resume,
+    check_sort_pair,
+    vacancy_filters,
+)
 from backend.db import repository as repo
 from backend.db.aggregate_cache import cached_aggregate
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
@@ -19,6 +26,7 @@ from backend.schemas import (
     VacancyQuery,
     VacancySortField,
     VacancySortOrder,
+    VacancyThenSortField,
 )
 from backend.services import export_service, idempotency, import_service
 from backend.services.llm_job_service import KIND_IMPORT, LlmJobUserLimitError, llm_job_runner
@@ -107,11 +115,16 @@ def export_vacancies_xlsx(
     filters: VacancyQuery = Depends(vacancy_filters),
     sort_by: VacancySortField = "post_date",
     sort_order: VacancySortOrder = "desc",
+    then_by: VacancyThenSortField | None = None,
+    then_order: VacancySortOrder = "desc",
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """Excel вакансий в БД с учётом фильтров (как в списке), не больше ``EXPORT_MAX_ROWS`` строк."""
     check_sort_needs_resume(sort_by, None)  # резюме у экспорта нет
-    query = filters.model_copy(update={"sort_by": sort_by, "sort_order": sort_order})
+    check_sort_pair(sort_by, then_by)
+    query = filters.model_copy(
+        update={"sort_by": sort_by, "sort_order": sort_order, "then_by": then_by, "then_order": then_order}
+    )
     limit = export_service.export_row_limit()
     total = counted_vacancies(db, query)
     metrics = aggregate_vacancy_metrics(db, query)
@@ -140,12 +153,15 @@ def list_vacancies(
     page_size: PageSize = 50,
     sort_by: VacancySortField = "post_date",
     sort_order: VacancySortOrder = "desc",
+    then_by: VacancyThenSortField | None = None,
+    then_order: VacancySortOrder = "desc",
     resume_id: int | None = None,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ) -> VacancyListResponse:
     check_list_depth(page, page_size)
     check_sort_needs_resume(sort_by, resume_id)
+    check_sort_pair(sort_by, then_by)
     if resume_id is not None:
         resume = repo.get_resume(db, resume_id)
         if resume is None or resume.user_id != user.id:
@@ -156,6 +172,8 @@ def list_vacancies(
             "page_size": page_size,
             "sort_by": sort_by,
             "sort_order": sort_order,
+            "then_by": then_by,
+            "then_order": then_order,
             "resume_id": resume_id,
         }
     )

@@ -38,7 +38,9 @@ def cached_aggregate[T](name: str, query: VacancyQuery, compute: Callable[[], T]
     ttl = _ttl_seconds()
     if ttl <= 0:
         return compute()
-    filters = query.model_dump(mode="json", exclude={"page", "page_size", "sort_by", "sort_order"})
+    filters = query.model_dump(
+        mode="json", exclude={"page", "page_size", "sort_by", "sort_order", "then_by", "then_order"}
+    )
     key = f"{name}|{sorted(filters.items())!r}|{sorted(extra.items())!r}"
     now = time.monotonic()
     with _lock:

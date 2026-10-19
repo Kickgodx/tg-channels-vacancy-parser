@@ -14,7 +14,7 @@ from fastapi import Query
 from pydantic import BeforeValidator
 
 from backend.errors import CODE_VALIDATION, http_error
-from backend.schemas import VacancyQuery
+from backend.schemas import VacancyQuery, sort_pair_error
 
 # Пустой параметр (``?date_from=``) — «не задан», как и раньше, а не ошибка формата.
 _EmptyAsNone = BeforeValidator(lambda v: None if v == "" else v)
@@ -43,6 +43,13 @@ def check_sort_needs_resume(sort_by: str, resume_id: int | None) -> None:
     """422 для ``sort_by=match_score`` без резюме: иначе список молча сортировался бы по дате."""
     if sort_by == "match_score" and resume_id is None:
         raise http_error(422, CODE_VALIDATION, "Сортировка по оценке (match_score) требует resume_id.")
+
+
+def check_sort_pair(sort_by: str, then_by: str | None) -> None:
+    """422 для второй сортировки вне пары «дата ↔ зарплата ₽» (``model_copy`` валидатор не зовёт)."""
+    error = sort_pair_error(sort_by, then_by)
+    if error:
+        raise http_error(422, CODE_VALIDATION, error)
 
 
 def vacancy_filters(

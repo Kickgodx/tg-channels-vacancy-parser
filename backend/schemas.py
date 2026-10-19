@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, model_validator
 
 from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
 from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
@@ -158,6 +158,18 @@ VacancySortField = Literal[
     "match_score",
 ]
 VacancySortOrder = Literal["asc", "desc"]
+# Вторая ступень сортировки — только пара «дата ↔ зарплата в рублях»: под неё есть индексы.
+VacancyThenSortField = Literal["post_date", "detected_salary_avg_rub"]
+_SORT_PAIRS: frozenset[tuple[str, str]] = frozenset(
+    {("post_date", "detected_salary_avg_rub"), ("detected_salary_avg_rub", "post_date")}
+)
+
+
+def sort_pair_error(sort_by: str, then_by: str | None) -> str | None:
+    """Текст ошибки для недопустимой пары ``sort_by`` + ``then_by`` или None."""
+    if then_by is None or (sort_by, then_by) in _SORT_PAIRS:
+        return None
+    return "Вторая сортировка (then_by) доступна только для пары post_date и detected_salary_avg_rub."
 
 
 class VacancyQuery(BaseModel):
@@ -183,10 +195,25 @@ class VacancyQuery(BaseModel):
     )
     sort_by: VacancySortField = "post_date"
     sort_order: VacancySortOrder = "desc"
+    then_by: VacancyThenSortField | None = Field(
+        default=None,
+        description=(
+            "Вторая ступень сортировки. С sort_by=post_date дата берётся по дню (UTC): "
+            "внутри дня — по зарплате. Допустима только пара post_date ↔ detected_salary_avg_rub."
+        ),
+    )
+    then_order: VacancySortOrder = "desc"
     resume_id: int | None = Field(
         default=None,
         description="Подмешать LLM-оценку соответствия этому резюме (join vacancy_matches).",
     )
+
+    @model_validator(mode="after")
+    def _check_sort_pair(self) -> VacancyQuery:
+        error = sort_pair_error(self.sort_by, self.then_by)
+        if error:
+            raise ValueError(error)
+        return self
 
 
 class HealthResponse(BaseModel):
