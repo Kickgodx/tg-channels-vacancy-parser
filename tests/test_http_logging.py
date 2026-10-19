@@ -67,6 +67,10 @@ def mini_client():
     def boom():
         raise RuntimeError("boom")
 
+    @app.get("/busy")
+    def busy():
+        return Response(b"{}", status_code=503, media_type="application/json")
+
     app.add_middleware(HttpLoggingMiddleware, body_limit=500)
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
@@ -214,6 +218,14 @@ def test_unhandled_error_logged_as_500(mini_client, caplog):
     rec = [r for r in caplog.records if r.name == "backend.http"][-1]
     assert rec.levelno == logging.ERROR
     assert _last(caplog, "/boom")["status"] == 500
+
+
+def test_overload_503_logged_as_warning(mini_client, caplog):
+    """503 — плановый отказ под перегрузкой: ERROR поднимал бы ложные алерты."""
+    caplog.set_level(logging.INFO, logger="backend.http")
+    assert mini_client.get("/busy").status_code == 503
+    rec = [r for r in caplog.records if r.name == "backend.http"][-1]
+    assert rec.levelno == logging.WARNING
 
 
 def test_truncated_json_falls_back_to_regex_redaction():

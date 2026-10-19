@@ -74,6 +74,14 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * `retry` для запросов, которые иначе не повторяются (`me`): повторить до 3 раз только
+ * retryable-ошибку — 503 OVERLOADED под перегрузкой, сбой сети. 401/403 — сразу.
+ */
+export function retryIfRetryable(failureCount: number, error: Error): boolean {
+  return error instanceof ApiError && error.retryable && failureCount < 3;
+}
+
 function apiKeyHeaders(): Record<string, string> {
   return VITE_API_KEY ? { "X-API-Key": VITE_API_KEY } : {};
 }

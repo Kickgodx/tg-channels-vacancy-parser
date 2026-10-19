@@ -45,13 +45,19 @@ class Settings(BaseSettings):
     api_metrics_port: int = Field(default=9100, ge=0, alias="API_METRICS_PORT")
     # Кэш COUNT-агрегатов db_* для /metrics (сек): частые scrape не нагружают Postgres; 0 — без кэша.
     metrics_db_stats_cache_seconds: float = Field(default=30.0, ge=0, alias="METRICS_DB_STATS_CACHE_SECONDS")
+    # Потолок строк экспорта (xlsx списка и прогона, JSON прогона): сверх — обрезка с пометкой в файле.
+    export_max_rows: int = Field(default=50_000, ge=1, alias="EXPORT_MAX_ROWS")
     # Пул SQLAlchemy на процесс. Пусто → по роли процесса (backend/db/session.py: API — под
     # threadpool sync-эндпоинтов, воркеры — 2–4 + overflow): N реплик llm-worker не съедают
     # max_connections Postgres.
-    # Потолок строк экспорта (xlsx списка и прогона, JSON прогона): сверх — обрезка с пометкой в файле.
-    export_max_rows: int = Field(default=50_000, ge=1, alias="EXPORT_MAX_ROWS")
     db_pool_size: int | None = Field(default=None, ge=1, alias="DB_POOL_SIZE")
     db_max_overflow: int | None = Field(default=None, ge=0, alias="DB_MAX_OVERFLOW")
+    # Сколько секунд ждать свободное соединение пула. Пусто → по роли: API 5 с (с лимитом
+    # одновременных запросов ожидание — миллисекунды), воркеры 30 с (LLM-потоки и AI-кэш).
+    db_pool_timeout: float | None = Field(default=None, gt=0, alias="DB_POOL_TIMEOUT")
+    # Сколько секунд запрос ждёт места обработки в процессе API; не дождался — 503 OVERLOADED
+    # (backend/overload.py). 0 — отклонять сразу, если все места заняты.
+    api_queue_timeout_seconds: float = Field(default=2.0, ge=0, alias="API_QUEUE_TIMEOUT_SECONDS")
     # Пусто → Postgres из compose с хоста, пароль — POSTGRES_PASSWORD из того же .env
     # (см. _apply_app_env): backend, CLI и alembic с хоста работают без своего DATABASE_URL.
     database_url: str = Field(default="", alias="DATABASE_URL")

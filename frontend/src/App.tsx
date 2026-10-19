@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
-import { api, getToken } from "./api/client";
+import { api, getToken, retryIfRetryable } from "./api/client";
 import DashboardPage from "./pages/DashboardPage";
 import HhPage from "./pages/HhPage";
 import ImportPage from "./pages/ImportPage";
@@ -19,14 +19,14 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 
 /** Парсинг, импорт и HH — только admin (backend отвечает 403); остальных — на вакансии. */
 function RequireAdmin({ children }: { children: JSX.Element }) {
-  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: retryIfRetryable });
   if (meQ.isLoading) return <p className="muted">Загрузка…</p>;
   if (!meQ.data?.is_admin) return <Navigate to="/vacancies" replace />;
   return children;
 }
 
 function UserBadge() {
-  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: retryIfRetryable });
   return (
     <span className="nav-user">
       <span className="muted">{meQ.data?.email ?? "…"}</span>
@@ -38,7 +38,7 @@ function UserBadge() {
 }
 
 function AdminNavLink({ to, end, children }: { to: string; end?: boolean; children: string }) {
-  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: retryIfRetryable });
   if (!meQ.data?.is_admin) return null;
   return (
     <NavLink to={to} end={end}>

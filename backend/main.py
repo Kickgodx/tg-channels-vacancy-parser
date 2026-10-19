@@ -33,6 +33,7 @@ from backend.db.session import init_db, session_scope
 from backend.errors import register_exception_handlers
 from backend.http_logging import HttpLoggingMiddleware
 from backend.observability import register_db_stats_collector
+from backend.overload import OverloadMiddleware, RequestSlots
 from backend.settings import check_api_workers, check_exposure, get_settings
 from backend.tracing import setup_tracing, shutdown_tracing
 from tg_jobs_parser.config.loader import load_config
@@ -205,7 +206,11 @@ async def lifespan(_app: FastAPI):
 
     from backend.db.session import api_thread_limit
 
-    anyio.to_thread.current_default_thread_limiter().total_tokens = api_thread_limit(get_settings())
+    slots = api_thread_limit(get_settings())
+    anyio.to_thread.current_default_thread_limiter().total_tokens = slots
+    # Запросов в работе не больше, чем потоков и соединений: без этого всплеск даёт тупик
+    # «поток ↔ соединение» (backend/overload.py).
+    _app.state.request_slots = RequestSlots(slots, get_settings().api_queue_timeout_seconds)
     from backend.core_ports import register_core_ports
 
     # LLM в inprocess-режиме идёт в этом процессе; RPM общий с воркерами.
@@ -268,6 +273,8 @@ app = FastAPI(
 
 settings = get_settings()
 register_exception_handlers(app)
+# Самое внутреннее middleware: 503 перегрузки проходят через CORS, HTTP-журнал, метрики и трассы.
+app.add_middleware(OverloadMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,

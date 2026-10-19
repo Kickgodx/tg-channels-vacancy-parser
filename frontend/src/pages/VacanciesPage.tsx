@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, type VacancyQueryParams } from "../api/client";
+import { api, retryIfRetryable, type VacancyQueryParams } from "../api/client";
 import AnalyticsPanel from "../components/AnalyticsPanel";
 import MetricsCharts from "../components/MetricsCharts";
 import ResumePanel from "../components/ResumePanel";
@@ -47,7 +47,7 @@ export default function VacanciesPage() {
   });
 
   // Обновление курсов и пересчёт ₽ — admin-only на backend.
-  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: false });
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => api.me(), retry: retryIfRetryable });
   const isAdmin = Boolean(meQ.data?.is_admin);
 
   const fxRefreshM = useMutation({
