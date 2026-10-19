@@ -40,11 +40,18 @@ _NEGOTIABLE = re.compile(
 )
 
 # «Якорные» слова — рядом с ними число почти наверняка действительно зарплата.
+# Только с начала слова: иначе «net» ловится в «internet»/«.NET», «rate» — в «accurate».
 _SALARY_ANCHOR = (
-    r"зарплат\w*|з\s*[/.]\s*п\b|зп\b|оклад\w*|доход\w*|вилка\w*|"
+    r"\b(?:зарплат\w*|з\s*[/.]\s*п\b|зп\b|оклад\w*|доход\w*|вилка\w*|"
     r"salary|compensation|rate\b|pay\b|comp\b|tc\b|"
-    r"на\s+руки|до\s+вычета|gross|net\b"
+    r"на\s+руки|до\s+вычета|gross|(?<!\.)net\b)"
 )
+
+# Множитель тысяч после числа: «200k», «180 тыс.», «300 тр».
+_THOUSANDS_SUFFIX = r"(?:k\b|тыс\b\.?|тр\b)"
+
+# Ниже этой суммы число без валюты у якоря — обрывок даты/счётчика, а не оклад.
+_MIN_ANCHORED_WITHOUT_CURRENCY = 1_000
 
 _CURRENCY_TOKEN = r"usd|eur|rub|руб|₽|€|\$|gbp|kzt|сум|тенге"
 
@@ -65,7 +72,11 @@ _HOURLY_RANGE_RE = re.compile(
 
 
 def _to_float(s: str) -> float | None:
-    s = s.replace(" ", "").replace("\u202f", "").replace(",", ".")
+    s = s.replace(" ", "").replace("\u202f", "")
+    # \u00ab120,000\u00bb / \u00ab60.000\u00bb \u2014 \u0440\u0430\u0437\u0434\u0435\u043b\u0438\u0442\u0435\u043b\u044c \u0442\u044b\u0441\u044f\u0447, \u0430 \u043d\u0435 \u0434\u0440\u043e\u0431\u043d\u0430\u044f \u0447\u0430\u0441\u0442\u044c.
+    if re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", s):
+        s = s.replace(",", "").replace(".", "")
+    s = s.replace(",", ".")
     try:
         return float(Decimal(s))
     except (InvalidOperation, ValueError):
@@ -204,7 +215,15 @@ def extract_salary(text: str) -> SalaryResult:
         b = _to_float(hourly_range_m.group(2))
         if a is not None and b is not None and _is_plausible_hourly_rate(a) and _is_plausible_hourly_rate(b):
             a, b = min(a, b), max(a, b)
-            cur_guess = "RUB" if re.search(r"₽|руб|rub", ctx, re.I) else "USD"
+            # «400–550/ч» без знака валюты — русское «час», значит рубли.
+            if re.search(r"₽|руб|rub", ctx, re.I):
+                cur_guess = "RUB"
+            elif re.search(r"\$|usd", ctx, re.I):
+                cur_guess = "USD"
+            elif re.search(r"час|/\s*ч\b", ctx, re.I):
+                cur_guess = "RUB"
+            else:
+                cur_guess = "USD"
             cur = _finalize_currency(cur_guess, low_compact, context=ctx)
             if cur:
                 return SalaryResult(a, b, (a + b) / 2, cur)
@@ -222,7 +241,7 @@ def extract_salary(text: str) -> SalaryResult:
 
     range_m = re.search(
         r"(\d[\d\s]*(?:[.,]\d+)?)\s*[-–]\s*(\d[\d\s]*(?:[.,]\d+)?)"
-        r"(?:\s*k)?"
+        r"(?:\s*" + _THOUSANDS_SUFFIX + r")?"
         r"(?:\s*(" + _CURRENCY_TOKEN + r"))?",
         low_compact,
         re.I,
@@ -287,8 +306,8 @@ def extract_salary(text: str) -> SalaryResult:
     # Якорь зарплаты рядом с числом ("salary 150000", "оклад 200к", "rate 50/hr").
     # Допускает до 30 не-цифровых символов между ключевым словом и числом.
     anchored = re.search(
-        r"(?:" + _SALARY_ANCHOR + r")[^\d\n]{0,30}"
-        r"(\d[\d\s]*(?:[.,]\d+)?)\s*(k)?\s*(" + _CURRENCY_TOKEN + r")?",
+        _SALARY_ANCHOR + r"[^\d\n]{0,30}"
+        r"(\d[\d\s]*(?:[.,]\d+)?)\s*(" + _THOUSANDS_SUFFIX + r")?\s*(" + _CURRENCY_TOKEN + r")?",
         low_compact,
         re.I,
     )
@@ -298,7 +317,12 @@ def extract_salary(text: str) -> SalaryResult:
         cur_raw = anchored.group(3)
         if a is not None:
             a = _scale_if_k(a, ctx)
-            if _is_plausible_anchored_salary(a):
+            tail = low_compact[anchored.end() : anchored.end() + 12]
+            hourly_tail = re.match(r"\s*(?:/\s*(?:час|ч|h(?:r|our)?)\b|в\s+час\b|per\s+hour)", tail, re.I)
+            # Без валюты и без «k/тыс» мелкое число у якоря — «Posted: 08», «зп до 180–260 тыс.»
+            # (взято только 180) и т.п.; почасовую ставку («rate 50/hr») не трогаем.
+            too_small = not cur_raw and not hourly_tail and a < _MIN_ANCHORED_WITHOUT_CURRENCY
+            if not too_small and _is_plausible_anchored_salary(a):
                 return SalaryResult(a, None, a, _finalize_currency(cur_raw, low_compact, context=ctx))
 
     # Число с явной валютой или k-маркером (без якорного слова рядом).

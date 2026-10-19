@@ -9,6 +9,7 @@ from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.extraction.salary_period import (
     apply_hourly_currency_from_text,
     normalize_annual_salary_to_monthly,
+    sanitize_salary_amounts,
     sanitize_salary_currency_period,
 )
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -149,4 +150,6 @@ def merge_rules_and_ai(
         apply_hourly_currency_from_text(out)
     sanitize_salary_currency_period(out)
     normalize_annual_salary_to_monthly(out)
+    # Primary тоже: проверка смотрит на правдоподобие суммы, а не перебивает LLM регэкспом.
+    sanitize_salary_amounts(out, default_currency_if_missing=config.fx.default_currency_if_missing)
     return out

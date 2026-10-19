@@ -17,6 +17,7 @@ from tg_jobs_parser.config.schema import FxConfig
 from tg_jobs_parser.extraction.salary_period import (
     apply_hourly_currency_from_text,
     normalize_annual_salary_to_monthly,
+    sanitize_salary_amounts,
     sanitize_salary_currency_period,
 )
 
@@ -72,6 +73,7 @@ def backfill_vacancies_salary_rub(
         apply_hourly_currency_from_text(v)
         sanitize_salary_currency_period(v)
         normalize_annual_salary_to_monthly(v)
+        sanitize_salary_amounts(v, default_currency_if_missing=config.default_currency_if_missing)
         apply_salary_rub_for_vacancy(
             v,
             session,

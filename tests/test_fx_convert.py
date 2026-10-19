@@ -147,3 +147,9 @@ def test_enrich_vacancies_salary_rub_uses_preloaded_rates_without_network(monkey
         rates_for_date={date(2026, 5, 10): {"RUB": 1.0, "USD": 90.0}},
     )
     assert v.detected_salary_avg_rub == 900.0
+
+
+def test_hh_byr_is_converted_as_byn():
+    """HH отдаёт белорусский рубль кодом BYR, курс ЦБ — под BYN."""
+    assert parse_salary_currency("BYR") == ("BYN", "month")
+    assert salary_amount_to_rub(1000.0, "BYR", {"BYN": 27.5}) == 27_500.0

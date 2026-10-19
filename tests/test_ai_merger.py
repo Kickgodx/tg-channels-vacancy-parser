@@ -176,3 +176,38 @@ def test_openrouter_parse_json_fence():
     ext = _parse_extraction(raw)
     assert ext.is_job_post is True
     assert "QA" in ext.detected_specializations
+
+
+def test_primary_small_rub_with_hourly_text_becomes_hourly():
+    """Регресс: LLM вернул «400–550 RUB» на «Оплата 400 - 550/ч» — это ставка за час, а не 475 ₽/мес."""
+    cfg = AppConfig()
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"})})
+    text = "QA парт-тайм. Оплата 400 - 550/ч. Контакты @hr"
+    v = _vacancy(raw_text=text, cleaned_text=text)
+    ai = VacancyAIExtraction(
+        is_job_post=True,
+        detected_specializations=["Manual QA"],
+        salary_min=400,
+        salary_max=550,
+        salary_currency="RUB",
+        confidence=0.8,
+    )
+    out = merge_rules_and_ai(v, ai, cfg)
+    assert out.salary_currency == "RUB/HOUR"
+    assert out.detected_salary_avg == 475
+
+
+def test_primary_drops_small_salary_without_currency():
+    cfg = AppConfig()
+    cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True, "mode": "primary"})})
+    v = _vacancy(raw_text="Compensation: from 2500 gross", cleaned_text="Compensation: from 2500 gross")
+    ai = VacancyAIExtraction(
+        is_job_post=True,
+        detected_specializations=["QA"],
+        salary_min=2500,
+        salary_currency=None,
+        confidence=0.8,
+    )
+    out = merge_rules_and_ai(v, ai, cfg)
+    assert out.detected_salary_min is None
+    assert out.detected_salary_avg is None
