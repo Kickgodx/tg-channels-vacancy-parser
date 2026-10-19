@@ -180,8 +180,8 @@
       "iOS"
     ],
     "detected_grade": "senior",
-    "salary_min": 70000,
-    "salary_max": 90000,
+    "salary_min": 5833,
+    "salary_max": 7500,
     "salary_currency": "EUR",
     "work_format": "relocation",
     "application_urls": [
@@ -395,5 +395,49 @@
     "application_urls": [
       "https://example.com/flutter"
     ]
+  },
+  "grade-exp-none-intern": {
+    "is_job_post": true,
+    "detected_grade": "intern"
+  },
+  "grade-exp-under-1y-intern": {
+    "is_job_post": true,
+    "detected_grade": "intern"
+  },
+  "grade-exp-1y-junior": {
+    "is_job_post": true,
+    "detected_grade": "junior"
+  },
+  "grade-exp-2y-en-junior": {
+    "is_job_post": true,
+    "detected_grade": "junior"
+  },
+  "grade-exp-3y-middle": {
+    "is_job_post": true,
+    "detected_grade": "middle"
+  },
+  "grade-exp-3-5y-middle": {
+    "is_job_post": true,
+    "detected_grade": "middle"
+  },
+  "grade-exp-6y-senior-plus": {
+    "is_job_post": true,
+    "detected_grade": "senior+"
+  },
+  "grade-exp-7y-en-senior-plus": {
+    "is_job_post": true,
+    "detected_grade": "senior+"
+  },
+  "grade-exp-company-age-unknown": {
+    "is_job_post": true,
+    "detected_grade": "unknown"
+  },
+  "grade-title-beats-exp": {
+    "is_job_post": true,
+    "detected_grade": "senior"
+  },
+  "grade-title-beats-exp-higher": {
+    "is_job_post": true,
+    "detected_grade": "middle"
   }
 }
