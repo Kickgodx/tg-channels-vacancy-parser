@@ -86,7 +86,7 @@ def test_enrich_merges_job(monkeypatch):
     service = AIEnrichmentService(cfg)
     fake = VacancyAIExtraction(
         is_job_post=True,
-        detected_specializations=["Go"],
+        detected_specializations=["Backend", "Go"],
         salary_min=400000,
         salary_currency="RUB",
         work_format="remote",
@@ -97,7 +97,9 @@ def test_enrich_merges_job(monkeypatch):
         out = service.enrich(_vacancy())
     assert out is not None
     assert service._progress_done == 1
-    assert out.detected_specializations == ["Go"]
+    # Язык из ответа модели — в технологиях, а не в специализациях.
+    assert out.detected_specializations == ["Backend"]
+    assert "Go" in out.technologies
     assert out.vacancy_score >= 3
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from tg_jobs_parser.config.schema import AppConfig
+from tg_jobs_parser.config.schema import AppConfig, canonical_technologies
 from tg_jobs_parser.extraction.normalizer import normalize_for_match
 from tg_jobs_parser.models.vacancy import Vacancy
 
@@ -16,6 +16,14 @@ def matches_specialization_filter(v: Vacancy, selected: list[str]) -> bool:
     selected_set = set(selected)
     detected = set(v.detected_specializations)
     return bool(detected & selected_set)
+
+
+def matches_technology_filter(v: Vacancy, selected: list[str]) -> bool:
+    """Любая из ``selected`` в технологиях вакансии (без учёта регистра и алиасов); пусто — без фильтра."""
+    if not selected:
+        return True
+    wanted = {t.lower() for t in canonical_technologies(selected)}
+    return any(t.lower() in wanted for t in canonical_technologies(v.technologies))
 
 
 def matches_exclude_keywords(v: Vacancy, keywords: list[str]) -> bool:
@@ -99,6 +107,9 @@ def apply_post_filters(
         return False
     # any_specialization — любая IT-роль: список специализаций не ограничивает.
     if not config.filters.any_specialization and not matches_specialization_filter(v, config.filters.specializations):
+        return False
+    # Технологии — через И со специализациями и независимо от any_specialization.
+    if not matches_technology_filter(v, config.filters.technologies):
         return False
     excl = exclude_keywords if exclude_keywords is not None else config.merged_exclude_keywords()
     if not matches_exclude_keywords(v, excl):

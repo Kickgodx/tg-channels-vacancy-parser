@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.api.deps import CurrentUser, get_current_user, get_db, require_admin, verify_api_key
@@ -15,22 +16,35 @@ from backend.api.params import (
 )
 from backend.db import repository as repo
 from backend.db.aggregate_cache import cached_aggregate
-from backend.db.vacancy_metrics import aggregate_vacancy_metrics
+from backend.db.models import LlmJobRow
+from backend.db.vacancy_metrics import aggregate_vacancy_metrics, technology_counts
 from backend.db.vacancy_repository import counted_vacancies
-from backend.errors import CODE_IDEMPOTENCY_IN_PROGRESS, CODE_RATE_LIMITED, CODE_VALIDATION, AppError, http_error
+from backend.errors import (
+    CODE_IDEMPOTENCY_IN_PROGRESS,
+    CODE_RATE_LIMITED,
+    CODE_UPSTREAM_UNAVAILABLE,
+    CODE_VALIDATION,
+    AppError,
+    http_error,
+)
 from backend.schemas import (
     LlmJobAccepted,
+    TechnologyCount,
+    TechnologyFacetResponse,
     VacancyImportRequest,
     VacancyImportResponse,
     VacancyListResponse,
     VacancyQuery,
+    VacancyReextractInfo,
     VacancySortField,
     VacancySortOrder,
     VacancyThenSortField,
 )
-from backend.services import export_service, idempotency, import_service
-from backend.services.llm_job_service import KIND_IMPORT, LlmJobUserLimitError, llm_job_runner
+from backend.services import export_service, idempotency, import_service, reextract_service
+from backend.services.llm_job_service import KIND_IMPORT, KIND_REEXTRACT, LlmJobUserLimitError, llm_job_runner
 from backend.services.llm_result_freshness import current_ai_config
+from backend.settings import get_settings
+from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.vacancy import Vacancy
 
@@ -108,6 +122,77 @@ def import_vacancies(
         request_hash=req_hash,
     )
     return JSONResponse(status_code=status_code, content=content)
+
+
+def _active_reextract_job_id(db: Session):
+    # Одна джоба переразбора на всех: вторая разбирала бы те же вакансии.
+    return db.scalar(
+        select(LlmJobRow.id)
+        .where(LlmJobRow.kind == KIND_REEXTRACT, LlmJobRow.status.in_(("queued", "running")))
+        .order_by(LlmJobRow.created_at.desc())
+        .limit(1)
+    )
+
+
+@router.get("/reextract", response_model=VacancyReextractInfo)
+def reextract_info(
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(require_admin),
+) -> VacancyReextractInfo:
+    """Сколько вакансий без специализации ждут переразбора LLM. Только admin."""
+    return VacancyReextractInfo(
+        missing_role=reextract_service.count_missing_role(db),
+        max_per_job=reextract_service.MAX_REEXTRACT_VACANCIES,
+        ai_enabled=load_config(get_settings().config_path).ai.enabled,
+        active_job_id=_active_reextract_job_id(db),
+    )
+
+
+@router.post("/reextract", status_code=202, response_model=LlmJobAccepted)
+def start_reextract(
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(require_admin),
+) -> LlmJobAccepted:
+    """Переразобрать LLM активные вакансии (не HH) без специализации. Только admin.
+
+    202 ``{job_id}``: итог по вакансиям растёт в ``GET /llm-jobs/{id}`` (``reextract_result``).
+    Уже идёт переразбор — 202 с его ``job_id``: повтор запроса новой джобы не ставит.
+    """
+    active = _active_reextract_job_id(db)
+    if active is not None:
+        return LlmJobAccepted(job_id=active, status="running")
+    if not load_config(get_settings().config_path).ai.enabled:
+        raise http_error(409, CODE_UPSTREAM_UNAVAILABLE, "AI выключен — переразбор вакансий невозможен.")
+    ids = reextract_service.missing_role_vacancy_ids(db)
+    if not ids:
+        raise http_error(409, CODE_VALIDATION, "Вакансий без специализации нет — переразбирать нечего.")
+    try:
+        queued = llm_job_runner.enqueue(
+            user_id=user.id,
+            kind=KIND_REEXTRACT,
+            params=reextract_service.job_params(ids),
+        )
+    except LlmJobUserLimitError as e:
+        raise http_error(429, CODE_RATE_LIMITED, str(e), retryable=True) from e
+    return LlmJobAccepted(job_id=queued.job_id, status="queued")
+
+
+@router.get("/technologies", response_model=TechnologyFacetResponse)
+def technology_facets(
+    filters: VacancyQuery = Depends(vacancy_filters),
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> TechnologyFacetResponse:
+    """Технологии по числу вакансий под фильтрами — варианты фильтра «Технологии».
+
+    Собственный выбор технологий не учитывается: иначе выбранная технология
+    оставила бы в списке только саму себя и те, что встречаются вместе с ней.
+    """
+    query = filters.model_copy(update={"technologies": []})
+    counts = cached_aggregate(
+        "technology_facets", query, lambda: technology_counts(db, query, limit=limit), limit=limit
+    )
+    return TechnologyFacetResponse(items=[TechnologyCount(name=k, count=v) for k, v in counts.items()])
 
 
 @router.get("/export.xlsx")

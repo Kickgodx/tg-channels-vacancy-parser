@@ -16,6 +16,8 @@ import {
 
 /** Совпадает с MAX_LIST_DEPTH в backend/api/params.py. */
 const MAX_LIST_DEPTH = 10_000;
+/** Сколько самых частых технологий показывать чипами; остальные — через поиск. */
+const TOP_TECHNOLOGY_CHIPS = 30;
 
 type VacanciesTab = "list" | "analytics";
 
@@ -24,6 +26,7 @@ function vacancyFilterParams(
   sourceChannel: string,
   grade: string,
   specializations: string[],
+  technologies: string[],
   workFormat: string,
   dateFrom: string,
   dateTo: string,
@@ -34,6 +37,7 @@ function vacancyFilterParams(
   if (sourceChannel) params.source_channel = sourceChannel.replace(/^@/, "");
   if (grade) params.grade = grade;
   if (specializations.length > 0) params.specialization = specializations;
+  if (technologies.length > 0) params.technology = technologies;
   if (workFormat) params.work_format = workFormat;
   if (dateFrom) params.date_from = dateFrom;
   if (dateTo) params.date_to = dateTo;
@@ -80,6 +84,7 @@ export default function VacanciesPage() {
   const sourceChannel = searchParams.get("source_channel") ?? "";
   const grade = searchParams.get("grade") ?? "";
   const specializations = useMemo(() => searchParams.getAll("specialization"), [searchParams]);
+  const technologies = useMemo(() => searchParams.getAll("technology"), [searchParams]);
   const workFormat = searchParams.get("work_format") ?? "";
   const dateFrom = searchParams.get("date_from") ?? "";
   const dateTo = searchParams.get("date_to") ?? "";
@@ -98,6 +103,7 @@ export default function VacanciesPage() {
   const [selectedPreset, setSelectedPreset] = useState("");
   const [presetName, setPresetName] = useState("");
   const [qInput, setQInput] = useState(q);
+  const [techInput, setTechInput] = useState("");
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportNote, setExportNote] = useState<string | null>(null);
 
@@ -138,13 +144,26 @@ export default function VacanciesPage() {
         sourceChannel,
         grade,
         specializations,
+        technologies,
         workFormat,
         dateFrom,
         dateTo,
         hasSalaryOnly,
       ),
-    [q, sourceChannel, grade, specializations, workFormat, dateFrom, dateTo, hasSalaryOnly],
+    [q, sourceChannel, grade, specializations, technologies, workFormat, dateFrom, dateTo, hasSalaryOnly],
   );
+
+  // Варианты технологий — под остальными фильтрами, без собственного выбора (его backend игнорирует).
+  const facetParams = useMemo(() => {
+    const { technology: _omit, ...rest } = filterParams;
+    return rest;
+  }, [filterParams]);
+  const techFacetsQ = useQuery({
+    queryKey: ["technology-facets", facetParams],
+    queryFn: () => api.getTechnologyFacets(facetParams),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+  });
 
   const sortParams = useMemo(() => {
     const params: VacancyQueryParams = { sort_by: sortBy, sort_order: sortOrder };
@@ -204,6 +223,7 @@ export default function VacanciesPage() {
     source_channel: sourceChannel ? sourceChannel.replace(/^@/, "") : null,
     grade: grade || null,
     specializations,
+    technologies,
     work_format: workFormat || null,
     date_from: dateFrom || null,
     date_to: dateTo || null,
@@ -225,6 +245,7 @@ export default function VacanciesPage() {
       source_channel: p.source_channel ?? null,
       grade: p.grade ?? null,
       specialization: p.specializations ?? [],
+      technology: p.technologies ?? [],
       work_format: p.work_format ?? null,
       date_from: p.date_from ?? null,
       date_to: p.date_to ?? null,
@@ -243,6 +264,29 @@ export default function VacanciesPage() {
   const totalPages = Math.min(pagesByTotal, maxPages);
   const gradeOptions = defaultsQ.data?.grade_options ?? [];
   const specOptions = defaultsQ.data?.specialization_options ?? [];
+  const techFacets = techFacetsQ.data?.items ?? [];
+  const techCounts = new Map(techFacets.map((t) => [t.name, t.count]));
+  // Выбранные — всегда видны, даже если выпали из топа под текущими фильтрами.
+  const techChips = [
+    ...technologies,
+    ...techFacets
+      .slice(0, TOP_TECHNOLOGY_CHIPS)
+      .map((t) => t.name)
+      .filter((name) => !technologies.includes(name)),
+  ];
+  const toggleTechnology = (name: string) =>
+    updateParams({
+      technology: technologies.includes(name)
+        ? technologies.filter((x) => x !== name)
+        : [...technologies, name],
+    });
+  const addTechnologyFromInput = () => {
+    const wanted = techInput.trim().toLowerCase();
+    if (!wanted) return;
+    const name = techFacets.find((t) => t.name.toLowerCase() === wanted)?.name ?? techInput.trim();
+    if (!technologies.includes(name)) updateParams({ technology: [...technologies, name] });
+    setTechInput("");
+  };
 
   return (
     <div className="card">
@@ -381,6 +425,39 @@ export default function VacanciesPage() {
             {s}
           </label>
         ))}
+      </div>
+
+      <p className="field-label">
+        Технологии (пусто — любые; любая из выбранных, вместе со специализациями — через «и»)
+      </p>
+      <div className="chip-grid filters-spec-chips">
+        {techChips.map((t) => (
+          <label key={t} className="chip">
+            <input type="checkbox" checked={technologies.includes(t)} onChange={() => toggleTechnology(t)} />
+            {t}
+            {techCounts.has(t) && <span className="muted"> {techCounts.get(t)}</span>}
+          </label>
+        ))}
+        <input
+          className="tech-search"
+          list="technology-options"
+          placeholder="Другая технология…"
+          value={techInput}
+          onChange={(e) => setTechInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addTechnologyFromInput();
+            }
+          }}
+        />
+        <datalist id="technology-options">
+          {techFacets.map((t) => (
+            <option key={t.name} value={t.name}>
+              {t.count}
+            </option>
+          ))}
+        </datalist>
       </div>
 
       <div className="export-links vacancies-export">

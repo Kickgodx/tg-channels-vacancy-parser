@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 
-from tg_jobs_parser.config.schema import AppConfig
+from tg_jobs_parser.config.schema import AppConfig, split_specializations
 from tg_jobs_parser.extraction.company_extractor import extract_company
 from tg_jobs_parser.extraction.contact_extractor import extract_contact
 from tg_jobs_parser.extraction.grade_extractor import extract_grade
@@ -85,7 +85,8 @@ def rules_from_raw_post(
     country, city = extract_country_city(raw)
     wf = detect_work_format(raw, wf_map)
     contact = extract_contact(raw)
-    technologies = extract_technologies(raw, tech_list)
+    # Языки из пользовательского словаря специализаций — тоже в технологии.
+    specs, technologies = split_specializations(specs, extract_technologies(raw, tech_list))
     company = extract_company(raw)
 
     ch = normalize_channel_username(post.channel_username)

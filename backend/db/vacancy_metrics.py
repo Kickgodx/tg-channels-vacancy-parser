@@ -19,6 +19,7 @@ from tg_jobs_parser.models.metrics import (
 )
 
 _TOP_SPECS = 50
+_TOP_TECHNOLOGIES = 50
 _TOP_SALARY_SPECS = 25
 _MAX_DAILY_BUCKETS = 400
 
@@ -145,10 +146,33 @@ def _spec_stats(session: Session, query: VacancyQuery) -> tuple[dict[str, int], 
     return counts, salary
 
 
+def _tech_lateral(v):
+    """LATERAL unnest технологий; v — алиас vacancies с .correlate(v)."""
+    tech_q = select(func.jsonb_array_elements_text(v.c.technologies).label("tech")).correlate(v)
+    return lateral(tech_q).alias("tech_el")
+
+
+def technology_counts(session: Session, query: VacancyQuery, *, limit: int) -> dict[str, int]:
+    """Технологии по числу вакансий под фильтром (топ ``limit``; при равенстве — по имени)."""
+    v = _vacancies_alias()
+    tech_lat = _tech_lateral(v)
+    n = func.count(v.c.id)
+    stmt = apply_vacancy_filters(
+        select(tech_lat.c.tech, n)
+        .select_from(v.join(tech_lat, true()))
+        .group_by(tech_lat.c.tech)
+        .order_by(n.desc(), tech_lat.c.tech)
+        .limit(limit),
+        query,
+        table=v,
+    )
+    return {str(tech): int(cnt) for tech, cnt in session.execute(stmt).all() if tech}
+
+
 def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsSummary:
     """Сводка для графиков; те же фильтры, что у GET /vacancies.
 
-    Четыре запроса: курс, грейды/форматы/итоги, специализации, дни.
+    Пять запросов: курс, грейды/форматы/итоги, специализации, технологии, дни.
     """
     salary_display = _prepare_fx(session)
     total, with_salary, by_grade, by_format, salary_by_grade = _grade_and_format_stats(session, query)
@@ -169,5 +193,6 @@ def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsS
         salary_by_specialization=salary_spec,
         salary_by_grade=salary_by_grade,
         grade_distribution=by_grade,
+        technology_top=technology_counts(session, query, limit=_TOP_TECHNOLOGIES),
         salary_display=salary_display,
     )

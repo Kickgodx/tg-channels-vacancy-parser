@@ -58,6 +58,7 @@ def get_config_defaults() -> dict:
         "filters": {
             "specializations": list(cfg.filters.specializations),
             "any_specialization": bool(getattr(cfg.filters, "any_specialization", False)),
+            "technologies": list(cfg.filters.technologies),
             "exclude_keywords": list(cfg.filters.exclude_keywords),
             "countries": list(cfg.filters.countries),
             "cities": list(cfg.filters.cities),
@@ -77,6 +78,7 @@ def get_config_defaults() -> dict:
         },
         "telegram": {"telethon_session_file": cfg.telegram.telethon_session_file},
         "specialization_options": list(DEFAULT_SPECIALIZATIONS.keys()),
+        "technology_options": cfg.merged_technologies(),
         "work_format_options": WORK_FORMAT_OPTIONS,
         "grade_options": list(GRADE_OPTIONS),
     }

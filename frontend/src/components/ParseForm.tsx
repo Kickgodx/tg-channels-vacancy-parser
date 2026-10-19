@@ -48,6 +48,19 @@ export default function ParseForm({ onSubmit, disabled, isSubmitting }: Props) {
     }
   };
 
+  const toggleTech = (tech: string) => {
+    if (form.technologies.includes(tech)) {
+      patch({ technologies: form.technologies.filter((t) => t !== tech) });
+    } else {
+      patch({ technologies: [...form.technologies, tech] });
+    }
+  };
+  // Технологии из снимка/конфига, которых нет в словаре, — тоже видны и снимаются.
+  const techOptions = [
+    ...d.technology_options,
+    ...form.technologies.filter((t) => !d.technology_options.includes(t)),
+  ];
+
   const toggleWf = (wf: string) => {
     if (form.workFormats.includes(wf)) {
       patch({ workFormats: form.workFormats.filter((w) => w !== wf) });
@@ -111,6 +124,19 @@ export default function ParseForm({ onSubmit, disabled, isSubmitting }: Props) {
             ))}
           </div>
         )}
+        <p className="field-label">Технологии (пусто — любые; со специализациями — через «и»)</p>
+        <div className="chip-grid">
+          {techOptions.map((tech) => (
+            <label key={tech} className="chip">
+              <input
+                type="checkbox"
+                checked={form.technologies.includes(tech)}
+                onChange={() => toggleTech(tech)}
+              />
+              {tech}
+            </label>
+          ))}
+        </div>
         <label className="field">
           Исключающие ключевые слова (по строке)
           <textarea

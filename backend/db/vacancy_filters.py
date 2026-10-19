@@ -17,7 +17,7 @@ from sqlalchemy.sql import Select
 
 from backend.db.models import VacancyRow, VacancySightingRow
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.config.schema import canonical_specializations
+from tg_jobs_parser.config.schema import canonical_specializations, canonical_technologies
 
 
 def _specializations_match(c, specs: list[str]) -> ColumnElement[bool]:
@@ -26,6 +26,15 @@ def _specializations_match(c, specs: list[str]) -> ColumnElement[bool]:
     Старые имена (``AQA``, ``Manual QA`` в закладках и ссылках) приводятся к каноническим.
     """
     return or_(*[c.detected_specializations.contains([spec]) for spec in canonical_specializations(specs)])
+
+
+def _technologies_match(c, techs: list[str]) -> ColumnElement[bool]:
+    """Хотя бы одна из выбранных технологий в JSONB-массиве вакансии (``@>`` по GIN, миграция 037).
+
+    Имена в БД канонические (``canonical_technologies`` при записи и в миграции), поэтому
+    запрос приводится к тому же написанию: ``golang`` → ``Go``.
+    """
+    return or_(*[c.technologies.contains([tech]) for tech in canonical_technologies(techs)])
 
 
 def fts_query(document, q: str):
@@ -52,6 +61,9 @@ def vacancy_filter_conditions(
         conditions.append(c.detected_grade == query.grade)
     if query.specializations:
         conditions.append(_specializations_match(c, query.specializations))
+    if query.technologies:
+        # Через И со специализациями: «Automation QA + Python» — AQA на Python.
+        conditions.append(_technologies_match(c, query.technologies))
     if query.work_format:
         conditions.append(c.work_format == query.work_format)
     if query.date_from:

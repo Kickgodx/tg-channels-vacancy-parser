@@ -17,20 +17,32 @@ from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 
 # Источник истины для ключа кэша extraction. Меняете промпт → bump.
-EXTRACT_PROMPT_VERSION = "extract-v9"
+EXTRACT_PROMPT_VERSION = "extract-v10"
 
 _SPECIALIZATION_RULES = """
 - detected_specializations — ONLY the job role(s) this post is hiring for (usually ONE primary role).
-- Read the TITLE / first lines first: "Go разработчик", "Senior Backend", "QA Engineer" define the role.
+  A role is the FUNCTION (QA, Automation QA, Backend, Frontend, AI, DevOps, Data Engineer, Analyst…), never the stack.
+- Programming languages, frameworks, platforms, databases and tools (Python, Go, Java, PHP, C++, C#, .NET,
+  Rust, TypeScript, 1С, React, Kubernetes…) are NEVER specializations — put them in technologies only.
+  • "AQA Python" → ["Automation QA"], technologies ["Python", …]. "ML engineer, Python" → ["AI"].
+  • "<Language> developer" → role by what the person builds: server side → "Backend", UI → "Frontend",
+    both → "Fullstack", ML/LLM → "AI", data pipelines → "Data Engineer", test automation → "Automation QA",
+    mobile → "Android"/"iOS". A bare "<language> developer" with no other hint: Go, Java, PHP, C#/.NET,
+    Ruby, Python → "Backend"; C, C++, Rust and anything else → "Software Engineer".
+- Read the TITLE / first lines first: "Senior Backend", "QA Engineer", "Go разработчик" (→ Backend) define the role.
 - Do NOT tag extra roles from skills, tools, or infra mentioned in requirements:
   • "тестирование", "unit tests", "качество кода" in a developer post → NOT QA / Automation QA / SDET.
   • Kubernetes, Docker, CI/CD, client-go, SRE practices in a developer post → NOT DevOps unless the title is DevOps/SRE.
   • "аналитик", "архитектура", "бизнес" in prose without hiring an analyst → NOT System Analyst / Business Analyst / Analyst.
 - Channel footers ("база знаний", "другие вакансии в канале", @mentions) are NOT part of the vacancy — ignore for role.
 - QA roles: manual testing, «тестировщик», Manual QA → "QA"; test automation, AQA, «автотестировщик» → "Automation QA".
-- One clear developer vacancy → list that developer role only (e.g. ["Go"]), not QA + analyst + DevOps.
-- Prefer one canonical name from ALLOWED_SPECIALIZATIONS (e.g. "Go" OR "Golang", not both unless two roles are hired).
-- You MAY add a new role name only if clearly stated in the vacancy (e.g. Rust) even if not in ALLOWED list."""
+- One clear developer vacancy → list that developer role only (e.g. ["Backend"]), not QA + analyst + DevOps.
+- Prefer one canonical name from ALLOWED_SPECIALIZATIONS.
+- You MAY add a new role name only if clearly stated in the vacancy (e.g. "Security Engineer") even if not
+  in ALLOWED list — but never a language or tool name.
+- technologies — languages, frameworks, databases, infra and tools the post explicitly requires or uses.
+  Canonical names: "Go" (not Golang), "PostgreSQL" (not Postgres), "Kafka", "REST", "1С".
+  No roles ("QA", "AI"), no soft skills, no methodologies like "Agile"."""
 
 _JOB_SEEKER_RULES = """
 - is_job_post=true ONLY when an employer/recruiter is hiring (offering a job).
@@ -109,14 +121,14 @@ def resolve_extract_prompt_version(configured: str | None = None) -> str:
 
 
 _FEW_SHOT_USER = """Example job post:
-"Senior Go Developer, remote EU, 350-450k RUB, Requirements: Go, Kubernetes, Docker, apply: https://example.com/careers/go".
-(developer only — if skills exists, they should not become extra roles, they should be listed in technologies)
+"Senior Go Developer, remote EU, 350-450k RUB, building microservices. Requirements: Go, Kubernetes, Docker, apply: https://example.com/careers/go".
+(server-side developer → role Backend; the language and tools are technologies, not roles)
 Example JSON:
 """ + json.dumps(
     {
         "is_job_post": True,
         "rejection_reason": None,
-        "detected_specializations": ["Go"],
+        "detected_specializations": ["Backend"],
         "detected_grade": "senior",
         "salary_min": 350000,
         "salary_max": 450000,
@@ -128,6 +140,24 @@ Example JSON:
         "application_urls": ["https://example.com/careers/go"],
         "confidence": 0.9,
         "notes": "Компания в тексте не указана.",
+    },
+    ensure_ascii=False,
+)
+
+_FEW_SHOT_AQA = """Example test automation post (stack is technologies, not a second role):
+"Ищем AQA (Python) в команду платежей. pytest, Playwright, CI в GitLab. Удалёнка."
+Example JSON:
+""" + json.dumps(
+    {
+        "is_job_post": True,
+        "rejection_reason": None,
+        "detected_specializations": ["Automation QA"],
+        "detected_grade": "unknown",
+        "work_format": "remote",
+        "technologies": ["Python", "Pytest", "Playwright", "GitLab CI"],
+        "application_urls": [],
+        "confidence": 0.9,
+        "notes": "Зарплата и компания в тексте не указаны.",
     },
     ensure_ascii=False,
 )
@@ -263,6 +293,8 @@ def build_messages(
         user_parts.insert(
             0,
             _FEW_SHOT_USER
+            + "\n\n"
+            + _FEW_SHOT_AQA
             + "\n\n"
             + _FEW_SHOT_RESUME
             + "\n\n"

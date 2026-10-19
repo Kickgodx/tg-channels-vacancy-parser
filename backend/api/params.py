@@ -56,6 +56,7 @@ def vacancy_filters(
     source_channel: Annotated[str | None, Query(max_length=128)] = None,
     grade: Annotated[str | None, Query(max_length=32)] = None,
     specialization: Annotated[list[str], Query(max_length=50)] = [],  # noqa: B006 — FastAPI копирует default
+    technology: Annotated[list[str], Query(max_length=50)] = [],  # noqa: B006
     work_format: Annotated[str | None, Query(max_length=32)] = None,
     date_from: Annotated[date | None, _EmptyAsNone, Query(description="YYYY-MM-DD")] = None,
     date_to: Annotated[date | None, _EmptyAsNone, Query(description="YYYY-MM-DD")] = None,
@@ -68,6 +69,7 @@ def vacancy_filters(
         source_channel=source_channel,
         grade=grade,
         specializations=specialization,
+        technologies=technology,
         work_format=work_format,
         date_from=date_from,
         date_to=date_to,

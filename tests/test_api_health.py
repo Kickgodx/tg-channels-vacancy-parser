@@ -121,7 +121,8 @@ def test_vacancy_metrics_aggregated(client: TestClient):
         post_date=datetime(2026, 3, 1, tzinfo=UTC),
         raw_text=text1,
         cleaned_text=text1,
-        detected_specializations=["Python"],
+        detected_specializations=["Automation QA"],
+        technologies=["Python"],
         detected_grade="middle",
         work_format="remote",
         detected_salary_avg=200000.0,
@@ -145,7 +146,8 @@ def test_vacancy_metrics_aggregated(client: TestClient):
         post_date=datetime(2026, 3, 2, tzinfo=UTC),
         raw_text=text2,
         cleaned_text=text2,
-        detected_specializations=["Python", "Backend"],
+        detected_specializations=["Backend"],
+        technologies=["Python", "Go"],
         detected_grade="senior",
         work_format="remote",
         detected_salary_avg=300000.0,
@@ -163,8 +165,8 @@ def test_vacancy_metrics_aggregated(client: TestClient):
     assert body["unique_vacancies"] == 2
     assert body["vacancies_by_grade"].get("middle") == 1
     assert body["vacancies_by_work_format"].get("remote") == 2
-    assert body["vacancies_by_specialization"].get("Python") == 2
-    assert body["vacancies_by_specialization"].get("Backend") == 1
+    assert body["vacancies_by_specialization"] == {"Automation QA": 1, "Backend": 1}
+    assert body["technology_top"] == {"Python": 2, "Go": 1}
     for count in body["vacancies_by_specialization"].values():
         assert count <= body["unique_vacancies"]
     assert len(body["daily"]) >= 1
@@ -174,13 +176,33 @@ def test_vacancy_metrics_aggregated(client: TestClient):
     assert r_list.json()["total"] == 1
     assert r_list.json()["items"][0]["id"] == vacancy_content_id(text2)
 
-    r_multi = client.get("/api/v1/vacancies?specialization=Python&specialization=Backend")
+    r_multi = client.get("/api/v1/vacancies?specialization=Automation%20QA&specialization=Backend")
     assert r_multi.status_code == 200
     assert r_multi.json()["total"] == 2
 
-    r_metrics = client.get("/api/v1/vacancies/metrics?specialization=Python")
+    def _total(qs: str) -> int:
+        resp = client.get(f"/api/v1/vacancies?{qs}")
+        assert resp.status_code == 200, resp.text
+        return resp.json()["total"]
+
+    # Технологии: любая из выбранных; со специализациями — через И; алиасы (golang → Go).
+    assert _total("technology=Python") == 2
+    assert _total("technology=golang") == 1
+    assert _total("specialization=Automation%20QA&technology=Python") == 1
+    assert _total("specialization=Automation%20QA&technology=Go") == 0
+    # Старая ссылка: язык в specialization — фильтр по технологии.
+    assert _total("specialization=Python") == 2
+
+    r_metrics = client.get("/api/v1/vacancies/metrics?technology=Go")
     assert r_metrics.status_code == 200
-    assert r_metrics.json()["unique_vacancies"] == 2
+    assert r_metrics.json()["unique_vacancies"] == 1
+
+    # Фасет игнорирует собственный выбор технологий, остальные фильтры — учитывает.
+    facets = client.get("/api/v1/vacancies/technologies?technology=Go")
+    assert facets.status_code == 200
+    assert facets.json()["items"] == [{"name": "Python", "count": 2}, {"name": "Go", "count": 1}]
+    facets_qa = client.get("/api/v1/vacancies/technologies?specialization=Automation%20QA")
+    assert facets_qa.json()["items"] == [{"name": "Python", "count": 1}]
 
     r_salary = client.get("/api/v1/vacancies?has_salary=true")
     assert r_salary.status_code == 200
@@ -202,7 +224,7 @@ def test_vacancy_metrics_aggregated(client: TestClient):
         post_date=datetime(2026, 3, 3, tzinfo=UTC),
         raw_text=text3,
         cleaned_text=text3,
-        detected_specializations=["Python"],
+        detected_specializations=["Analyst"],
     )
     session = factory()
     try:

@@ -85,6 +85,8 @@ export interface ConfigDefaults {
   filters: {
     specializations: string[];
     any_specialization: boolean;
+    /** Технологии стека; со специализациями — через И. */
+    technologies: string[];
     exclude_keywords: string[];
     countries: string[];
     cities: string[];
@@ -102,6 +104,8 @@ export interface ConfigDefaults {
   };
   telegram: { telethon_session_file: string };
   specialization_options: string[];
+  /** Словарь технологий config.yaml — варианты фильтра прогона. */
+  technology_options: string[];
   work_format_options: string[];
   grade_options: string[];
 }
@@ -209,6 +213,7 @@ export interface SavedFilterParams {
   source_channel?: string | null;
   grade?: string | null;
   specializations?: string[];
+  technologies?: string[];
   work_format?: string | null;
   date_from?: string | null;
   date_to?: string | null;
@@ -385,7 +390,7 @@ export interface CoverLetter {
   stale: boolean;
 }
 
-export type LlmJobKind = "match" | "cover_letter" | "import";
+export type LlmJobKind = "match" | "cover_letter" | "import" | "reextract";
 export type LlmJobStatus = "queued" | "running" | "done" | "error" | "cancelled";
 
 export interface LlmJobAccepted {
@@ -405,11 +410,43 @@ export interface LlmJob {
   cover_letter?: CoverLetter | null;
   /** Импорт: итог по уже обработанным текстам — растёт, пока джоба running. */
   import_result?: VacancyImportResponse | null;
+  /** Переразбор (kind=reextract): итог по уже обработанным вакансиям. */
+  reextract_result?: VacancyReextractResponse | null;
   /** Запрошена отмена; у running — воркер остановит задачу в ближайшей точке проверки. */
   cancel_requested: boolean;
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;
+}
+
+export type VacancyReextractStatus = "updated" | "kept" | "error";
+
+export interface VacancyReextractItem {
+  index: number;
+  vacancy_id: string;
+  status: VacancyReextractStatus;
+  message?: string | null;
+}
+
+export interface VacancyReextractResponse {
+  total: number;
+  items: VacancyReextractItem[];
+  updated: number;
+  kept: number;
+  errors: number;
+  warning?: string | null;
+}
+
+export interface VacancyReextractInfo {
+  missing_role: number;
+  max_per_job: number;
+  ai_enabled: boolean;
+  active_job_id?: string | null;
+}
+
+export interface TechnologyCount {
+  name: string;
+  count: number;
 }
 
 export type VacancyImportStatus = "created" | "exists" | "not_vacancy" | "error";
@@ -478,6 +515,7 @@ export interface RunCreateBody {
   filters?: {
     specializations?: string[];
     any_specialization?: boolean;
+    technologies?: string[];
     exclude_keywords?: string[];
     countries?: string[];
     cities?: string[];
@@ -498,6 +536,7 @@ export interface ParseFormState {
   dateTo: string;
   anySpecialization: boolean;
   specializations: string[];
+  technologies: string[];
   excludeKeywordsText: string;
   countriesText: string;
   citiesText: string;

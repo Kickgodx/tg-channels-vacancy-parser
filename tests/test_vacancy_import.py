@@ -56,7 +56,9 @@ def test_import_creates_vacancy_and_dedups(api_client):
     v = item["vacancy"]
     assert v["source_channel"] == "manual"
     assert v["post_url"] == "https://hh.ru/vacancy/123"
-    assert "Python" in v["detected_specializations"]
+    # Язык — технология, не специализация.
+    assert "Python" in v["technologies"]
+    assert "Python" not in v["detected_specializations"]
 
     # видна в общем списке по фильтру канала
     lst = api_client.get("/api/v1/vacancies?source_channel=manual", headers=_auth(token))

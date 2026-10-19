@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from tg_jobs_parser.config.schema import canonical_specializations
+from tg_jobs_parser.config.schema import canonical_specializations, split_specializations
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS, normalize_grade
 
 _VALID_GRADES = frozenset(GRADE_OPTIONS)
@@ -52,7 +52,8 @@ class VacancyAIExtraction(BaseModel):
     detected_specializations: list[str] = Field(
         default_factory=list,
         description=(
-            "Primary hired role(s) in this post, usually one entry (e.g. ['Go']). "
+            "Primary hired role(s) in this post, usually one entry (e.g. ['Backend']). "
+            "A role, never a language/framework/tool (Python, Go, Java go to technologies). "
             "Do not add QA, analyst, or DevOps from skill/tool mentions unless that role is explicitly hired."
         ),
     )
@@ -74,7 +75,13 @@ class VacancyAIExtraction(BaseModel):
     city: str | None = None
     company: str | None = None
     contact: str | None = None
-    technologies: list[str] = Field(default_factory=list)
+    technologies: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Languages, frameworks, databases, infra and tools required by the post "
+            "(canonical names: Go, PostgreSQL). Not roles, not soft skills."
+        ),
+    )
     required_experience: str | None = None
     employment_type: str | None = None
     application_urls: list[str] = Field(default_factory=list)
@@ -115,6 +122,14 @@ class VacancyAIExtraction(BaseModel):
     def norm_specializations(cls, v: list[str]) -> list[str]:
         # AQA / Manual QA от модели и в кэше extraction до extract-v9.
         return canonical_specializations(v)
+
+    @model_validator(mode="after")
+    def split_roles_and_technologies(self) -> VacancyAIExtraction:
+        # Язык в специализациях (ответ модели или кэш до extract-v10) — это технология.
+        self.detected_specializations, self.technologies = split_specializations(
+            self.detected_specializations, self.technologies
+        )
+        return self
 
     @field_validator("detected_grade", mode="before")
     @classmethod

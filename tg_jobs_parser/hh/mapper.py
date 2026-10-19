@@ -8,7 +8,7 @@ import re
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from tg_jobs_parser.config.schema import canonical_specializations
+from tg_jobs_parser.config.schema import canonical_technologies, split_specializations
 from tg_jobs_parser.hh.grades import grade_from_experience
 from tg_jobs_parser.hh.models import (
     Contacts,
@@ -132,11 +132,14 @@ def _contact_from(contacts: Contacts | None) -> str | None:
     return "; ".join(parts) if parts else None
 
 
-def _specializations(detail: VacancyDetail | VacancyShort) -> list[str]:
+def _roles_and_technologies(detail: VacancyDetail | VacancyShort, key_skills: list[str]) -> tuple[list[str], list[str]]:
     # Роль HH сразу каноническая: «Тестировщик» → QA, «Программист, разработчик» →
     # Software Engineer (SPECIALIZATION_ALIASES); прочие роли — как есть.
     # Без ролей — пусто: выдуманные специализации пускали бы вакансию под чужие фильтры.
-    return canonical_specializations([role.name for role in detail.professional_roles or [] if role.name])
+    # key_skills — технологии в каноническом написании (Golang → Go).
+    roles = [role.name for role in detail.professional_roles or [] if role.name]
+    specs, techs = split_specializations(roles, key_skills)
+    return specs, canonical_technologies(techs)
 
 
 def detail_to_vacancy(
@@ -150,6 +153,7 @@ def detail_to_vacancy(
     title = (detail.name or "").strip()
     body = f"{title}\n\n{cleaned}".strip() if cleaned else title
     lo, hi, avg, currency = _salary_fields(detail.salary_range)
+    specs, technologies = _roles_and_technologies(detail, [s.name for s in detail.key_skills if s.name])
     city = detail.area.name if detail.area else None
     if not city and detail.address and detail.address.city:
         city = detail.address.city
@@ -167,7 +171,7 @@ def detail_to_vacancy(
         post_date=parse_hh_datetime(detail.published_at),
         raw_text=detail.description or body,
         cleaned_text=body,
-        detected_specializations=_specializations(detail),
+        detected_specializations=specs,
         detected_grade=grade_from_experience(detail.experience),
         detected_salary_min=lo,
         detected_salary_max=hi,
@@ -178,7 +182,7 @@ def detail_to_vacancy(
         city=city,
         company=detail.employer.name if detail.employer else None,
         contact=_contact_from(detail.contacts),
-        technologies=[s.name for s in detail.key_skills if s.name],
+        technologies=technologies,
         required_experience=detail.experience.name if detail.experience else None,
         employment_type=detail.employment_form.name if detail.employment_form else None,
         application_urls=urls,
@@ -222,7 +226,7 @@ def short_to_vacancy(
         post_date=parse_hh_datetime(short.published_at),
         raw_text=body,
         cleaned_text=body,
-        detected_specializations=_specializations(short),
+        detected_specializations=_roles_and_technologies(short, [])[0],
         detected_grade=grade_from_experience(short.experience),
         detected_salary_min=lo,
         detected_salary_max=hi,

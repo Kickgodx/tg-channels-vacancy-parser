@@ -68,6 +68,7 @@ function salaryChartSuffix(metrics: MetricsSummary): string {
 export default function MetricsCharts({ metrics }: Props) {
   const salarySuffix = salaryChartSuffix(metrics);
   const specData = dictToBarData(metrics.vacancies_by_specialization ?? {}, 20);
+  const techData = dictToBarData(metrics.technology_top ?? {}, 25);
   const gradeData = dictToBarData(metrics.vacancies_by_grade ?? {});
   const wfData = dictToBarData(metrics.vacancies_by_work_format ?? {});
   const wfTotal = wfData.reduce((sum, row) => sum + row.count, 0);
@@ -96,6 +97,23 @@ export default function MetricsCharts({ metrics }: Props) {
               <YAxis />
               <Tooltip />
               <Bar dataKey="count" fill="#3b5bdb" />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="card chart-card">
+        <h4>Топ технологий</h4>
+        {techData.length === 0 ? (
+          <p className="muted">Нет данных</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={techData} margin={{ bottom: 80 }}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" angle={-35} textAnchor="end" interval={0} height={90} tick={{ fontSize: 11 }} />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="count" fill="#0c8599" />
             </BarChart>
           </ResponsiveContainer>
         )}

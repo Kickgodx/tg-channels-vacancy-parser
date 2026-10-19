@@ -15,6 +15,7 @@ const ALL_COLUMNS = [
   { key: "work_format", label: "Формат", sortable: true },
   { key: "detected_grade", label: "Грейд", sortable: true },
   { key: "detected_specializations", label: "Специализации", sortable: false },
+  { key: "technologies", label: "Технологии", sortable: false },
   { key: "vacancy_score", label: "Score", sortable: true },
   { key: "match_score", label: "Match", sortable: true },
   { key: "preview", label: "Текст", sortable: false },
@@ -106,6 +107,7 @@ export default function VacancyTable({
     "work_format",
     "detected_grade",
     "detected_specializations",
+    "technologies",
     "vacancy_score",
     "preview",
   ]);
@@ -206,6 +208,13 @@ export default function VacancyTable({
         );
       case "detected_specializations":
         return (v.detected_specializations || []).join(", ") || "—";
+      case "technologies": {
+        // Длинный стек — первые несколько, полный список во всплывающей подсказке.
+        const techs = v.technologies ?? [];
+        if (techs.length === 0) return "—";
+        const shown = techs.slice(0, 5).join(", ");
+        return <span title={techs.join(", ")}>{techs.length > 5 ? `${shown}, +${techs.length - 5}` : shown}</span>;
+      }
       case "preview":
         return v.preview || "—";
       default: {

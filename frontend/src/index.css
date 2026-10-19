@@ -369,6 +369,12 @@ tr.clickable:hover {
   overflow-y: auto;
 }
 
+.filters-spec-chips .tech-search {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.5rem;
+  width: 12rem;
+}
+
 .page-tabs {
   display: flex;
   gap: 0.25rem;
