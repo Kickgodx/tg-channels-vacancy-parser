@@ -420,13 +420,13 @@
     "is_job_post": true,
     "detected_grade": "middle"
   },
-  "grade-exp-6y-senior-plus": {
+  "grade-exp-6y-senior": {
     "is_job_post": true,
-    "detected_grade": "senior+"
+    "detected_grade": "senior"
   },
-  "grade-exp-7y-en-senior-plus": {
+  "grade-exp-7y-en-senior": {
     "is_job_post": true,
-    "detected_grade": "senior+"
+    "detected_grade": "senior"
   },
   "grade-exp-company-age-unknown": {
     "is_job_post": true,

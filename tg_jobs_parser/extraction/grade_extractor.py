@@ -13,7 +13,6 @@ _ORDER = [
     "middle",
     "middle+",
     "senior",
-    "senior+",
     "lead",
     "staff",
     "principal",
@@ -28,7 +27,6 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("junior", re.compile(r"\b(junior|джун|джуниор)\b", re.I)),
     ("middle+", re.compile(r"\b(middle\+|мидл\+|\bm\+\b)\b", re.I)),
     ("middle", re.compile(r"\b(middle|mid|мидл|middl)\b", re.I)),
-    ("senior+", re.compile(r"\b(senior\+|сеньор\+|синьор\+)\b", re.I)),
     ("senior", re.compile(r"\b(senior|сеньор|синьор|\bsr\.?\b)\b", re.I)),
     ("lead", re.compile(r"\b(lead|лид|team\s*lead|tech\s*lead)\b", re.I)),
     # Не «to staff teams» — только уровень вроде Staff Engineer / staff-level
@@ -47,6 +45,8 @@ _ALIASES: dict[str, str] = {
     "jr.": "junior",
     "sr": "senior",
     "sr.": "senior",
+    # Отдельного senior+ нет (миграция 035): старый кэш LLM и ответы модели → senior.
+    "senior+": "senior",
     "mid": "middle",
     "trainee": "intern",
     "стажер": "intern",

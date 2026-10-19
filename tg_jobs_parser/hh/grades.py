@@ -12,13 +12,13 @@ _EXPERIENCE_ID_TO_GRADE: dict[str, str] = {
     "noExperience": "intern",
     "between1And3": "junior",
     "between3And6": "middle",
-    "moreThan6": "senior+",
+    "moreThan6": "senior",
 }
 
 # Эвристики для бэкфилла по required_experience (name), когда id уже не хранится.
 _NAME_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("intern", re.compile(r"нет\s+опыта|без\s+опыта|no\s*experience", re.I)),
-    ("senior+", re.compile(r"более\s*6|больше\s*6|more\s*than\s*6|6\s*\+", re.I)),
+    ("senior", re.compile(r"более\s*6|больше\s*6|more\s*than\s*6|6\s*\+", re.I)),
     ("middle", re.compile(r"от\s*3\s*до\s*6|3\s*[–\-]\s*6|between\s*3\s*and\s*6", re.I)),
     ("junior", re.compile(r"от\s*1\s*(года\s*)?до\s*3|1\s*[–\-]\s*3|between\s*1\s*and\s*3", re.I)),
 ]
