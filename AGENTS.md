@@ -9,6 +9,7 @@
 .venv/Scripts/ruff.exe check .                 # lint (конфиг в pyproject.toml)
 cd frontend && npm run lint                    # oxlint (.oxlintrc.json)
 cd frontend && npm run build                   # tsc -b + vite build
+bash scripts/check_alerts.sh                   # при правке observability/alerts|prometheus.yml|alertmanager.yml (Docker)
 ```
 
 - Тесты идут на Postgres 16, как прод. По умолчанию `tests/conftest.py` сам поднимает

@@ -15,7 +15,7 @@ from tg_jobs_parser.ai.search_context import build_search_context
 from tg_jobs_parser.ai.token_cost import TokenCostEstimate, estimate_run_cost
 from tg_jobs_parser.config.schema import AppConfig
 from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.observability.llm_metrics import record_enrich_event
+from tg_jobs_parser.observability.llm_metrics import record_enrich_event, record_llm_disabled
 from tg_jobs_parser.parse_cancel import ParseCancellationToken, ParseCancelled
 from tg_jobs_parser.utils.logger import get_logger
 
@@ -236,7 +236,7 @@ class AIEnrichmentService:
                 self._daily_limit_hit = True
                 with self.stats._lock:
                     self.stats.rate_limit_skipped += 1
-                    self.stats.llm_disabled_mid_run = True
+                self._mark_llm_disabled("quota")
                 record_enrich_event("rate_limit_skipped")
                 return vacancy if self._ai.mode == "assist" else None
             except Exception as e:
@@ -314,9 +314,16 @@ class AIEnrichmentService:
         if len(detail) > 200:
             detail = detail[:199] + "…"
         limiter.disable_llm_for_run(f"circuit breaker: {consecutive} ошибок LLM подряд, последняя: {detail}")
-        with self.stats._lock:
-            self.stats.llm_disabled_mid_run = True
+        self._mark_llm_disabled("circuit_breaker")
         record_enrich_event("circuit_open")
+
+    def _mark_llm_disabled(self, reason: str) -> None:
+        """Первое отключение LLM за разбор — в метрику (алерт ``LlmDisabled``); повторы — нет."""
+        with self.stats._lock:
+            if self.stats.llm_disabled_mid_run:
+                return
+            self.stats.llm_disabled_mid_run = True
+        record_llm_disabled(reason)
 
     def log_batch_finished(self) -> None:
         if self._progress_total <= 0:

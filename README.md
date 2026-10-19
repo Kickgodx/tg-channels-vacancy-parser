@@ -30,6 +30,7 @@ docker compose up --build
 | **Web UI** | http://localhost:5173 |
 | **API** (OpenAPI) | http://localhost:9000/docs |
 | **Prometheus** | http://localhost:9090 |
+| **Alertmanager** | http://localhost:9093 (сработавшие алерты; также Grafana → Alerting) |
 | **Grafana** | http://localhost:3000 (login: `admin` / `GRAFANA_ADMIN_PASSWORD` из `.env`) |
 | **Loki** | http://localhost:3100 (API; логи смотрятся в Grafana → Explore) |
 | **Alloy** | http://localhost:12345 (UI пайплайна сбора логов и трасс) |
@@ -819,6 +820,14 @@ python -m tg_jobs_parser.cli login --telegram-session sessions/tg_jobs.session
 - **Мониторинг.** Контейнер `unhealthy`, если последний проверенный дамп старше
   1,5 × `BACKUP_INTERVAL_HOURS`; каждый шаг пишется в stdout (в Loki через Alloy).
   Рестарт контейнера дамп не повторяет — отсчёт идёт от последнего удачного.
+- **Метрики для алертов.** При старте и после каждой попытки скрипт перезаписывает
+  `pg_backup.prom` в каталоге дампов (текстовый формат Prometheus):
+  `pg_backup_last_verified_timestamp_seconds` (0 — проверенного дампа нет),
+  `pg_backup_interval_seconds`, `pg_backup_last_attempt_timestamp_seconds` и
+  `pg_backup_last_attempt_success` (1/0). Итог попытки хранится в `.last_attempt` и
+  переживает рестарт; запуск, не получивший lock, попыткой не считается. В профиле
+  observability файл читает Alloy, на нём построены алерты `PgBackupStale`,
+  `PgBackupFailed` и `PgBackupMetricsMissing` (см. «Алерты»).
 
 ```powershell
 # внеплановый дамп сейчас
@@ -889,12 +898,13 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 |-----------|------------|
 | **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
 | **`GET /metrics`** | Эндпоинт Prometheus на отдельном порту `API_METRICS_PORT` (`backend:9100`, только Docker-сеть; не путать с `/api/v1/vacancies/metrics`) |
-| **Prometheus** | Scrape backend, llm-worker, parse-worker и hh-worker каждые 15 с (`observability/prometheus.yml`) |
+| **Prometheus** | Scrape backend, llm-worker, parse-worker и hh-worker каждые 15 с (`observability/prometheus.yml`); правила алертов — `observability/alerts/` |
+| **Alertmanager** | Сработавшие алерты (см. «Алерты»); наружу не отправляет — UI `:9093` и Grafana → Alerting |
 | **Grafana** | Дашборды **API**, **LLM**, **LLM jobs / queue**, **Pipeline**, **Parse run**, **HH.ru sync**, **DB pool** |
-| **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment; ожидание RPM-лимита (`llm_rate_gate_wait_seconds`), повторы (`llm_retries_total{reason}`), оценка стоимости по ценам `llm_models.yaml` (`llm_cost_usd_total{model}`) |
+| **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment; ожидание RPM-лимита (`llm_rate_gate_wait_seconds`), повторы (`llm_retries_total{reason}`), оценка стоимости по ценам `llm_models.yaml` (`llm_cost_usd_total{model}`), отключение LLM посреди разбора — раз за прогон или импорт (`llm_enrich_disabled_total{reason}`: `circuit_breaker`, `quota`, `init_failed`) |
 | **Метрики прогона** | Живые, во время прогона: каналы и посты Telegram (`telegram_channels_fetched_total{result}`, `telegram_posts_fetched_total`, `telegram_channel_fetch_duration_seconds`), паузы между страницами истории (`telegram_request_pause_seconds_total`), FloodWait — в т.ч. короткие, которые Telethon пережидает сам (`telegram_flood_waits_total{handled_by}`), поток обработанных постов (`parse_posts_processed_total{result}`), длительность фаз (`parse_phase_duration_seconds{phase}`) |
-| **Доменные метрики** | прогоны, UPSERT/TTL, импорт, матчинг, письма, LLM-джобы (`llm_job_enqueue_*`, `llm_worker_*`, `llm_jobs_by_status`, recover), глубина RQ-очередей (`llm_rq_queue_jobs{queue="llm"|"parse"}`), parse recover (`parse_jobs_recover_total`), auth, ЦБ |
-| **`db_*` gauges** | COUNT-агрегаты по таблицам с кэшем `METRICS_DB_STATS_CACHE_SECONDS` (30 с) между scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ); только на backend (`job="tg-jobs-backend"`) |
+| **Доменные метрики** | прогоны, UPSERT/TTL, импорт, матчинг, письма, LLM-джобы (`llm_job_enqueue_*`, `llm_worker_*`, `llm_jobs_by_status`, recover), глубина RQ-очередей (`llm_rq_queue_jobs{queue="llm"|"parse"}`), parse recover (`parse_jobs_recover_total`), отказы 503 `OVERLOADED` (`api_overload_rejections_total`; 503 от HH сюда не входят), auth, ЦБ |
+| **`db_*` gauges** | COUNT-агрегаты по таблицам с кэшем `METRICS_DB_STATS_CACHE_SECONDS` (30 с) между scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ, задачи в `running` с истёкшим lease — `db_jobs_lease_expired{kind="parse"|"llm"|"hh_sync"}`); только на backend (`job="tg-jobs-backend"`) |
 | **`db_pool_*` gauges** | SQLAlchemy QueuePool: занято / свободно / overflow / лимит (`pool_size` + `max_overflow`); на backend, llm-worker и parse-worker |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
 | **Alloy** | Собирает stdout контейнеров compose-проекта через `docker-socket-proxy` (только чтение контейнеров, сетей и логов; сам `docker.sock` в Alloy не монтируется, Alloy работает не под root), парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и воркеров, отбрасывает шумные span'ы `connect` SQLAlchemy и отправляет в Tempo (`observability/alloy-config.alloy`) |
@@ -908,7 +918,43 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 
 **Нагрузочный тест:** дашборд **k6 load test** — RPS, p50/p95/p99, ошибки и VU k6 (remote write, `PROM_RW=1`) рядом с RPS, задержками и пулом БД стенда `lt-api` (job `tg-jobs-loadtest`). Порядок — [scripts/loadtest/README.md](scripts/loadtest/README.md).
 
-Конфигурация: `observability/prometheus.yml`, `observability/loki-config.yml`, `observability/tempo-config.yml`, `observability/alloy-config.alloy`, provisioning Grafana — `observability/grafana/provisioning/` (datasources Prometheus, Loki и Tempo с переходами лог ↔ трасса).
+Конфигурация: `observability/prometheus.yml`, `observability/alerts/`, `observability/alertmanager.yml`, `observability/loki-config.yml`, `observability/tempo-config.yml`, `observability/alloy-config.alloy`, provisioning Grafana — `observability/grafana/provisioning/` (datasources Prometheus, Loki и Tempo с переходами лог ↔ трасса, Alertmanager).
+
+### Алерты
+
+Prometheus вычисляет правила из `observability/alerts/tg-jobs.yml` и отдаёт сработавшие в
+Alertmanager. **Доставки наружу нет**: алерты видны в UI Alertmanager (http://localhost:9093)
+и в Grafana → Alerting (правила — источник Prometheus, сработавшие и silences —
+Alertmanager). Пороги — в `openspec/specs/platform/alerting`.
+
+| Алерт | Severity | Когда |
+|---|---|---|
+| `JobLeaseExpired` | critical | прогон, LLM-задача или HH sync в `running` с истёкшим lease дольше 5 мин (`db_jobs_lease_expired{kind}`): recover не работает |
+| `ParseQueueStuck` | critical | прогон в очереди `parse` дольше 10 мин — parse-worker его не берёт |
+| `LlmQueueGrowing` | warning | очередь `llm` 15 мин не пустела и выросла (держится 5 мин) |
+| `ParseRunFailed` | warning | за последние 24 ч есть прогон `failed` |
+| `LlmDisabled` | warning | за последние 24 ч разбор продолжал без LLM: `circuit_breaker`, `quota`, `init_failed` |
+| `FxRatesStale` | warning | последний курс ЦБ старше 3 суток дольше часа |
+| `ApiOverloaded` | warning | 503 `OVERLOADED` — больше 1% запросов и больше 0,1/с 5 мин подряд |
+| `TargetDown` | critical | backend или воркер не отдаёт `/metrics` 5 мин, в т.ч. остановленный контейнер |
+| `WorkerMissing` | critical | у llm-, parse- или hh-worker нет ни одной цели 5 мин (не запускался с момента старта Prometheus) |
+| `PgBackupStale` | critical | проверенный дамп старше 1,5 × `BACKUP_INTERVAL_HOURS` дольше часа |
+| `PgBackupFailed` | critical | последняя попытка бэкапа провалилась (до следующей удачной) |
+| `PgBackupMetricsMissing` | warning | метрик бэкапа нет 30 мин (pg-backup не пишет `pg_backup.prom` или Alloy его не читает) |
+
+Алерты о событиях (`ParseRunFailed`, `LlmDisabled`) держатся 24 часа — без доставки короткий
+алерт никто бы не увидел. Метрики бэкапа идут не скрейпом: `pg-backup` пишет
+`pg_backup.prom`, Alloy читает его textfile-коллектором и отправляет в Prometheus
+(`job="pg-backup"`).
+
+- **Заглушить алерт** (например, `FxRatesStale` на новогодние каникулы, когда ЦБ не
+  публикует курсы) — silence в UI Alertmanager или Grafana → Alerting → Silences.
+- **Подключить доставку** (Telegram, почта) — получатель `ui-only` в
+  `observability/alertmanager.yml`, пример там в комментарии. Секреты — только файлом
+  (`bot_token_file` и т.п.): Alertmanager не подставляет переменные окружения.
+- **Проверка правил** после правки: `bash scripts/check_alerts.sh` (Docker; `promtool
+  check config`, юнит-тесты `observability/alerts/tests/`, `amtool check-config`). Тест
+  `tests/test_alert_rules.py` ловит метрику в правиле, которой код больше не отдаёт.
 
 **HTTP-лог** (`backend/http_logging.py`, логгер `backend.http`, вместо `uvicorn.access`). Каждому запросу присваивается `request_id` (UUID; валидный входящий `X-Request-ID` переиспользуется), он возвращается в заголовке ответа `X-Request-ID` и попадает в **каждую** строку лога, записанную во время запроса (и в логи роутов/сервисов): `... | backend.http | request_id=<uuid> | ...`. На запрос — одна запись после ответа:
 `RESPONSE METHOD path status Nms {json}`. В JSON — `status`, `duration_ms`, `headers` и `body` ответа, а в `request` — `client`, `headers` и `body` запроса. Начало долгого запроса (SSE, экспорт) видно в трассе.

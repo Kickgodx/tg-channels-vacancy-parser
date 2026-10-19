@@ -39,6 +39,13 @@ PARSE_RUNS = Counter(
     labelnames=("status",),  # completed | partial | failed | cancelled
 )
 
+# Отказы 503 OVERLOADED (backend/overload.py). В http_requests_total{status="503"} они
+# смешаны с 503 UPSTREAM_UNAVAILABLE от HH — алерт перегрузки считает по этому счётчику.
+API_OVERLOAD_REJECTIONS = Counter(
+    "api_overload_rejections_total",
+    "Запросы, отклонённые 503 OVERLOADED: место обработки не освободилось за API_QUEUE_TIMEOUT_SECONDS",
+)
+
 PARSE_RUNS_ACTIVE = Gauge(
     "parse_runs_active",
     "Прогоны парсинга, выполняющиеся прямо сейчас",
@@ -473,6 +480,9 @@ class _DBPoolCollector:
 # --- Агрегаты БД на scrape ---------------------------------------------------
 
 
+_JOBS_LEASE_EXPIRED_HELP = "Фоновые задачи в running с истёкшим или пустым lease (parse | llm | hh_sync)"
+
+
 class _DBStatsCollector:
     """COUNT-запросы по таблицам для scrape /metrics, с кэшем.
 
@@ -521,6 +531,7 @@ class _DBStatsCollector:
         yield GaugeMetricFamily("fx_latest_rate_timestamp_seconds", "Дата последнего курса ЦБ (unix time)")
         yield GaugeMetricFamily("db_hh_listings", "Кэш HH listings", labels=["state"])
         yield GaugeMetricFamily("llm_jobs_by_status", "LLM-джобы в БД по статусу", labels=["status"])
+        yield GaugeMetricFamily("db_jobs_lease_expired", _JOBS_LEASE_EXPIRED_HELP, labels=["kind"])
 
     def collect(self):
         try:
@@ -532,6 +543,7 @@ class _DBStatsCollector:
                 fx_latest_ts,
                 hh_listings,
                 llm_jobs_by_status,
+                jobs_lease_expired,
             ) = self._read_db_cached()
         except Exception as e:
             _LOG.debug("DBStatsCollector: БД недоступна: %s", e)
@@ -603,6 +615,11 @@ class _DBStatsCollector:
             fam.add_metric([status], n)
         yield fam
 
+        fam = GaugeMetricFamily("db_jobs_lease_expired", _JOBS_LEASE_EXPIRED_HELP, labels=["kind"])
+        for kind, n in jobs_lease_expired.items():
+            fam.add_metric([kind], n)
+        yield fam
+
     @staticmethod
     def _read_db() -> tuple[
         dict[str, int],
@@ -612,16 +629,18 @@ class _DBStatsCollector:
         float | None,
         dict[str, int],
         dict[str, int],
+        dict[str, int],
     ]:
         from datetime import timedelta
 
-        from sqlalchemy import func, select
+        from sqlalchemy import func, or_, select
 
         from backend.db.models import (
             AIExtractionCacheRow,
             CoverLetterRow,
             ExchangeRateRow,
             HhListingRow,
+            HhSyncJobRow,
             LlmJobRow,
             ParseRunRow,
             ResumeRow,
@@ -638,6 +657,7 @@ class _DBStatsCollector:
         fx_latest_ts: float | None = None
         hh_listings = {"total": 0, "with_detail": 0, "without_detail": 0}
         llm_jobs_by_status: dict[str, int] = {}
+        jobs_lease_expired: dict[str, int] = {}
         since = datetime.now(UTC) - timedelta(hours=24)
 
         with session_scope() as s:
@@ -694,6 +714,22 @@ class _DBStatsCollector:
             for status, n in s.execute(select(LlmJobRow.status, func.count()).group_by(LlmJobRow.status)):
                 llm_jobs_by_status[str(status)] = int(n)
 
+            # running с истёкшим lease: recover (раз в JOB_RECOVER_INTERVAL_SECONDS) такую
+            # задачу возвращает в очередь — долго висящая значит, что recover не работает.
+            db_now = func.now()
+            for kind, model in (("parse", ParseRunRow), ("llm", LlmJobRow), ("hh_sync", HhSyncJobRow)):
+                jobs_lease_expired[kind] = int(
+                    s.scalar(
+                        select(func.count())
+                        .select_from(model)
+                        .where(
+                            model.status == "running",
+                            or_(model.lease_until.is_(None), model.lease_until < db_now),
+                        )
+                    )
+                    or 0
+                )
+
         return (
             counts,
             runs_by_status,
@@ -702,6 +738,7 @@ class _DBStatsCollector:
             fx_latest_ts,
             hh_listings,
             llm_jobs_by_status,
+            jobs_lease_expired,
         )
 
 

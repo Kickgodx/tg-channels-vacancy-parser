@@ -287,9 +287,16 @@ def _broken_ai(monkeypatch) -> None:
     monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", broken)
 
 
+def _init_failed() -> float:
+    from prometheus_client import REGISTRY
+
+    return REGISTRY.get_sample_value("llm_enrich_disabled_total", {"reason": "init_failed"}) or 0.0
+
+
 def test_primary_without_llm_fails_before_fetch(monkeypatch):
     from tg_jobs_parser.ai.enricher import LlmUnavailableError
 
+    before = _init_failed()
     _broken_ai(monkeypatch)
     parser = _NeverFetched()
     _install(monkeypatch, parser)
@@ -301,9 +308,11 @@ def test_primary_without_llm_fails_before_fetch(monkeypatch):
     assert "OPENROUTER_API_KEY не задан" in message
     assert "primary" in message and "assist" in message
     assert parser.calls == 0
+    assert _init_failed() == before + 1
 
 
 def test_assist_without_llm_runs_on_rules(monkeypatch):
+    before = _init_failed()
     _broken_ai(monkeypatch)
     _install(monkeypatch, _StreamingParser({"alpha": [_post("alpha", 1)], "beta": []}))
 
@@ -313,6 +322,7 @@ def test_assist_without_llm_runs_on_rules(monkeypatch):
     assert result.vacancies_unique[0].extraction_source == "rules"
     assert "AI не запущен: OPENROUTER_API_KEY не задан" in result.parse_warnings
     assert result.incomplete_reason is None
+    assert _init_failed() == before + 1
 
 
 class _MemCache:

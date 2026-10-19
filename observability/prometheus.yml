@@ -2,6 +2,16 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Правила алертов (observability/alerts/, тесты — scripts/check_alerts.sh). Сработавшие уходят
+# в Alertmanager; доставки наружу нет — см. observability/alertmanager.yml.
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   # Отдельный порт метрик backend (API_METRICS_PORT), не порт API: на хост он не публикуется.
   - job_name: tg-jobs-backend

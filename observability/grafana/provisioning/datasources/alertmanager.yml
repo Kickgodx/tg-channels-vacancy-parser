@@ -1,0 +1,15 @@
+apiVersion: 1
+
+# Алерты Prometheus (observability/alerts/) в Grafana → Alerting: правила видны через
+# datasource Prometheus, сработавшие алерты и silences — через этот.
+datasources:
+  - name: Alertmanager
+    uid: alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: false
+    jsonData:
+      implementation: prometheus
+      # Алерты самой Grafana сюда не отправляются: их нет, источник правил — Prometheus.
+      handleGrafanaManagedAlerts: false

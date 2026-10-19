@@ -8,6 +8,7 @@ import anyio
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
+from prometheus_client import REGISTRY
 
 from backend.overload import OverloadMiddleware, RequestSlots
 
@@ -86,6 +87,32 @@ def test_busy_process_rejects_after_queue_timeout():
 
     app = anyio.run(_while_busy, "/api/v1/slow", check)
     assert app.state.request_slots.in_use == 0  # места вернулись
+
+
+def _rejections() -> float:
+    return REGISTRY.get_sample_value("api_overload_rejections_total") or 0.0
+
+
+def test_overload_rejection_is_counted():
+    before = _rejections()
+
+    async def check(client):
+        assert (await client.get("/api/v1/fast")).status_code == 503
+
+    anyio.run(_while_busy, "/api/v1/slow", check)
+    assert _rejections() == before + 1
+
+
+def test_served_request_is_not_counted_as_rejection():
+    app, _gate, _started = _app(limit=1, queue_timeout=0.2)
+    before = _rejections()
+
+    async def run():
+        async with _client(app) as client:
+            assert (await client.get("/api/v1/fast")).status_code == 200
+
+    anyio.run(run)
+    assert _rejections() == before
 
 
 def test_zero_queue_timeout_rejects_immediately():

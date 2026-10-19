@@ -124,3 +124,17 @@ def test_llm_enrich_metrics_merged_on_llm_success(monkeypatch):
     with patch.object(service._client, "extract_with_fallback", return_value=(fake, LLMUsage())):
         assert service.enrich(_vacancy()) is not None
     assert _counter("llm_enrich_events_total", {"event": "merged"}) == before + 1
+
+
+def test_llm_enrich_disabled_series_start_at_zero():
+    """Без нулевых серий первый inc() не виден increase() — алерт LlmDisabled молчал бы."""
+    import subprocess
+    import sys
+
+    code = (
+        "from prometheus_client import REGISTRY\n"
+        "import tg_jobs_parser.observability.llm_metrics\n"
+        "for r in ('circuit_breaker', 'quota', 'init_failed'):\n"
+        "    assert REGISTRY.get_sample_value('llm_enrich_disabled_total', {'reason': r}) == 0, r\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
