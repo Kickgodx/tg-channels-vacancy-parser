@@ -39,7 +39,9 @@ def test_fts_condition_compiles_for_postgresql():
         VacancyQuery(q="python разработчик"),
     )
     sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
-    assert "to_tsvector" in sql
+    # Документ — хранимая колонка (миграция 033), без to_tsvector на каждый запрос.
+    assert "vacancies.search_tsv @@" in sql
+    assert "to_tsvector" not in sql
     assert "websearch_to_tsquery" in sql
     assert "@@" in sql
     assert "russian" in sql

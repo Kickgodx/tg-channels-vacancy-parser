@@ -413,3 +413,17 @@ def test_token_without_version_claim_still_valid(client: TestClient):
         {"sub": str(user_id), "iat": now, "exp": now + timedelta(minutes=5)}, "test-secret", algorithm="HS256"
     )
     assert client.get("/api/v1/auth/me", headers=_auth(legacy)).status_code == 200
+
+
+def test_deactivated_user_is_rejected_on_next_request(client: TestClient):
+    """Текущий пользователь читается из базы на каждый запрос — без кэша."""
+    from sqlalchemy import update
+
+    from backend.db.models import UserRow
+    from backend.db.session import session_scope
+
+    token = _register(client, "blocked@example.com").json()["access_token"]
+    assert client.get("/api/v1/auth/me", headers=_auth(token)).status_code == 200
+    with session_scope() as s:
+        s.execute(update(UserRow).where(UserRow.email == "blocked@example.com").values(is_active=False))
+    assert client.get("/api/v1/auth/me", headers=_auth(token)).status_code == 401

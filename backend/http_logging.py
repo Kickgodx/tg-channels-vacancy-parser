@@ -4,15 +4,14 @@
 ``request_id`` (UUID; валидный входящий ``X-Request-ID`` переиспользуется),
 он же уходит в заголовок ответа ``X-Request-ID`` и в contextvar
 ``request_id_var`` — все логи внутри запроса получают префикс
-``request_id=… |``. Две записи на запрос:
+``request_id=… |``. Одна запись на запрос — после ответа:
+``RESPONSE METHOD path status Nms {json}``. В JSON — статус, длительность,
+заголовки и тело ответа, а в ``request`` — клиент, заголовки и тело запроса
+(текстовое тело вычитывается заранее и отдаётся приложению повторно).
 
-- ``REQUEST METHOD path {json}`` — до обработки: заголовки и тело (текстовое
-  тело вычитывается заранее и отдаётся приложению повторно);
-- ``RESPONSE METHOD path status Nms {json}`` — после ответа: заголовки и тело.
-
-Тела ответа копятся только для лога — SSE и выгрузки файлов стримятся без
-буферизации. Тела пишутся только для текстовых типов (JSON, form, text/*,
-XML), кроме ``text/event-stream`` и ``Content-Disposition: attachment``.
+От тел копится только начало до ``body_limit`` — SSE и выгрузки файлов
+стримятся без буферизации. Тела пишутся только для текстовых типов (JSON, form,
+text/*, XML), кроме ``text/event-stream`` и ``Content-Disposition: attachment``.
 Секреты маскируются: заголовки авторизации и cookies, query-параметры и
 JSON/form-ключи вида password/token/ticket/secret/api_key.
 """
@@ -61,8 +60,9 @@ _TEXT_TYPES = frozenset(
         "application/javascript",
     }
 )
-_CAPTURE_LIMIT = 1 << 20
 _JSON_STR_PAIR = re.compile(r'"((?:[^"\\]|\\.)*)"(\s*:\s*)"(?:[^"\\]|\\.)*"')
+# Строковое значение, обрезанное границей лимита: закрывающей кавычки нет до конца среза.
+_JSON_STR_TAIL = re.compile(r'"((?:[^"\\]|\\.)*)"(\s*:\s*)"(?:[^"\\]|\\.)*\\?$')
 
 
 def is_sensitive_key(key: str) -> bool:
@@ -114,50 +114,61 @@ def render_headers(raw: list[tuple[bytes, bytes]]) -> dict[str, str]:
     return out
 
 
-def _truncate(text: str, limit: int, total_bytes: int) -> str:
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit]}…[truncated, {total_bytes} bytes]"
+def _mask_json_strings(text: str) -> str:
+    """Маскировать строковые значения чувствительных ключей в (возможно, обрезанном) JSON-тексте."""
+
+    def mask(m: re.Match) -> str:
+        return f'"{m.group(1)}"{m.group(2)}"{MASK}"' if is_sensitive_key(m.group(1)) else m.group(0)
+
+    return _JSON_STR_TAIL.sub(mask, _JSON_STR_PAIR.sub(mask, text))
 
 
 def render_body(raw: bytes, content_type: str | None, *, total_bytes: int, limit: int) -> Any:
-    """Тело для лога: dict/list для целого JSON в пределах лимита, иначе строка."""
+    """Тело для лога: dict/list для целого JSON не длиннее лимита, иначе строка.
+
+    Целиком (``json.loads`` → ``redact``) разбирается только тело в пределах лимита:
+    в журнал всё равно уходит не больше ``limit`` байт, а разбор и повторная
+    сериализация 70-килобайтного списка стоили ~30% CPU запроса. Длинное тело
+    маскируется регулярными выражениями в своём начале.
+    """
     if not raw:
         return None
-    text = raw.decode("utf-8", errors="replace")
     mt = _media_type(content_type)
-    complete = total_bytes <= len(raw)
-    if complete and (mt == "application/json" or mt.endswith("+json")):
+    complete = len(raw) >= total_bytes
+    if complete and total_bytes <= limit and (mt == "application/json" or mt.endswith("+json")):
         try:
-            data = redact(json.loads(text))
+            data = redact(json.loads(raw))
         except ValueError:
             pass
         else:
             dumped = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-            return data if len(dumped) <= limit else _truncate(dumped, limit, total_bytes)
-    if mt == "application/x-www-form-urlencoded" and complete:
-        text = redact_query(text)
-    else:
-        text = _JSON_STR_PAIR.sub(
-            lambda m: f'"{m.group(1)}"{m.group(2)}"{MASK}"' if is_sensitive_key(m.group(1)) else m.group(0),
-            text,
-        )
-    return _truncate(text, limit, total_bytes)
+            if len(dumped) <= limit:
+                return data
+    shown = raw[:limit]
+    text = shown.decode("utf-8", errors="replace")
+    # Форма маскируется и обрезанной: parse_qsl разбирает уже полученные пары.
+    text = redact_query(text) if mt == "application/x-www-form-urlencoded" else _mask_json_strings(text)
+    if total_bytes > len(shown):
+        text = f"{text}…[truncated, {total_bytes} bytes]"
+    return text
 
 
 class _BodyCapture:
-    __slots__ = ("chunks", "enabled", "size", "total")
+    """Начало тела не длиннее ``limit`` + 1 байт (лишний байт — признак обрезки) и полный размер."""
 
-    def __init__(self, enabled: bool) -> None:
+    __slots__ = ("chunks", "enabled", "limit", "size", "total")
+
+    def __init__(self, enabled: bool, limit: int = 0) -> None:
         self.enabled = enabled
+        self.limit = limit + 1
         self.chunks: list[bytes] = []
         self.size = 0
         self.total = 0
 
     def add(self, chunk: bytes) -> None:
         self.total += len(chunk)
-        if self.enabled and chunk and self.size < _CAPTURE_LIMIT:
-            part = chunk[: _CAPTURE_LIMIT - self.size]
+        if self.enabled and chunk and self.size < self.limit:
+            part = chunk[: self.limit - self.size]
             self.chunks.append(part)
             self.size += len(part)
 
@@ -204,36 +215,31 @@ class HttpLoggingMiddleware:
 
         pending: deque = deque()
         if self.log_bodies and is_loggable_type(req_headers.get("content-type")):
-            pending, req_body, complete = await _read_request_body(receive)
+            pending, req_body, complete = await _read_request_body(receive, self.body_limit)
             content_length = req_headers.get("content-length", "")
-            total = (
+            req_total = (
                 req_body.total
                 if complete
                 else (int(content_length) if content_length.isdigit() else req_body.total + 1)
             )
         else:
-            req_body, total = _BodyCapture(False), 0
+            req_body, req_total = _BodyCapture(False), 0
 
         client = scope.get("client")
         request: dict[str, Any] = {
-            "event": "request",
-            "request_id": request_id,
-            "method": method,
-            "path": path,
             "client": f"{client[0]}:{client[1]}" if client else None,
             "headers": req_headers,
         }
         body = render_body(
             req_body.data,
             req_headers.get("content-type"),
-            total_bytes=total,
+            total_bytes=req_total,
             limit=self.body_limit,
         )
         if body is not None:
             request["body"] = body
-        _LOG.info("REQUEST %s %s %s", method, path, _dumps(request))
 
-        resp_body = _BodyCapture(False)
+        resp_body = _BodyCapture(False, self.body_limit)
         resp: dict[str, Any] = {"status": None, "headers": {}}
 
         async def receive_wrapper():
@@ -261,19 +267,21 @@ class HttpLoggingMiddleware:
         try:
             await self.app(scope, receive_wrapper, send_wrapper)
         finally:
-            self._log_response(request_id, method, path, started, resp, resp_body)
+            self._log(request_id, method, path, started, request, resp, resp_body)
             request_id_var.reset(token)
 
-    def _log_response(self, request_id, method, path, started, resp, resp_body) -> None:
+    def _log(self, request_id, method, path, started, request, resp, resp_body) -> None:
+        """Одна запись на запрос — после ответа: данные запроса и ответа вместе."""
         status = resp["status"] or 500
         duration_ms = round((time.perf_counter() - started) * 1000, 1)
-        response: dict[str, Any] = {
+        record: dict[str, Any] = {
             "event": "response",
             "request_id": request_id,
             "method": method,
             "path": path,
             "status": status,
             "duration_ms": duration_ms,
+            "request": request,
             "headers": resp["headers"],
         }
         body = render_body(
@@ -283,7 +291,7 @@ class HttpLoggingMiddleware:
             limit=self.body_limit,
         )
         if body is not None:
-            response["body"] = body
+            record["body"] = body
         level = logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO
         _LOG.log(
             level,
@@ -292,7 +300,7 @@ class HttpLoggingMiddleware:
             path,
             status,
             duration_ms,
-            _dumps(response),
+            _dumps(record),
         )
 
 
@@ -307,12 +315,12 @@ def resolve_request_id(raw_headers: list[tuple[bytes, bytes]]) -> str:
     return str(uuid.uuid4())
 
 
-async def _read_request_body(receive) -> tuple[deque, _BodyCapture, bool]:
-    """Вычитать тело (до ``_CAPTURE_LIMIT``) для лога; сообщения потом отдаются приложению."""
-    capture = _BodyCapture(True)
+async def _read_request_body(receive, limit: int) -> tuple[deque, _BodyCapture, bool]:
+    """Вычитать начало тела (до ``limit`` + 1 байт) для лога; сообщения потом отдаются приложению."""
+    capture = _BodyCapture(True, limit)
     pending: deque = deque()
     more = True
-    while more and capture.size < _CAPTURE_LIMIT:
+    while more and capture.size < capture.limit:
         message = await receive()
         pending.append(message)
         if message["type"] != "http.request":

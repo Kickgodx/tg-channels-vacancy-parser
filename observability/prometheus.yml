@@ -9,6 +9,18 @@ scrape_configs:
       - targets: ["backend:9100"]
     metrics_path: /metrics
 
+  # Стенд нагрузочного теста (scripts/loadtest/stand.sh, контейнер lt-api). DNS SD:
+  # без стенда имя не резолвится — целей нет, а не down-таргет.
+  - job_name: tg-jobs-loadtest
+    scrape_interval: 5s
+    dns_sd_configs:
+      - names:
+          - lt-api
+        type: A
+        port: 9100
+        refresh_interval: 15s
+    metrics_path: /metrics
+
   # Все реплики llm-worker (compose DNS отдаёт A-записи по имени сервиса).
   # static_configs на llm-worker:9101 при --scale скрейпит только один контейнер.
   - job_name: tg-jobs-llm-worker

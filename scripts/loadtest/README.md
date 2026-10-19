@@ -1,0 +1,88 @@
+# Нагрузочный тест API (без LLM)
+
+k6 гоняет запросы каталога против отдельного стенда API на копии базы. Рабочую базу
+и рабочий backend тест не трогает. LLM-вызовов нет: стенд ставит LLM-задачи в
+очередь Redis, которую никто не разбирает.
+
+Нужен запущенный стек compose (`postgres`, `redis`). Для метрик в Grafana — ещё и
+профиль `observability`. Команды — из корня репозитория, в bash (на Windows — Git Bash).
+
+## Порядок
+
+```bash
+# 1. Копия базы tgjobs → tgjobs_lt; 25 — во сколько раз размножить вакансии (1 — как есть)
+bash scripts/loadtest/clone_db.sh 25
+
+# 2. Стенд: контейнер lt-api на копии, 4 процесса API
+docker compose build backend                   # если менялся код
+bash scripts/loadtest/stand.sh 4
+
+# 3. Прогон: сценарий, параллельных клиентов, длительность
+bash scripts/loadtest/run.sh mix 32 30s
+# → {"ep":"mix","vus":32,"rps":…,"p50_ms":…,"p95_ms":…,"p99_ms":…,"failed_pct":…}
+# → отчёт: scripts/loadtest/out/report-mix-32-<время>.html
+
+# 4. Убрать за собой
+bash scripts/loadtest/stand.sh stop
+bash scripts/loadtest/clone_db.sh drop
+```
+
+Сценарии (`EP`) — в `k6/catalog.js`:
+
+| EP | Что | Нагружает |
+|---|---|---|
+| `health`, `me` | здоровье, текущий пользователь | накладные расходы на запрос |
+| `list`, `list_filtered` | первая страница списка, случайные фильтры | список |
+| `list_q` | поиск по случайному слову | FTS в Postgres |
+| `detail` | карточка вакансии | чтение по ключу |
+| `metrics`, `salaries`, `sources` | агрегаты дашборда | кэш агрегатов |
+| `metrics_miss`, `salaries_miss` | агрегаты со случайными фильтрами | SQL агрегатов мимо кэша |
+| `login` | вход | argon2 (CPU) |
+| `mix` | смесь UI: 50% списков, 10% поиск, 25% карточки, 10% агрегаты, 5% `me` | всё вместе |
+
+Модель нагрузки закрытая (`constant-vus`): каждый из `VUS` клиентов шлёт следующий
+запрос сразу после ответа. Максимальный RPS — плато, после которого рост `VUS`
+увеличивает только задержку. Ищите его серией прогонов: 1 → 16 → 32 → 64.
+
+## Отчёты и дашборды
+
+- **HTML-отчёт** k6 web dashboard пишется на каждый прогон в
+  `scripts/loadtest/out/` (каталог в `.gitignore`). Это автономный файл: графики RPS,
+  задержек и ошибок по времени, открывается в браузере.
+- **Живой дашборд**: `LIVE=1 bash scripts/loadtest/run.sh mix 32 2m`, во время прогона —
+  http://localhost:5665.
+- **Grafana**: `PROM_RW=1 bash scripts/loadtest/run.sh mix 32 2m` пишет метрики k6 в
+  Prometheus compose (remote write). Дашборд **k6 load test** (папка tg-jobs-parser)
+  показывает RPS, p50/p95/p99, ошибки и VU k6. Рядом — RPS, задержки, эндпоинты и пул
+  БД стенда: Prometheus снимает `lt-api:9100` каждые 5 с (job `tg-jobs-loadtest`).
+  Прогоны различаются меткой `testid`.
+
+## Настройки стенда
+
+| Переменная | По умолчанию | Что |
+|---|---|---|
+| `stand.sh N` | 4 | `API_WORKERS` стенда |
+| `LT_IMAGE` | `tg_jobs_parser-backend` | образ API |
+| `LT_DB` | `tgjobs_lt` | копия базы (`tgjobs` скрипты отклоняют) |
+| `LT_APP_ENV` | из `.env` | `prod` — тела не пишутся в HTTP-лог |
+| `LT_OTEL=1` | выкл. | трассы в Alloy с `service.name=loadtest-backend` |
+| `LT_CPUS` | без лимита | ограничить CPU стенда, например `2` — как на VPS |
+| `BASE` (run.sh) | `http://lt-api:8000/api/v1` | другой адрес API |
+
+На стенде выключены лимиты входа (`AUTH_RATE_LIMIT_PER_MINUTE=0`,
+`AUTH_MAX_FAILED_LOGINS=0`), иначе сценарий `login` упрётся в 429. Redis — отдельная
+база 15.
+
+## Осторожно
+
+- **Не грузите рабочий backend**: `setup()` в k6 регистрирует пользователя
+  `loadtest@example.com`, а нагрузка конкурирует с UI за ту же базу.
+- **Соединения Postgres**: стенд берёт до 40 соединений (как backend) плюс по одному
+  служебному на процесс. Рабочий стек держит ещё около 76 при `max_connections=100`.
+  Два стенда одновременно или `DB_POOL_SIZE` побольше дадут `too many clients`
+  и у рабочего стека.
+- **Remote write** Prometheus принимает запись без аутентификации. Порт опубликован
+  только на `INFRA_BIND_ADDR` (loopback), наружу его не открывайте.
+- k6, Postgres и стенд делят одну машину: абсолютные RPS ниже, чем на выделенном
+  сервере, но варианты между собой сравниваются честно. `LT_CPUS` помогает
+  приблизиться к целевому хосту.

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 
 from fastapi import Depends, Query, Security
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.db.models import UserRow
@@ -14,6 +16,7 @@ from backend.services import auth_service, sse_tickets
 from backend.settings import get_settings
 
 __all__ = [
+    "CurrentUser",
     "SseCredentials",
     "authenticate_sse",
     "bearer_token",
@@ -49,14 +52,14 @@ def _check_api_key(provided: str | None) -> None:
         raise http_error(401, CODE_NOT_AUTHENTICATED, "Invalid API key")
 
 
-def verify_api_key(
+async def verify_api_key(
     x_api_key: str | None = Security(_api_key_scheme),
 ) -> None:
     """Только заголовок X-API-Key (обычные REST-запросы)."""
     _check_api_key(x_api_key)
 
 
-def bearer_token(
+async def bearer_token(
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),
     _oauth2_token: str | None = Security(_oauth2_scheme),
 ) -> str | None:
@@ -69,15 +72,41 @@ def bearer_token(
     return credentials.credentials.strip()
 
 
-def _active_user(db: Session, user_id: int, token_version: int) -> UserRow | None:
-    user = db.get(UserRow, user_id)
+@dataclass(frozen=True, slots=True)
+class CurrentUser:
+    """Вошедший пользователь запроса — снимок строки ``users`` без хэша пароля.
+
+    Не ORM-сущность: загрузка ``UserRow`` через identity map стоила четверть CPU
+    запроса ``/auth/me``. Мутации пользователя загружают ``UserRow`` явно.
+    """
+
+    id: int
+    email: str
+    is_admin: bool
+    is_active: bool
+    token_version: int
+    created_at: datetime
+
+
+_USER_COLUMNS = (
+    UserRow.id,
+    UserRow.email,
+    UserRow.is_admin,
+    UserRow.is_active,
+    UserRow.token_version,
+    UserRow.created_at,
+)
+
+
+def _active_user(db: Session, user_id: int, token_version: int) -> CurrentUser | None:
+    row = db.execute(select(*_USER_COLUMNS).where(UserRow.id == user_id)).one_or_none()
     # Версия меняется при смене пароля и «выйти везде» — старые токены отозваны.
-    if user is None or not user.is_active or token_version != user.token_version:
+    if row is None or not row.is_active or token_version != row.token_version:
         return None
-    return user
+    return CurrentUser(**row._mapping)
 
 
-def _user_from_token(db: Session, token: str | None) -> UserRow | None:
+def _user_from_token(db: Session, token: str | None) -> CurrentUser | None:
     if not token:
         return None
     claims = auth_service.decode_access_token(token)
@@ -89,7 +118,7 @@ def _user_from_token(db: Session, token: str | None) -> UserRow | None:
 def get_current_user(
     authorization: str | None = Depends(bearer_token),
     db: Session = Depends(get_db),
-) -> UserRow:
+) -> CurrentUser:
     """JWT только из ``Authorization: Bearer`` (не из query)."""
     user = _user_from_token(db, authorization)
     if user is None:
@@ -104,7 +133,7 @@ class SseCredentials:
     ticket: str | None
 
 
-def sse_credentials(
+async def sse_credentials(
     bearer: str | None = Depends(bearer_token),
     x_api_key: str | None = Security(_api_key_scheme),
     ticket: str | None = Query(
@@ -117,7 +146,7 @@ def sse_credentials(
     return SseCredentials(bearer=bearer, api_key=x_api_key, ticket=ticket)
 
 
-def authenticate_sse(db: Session, creds: SseCredentials) -> UserRow:
+def authenticate_sse(db: Session, creds: SseCredentials) -> CurrentUser:
     """Пользователь SSE: одноразовый ``?ticket=`` или ``Authorization: Bearer`` + X-API-Key.
 
     Тикет выдаётся только запросу, прошедшему JWT и X-API-Key, поэтому ключ с ним
@@ -136,7 +165,7 @@ def authenticate_sse(db: Session, creds: SseCredentials) -> UserRow:
     return user
 
 
-def require_admin(user: UserRow = Depends(get_current_user)) -> UserRow:
+async def require_admin(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     """JWT + ``users.is_admin``; иначе 403."""
     if not user.is_admin:
         raise http_error(403, CODE_FORBIDDEN, "Admin only")

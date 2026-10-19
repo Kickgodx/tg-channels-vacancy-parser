@@ -91,3 +91,6 @@ docs/specs/
 
 # кэш инкрементальной сборки tsc -b, генерируется npm run build
 *.tsbuildinfo
+
+# --- нагрузочный тест: HTML-отчёты k6 ---
+scripts/loadtest/out/

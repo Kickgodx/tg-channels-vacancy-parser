@@ -4,11 +4,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_current_user, get_db, require_admin, verify_api_key
+from backend.api.deps import CurrentUser, get_current_user, get_db, require_admin, verify_api_key
 from backend.api.params import Page, PageSize, check_list_depth, check_sort_needs_resume, vacancy_filters
 from backend.db import repository as repo
 from backend.db.aggregate_cache import cached_aggregate
-from backend.db.models import UserRow
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
 from backend.db.vacancy_repository import counted_vacancies
 from backend.errors import CODE_IDEMPOTENCY_IN_PROGRESS, CODE_RATE_LIMITED, CODE_VALIDATION, AppError, http_error
@@ -45,7 +44,7 @@ router = APIRouter(
 def import_vacancies(
     body: VacancyImportRequest,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(require_admin),
+    user: CurrentUser = Depends(require_admin),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> JSONResponse:
     """Импорт вакансий из текста: rules + LLM-разбор и запись в БД (как в прогоне). Только admin.
@@ -143,7 +142,7 @@ def list_vacancies(
     sort_order: VacancySortOrder = "desc",
     resume_id: int | None = None,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> VacancyListResponse:
     check_list_depth(page, page_size)
     check_sort_needs_resume(sort_by, resume_id)

@@ -34,13 +34,27 @@ def set_pool_role(role: str) -> None:
 
 
 def pool_limits(settings) -> tuple[int, int]:
-    """(pool_size, max_overflow): ``DB_POOL_SIZE`` / ``DB_MAX_OVERFLOW`` перекрывают умолчание роли."""
+    """(pool_size, max_overflow) процесса: ``DB_POOL_SIZE`` / ``DB_MAX_OVERFLOW`` перекрывают умолчание роли.
+
+    У API лимит — на все процессы (``API_WORKERS``) вместе: каждый получает долю, не
+    меньше одного постоянного соединения и одного дополнительного, если overflow не 0.
+    """
     size, overflow = POOL_BY_ROLE[_pool_role]
     if settings.db_pool_size is not None:
         size = settings.db_pool_size
     if settings.db_max_overflow is not None:
         overflow = settings.db_max_overflow
+    workers = getattr(settings, "api_workers", 1) or 1
+    if _pool_role == "api" and workers > 1:
+        size = max(1, size // workers)
+        overflow = max(1, overflow // workers) if overflow > 0 else 0
     return size, overflow
+
+
+def api_thread_limit(settings) -> int:
+    """Потоков threadpool у процесса API — по его пулу: sync-обработчик без соединения не работает."""
+    size, overflow = pool_limits(settings)
+    return size + overflow
 
 
 def _json_serializer(obj: object) -> str:

@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_current_user, get_db, verify_api_key
+from backend.api.deps import CurrentUser, get_current_user, get_db, verify_api_key
 from backend.db import repository as repo
-from backend.db.models import CoverLetterRow, ResumeRow, UserRow, VacancyMatchRow
+from backend.db.models import CoverLetterRow, ResumeRow, VacancyMatchRow
 from backend.observability import record_cover_letter, record_match
 from backend.schemas import (
     CoverLetterOut,
@@ -40,7 +40,7 @@ def _to_out(row) -> ResumeOut:
     return ResumeOut(id=row.id, name=row.name, text=row.text, created_at=row.created_at)
 
 
-def _get_own_resume(db: Session, resume_id: int, user: UserRow) -> ResumeRow:
+def _get_own_resume(db: Session, resume_id: int, user: CurrentUser) -> ResumeRow:
     row = repo.get_resume(db, resume_id)
     if row is None or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="Resume not found")
@@ -50,7 +50,7 @@ def _get_own_resume(db: Session, resume_id: int, user: UserRow) -> ResumeRow:
 @resumes_router.get("", response_model=ResumeListResponse)
 def list_resumes(
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> ResumeListResponse:
     items = [_to_out(r) for r in repo.list_resumes(db, user_id=user.id)]
     return ResumeListResponse(items=items)
@@ -60,7 +60,7 @@ def list_resumes(
 def create_resume(
     body: ResumeCreate,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> ResumeOut:
     row = repo.create_resume(db, name=body.name, text=body.text, user_id=user.id)
     return _to_out(row)
@@ -70,7 +70,7 @@ def create_resume(
 def get_resume(
     resume_id: int,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> ResumeOut:
     return _to_out(_get_own_resume(db, resume_id, user))
 
@@ -80,7 +80,7 @@ def update_resume(
     resume_id: int,
     body: ResumeUpdate,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> ResumeOut:
     row = repo.update_resume(db, resume_id, user_id=user.id, name=body.name, text=body.text)
     if row is None:
@@ -92,7 +92,7 @@ def update_resume(
 def delete_resume(
     resume_id: int,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> None:
     if not repo.delete_resume(db, resume_id, user_id=user.id):
         raise HTTPException(status_code=404, detail="Resume not found")
@@ -122,7 +122,7 @@ def get_vacancy_match(
     resume_id: int,
     vacancy_id: str,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> VacancyMatchOut:
     """Уже посчитанная оценка пары; 404 — если матчинг ещё не запускался."""
     _get_own_resume(db, resume_id, user)
@@ -145,7 +145,7 @@ def match_single_vacancy(
     vacancy_id: str,
     force: bool = False,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Свежая оценка без force → 200; иначе (нет, устарела, force) фоновая джоба → 202 ``{job_id}``."""
     _get_own_resume(db, resume_id, user)
@@ -196,7 +196,7 @@ def get_cover_letter(
     resume_id: int,
     vacancy_id: str,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> CoverLetterOut:
     """Сохранённое письмо пары; 404 — если генерация ещё не запускалась."""
     _get_own_resume(db, resume_id, user)
@@ -220,7 +220,7 @@ def generate_cover_letter(
     body: CoverLetterRequest | None = None,
     force: bool = False,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Свежее письмо того же тона без force → 200; иначе фоновая джоба → 202 ``{job_id}``."""
     _get_own_resume(db, resume_id, user)
@@ -261,7 +261,7 @@ def delete_cover_letter(
     resume_id: int,
     vacancy_id: str,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> None:
     """Сбросить сохранённое письмо пары."""
     _get_own_resume(db, resume_id, user)

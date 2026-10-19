@@ -33,7 +33,7 @@ from backend.db.session import init_db, session_scope
 from backend.errors import register_exception_handlers
 from backend.http_logging import HttpLoggingMiddleware
 from backend.observability import register_db_stats_collector
-from backend.settings import check_exposure, get_settings
+from backend.settings import check_api_workers, check_exposure, get_settings
 from backend.tracing import setup_tracing, shutdown_tracing
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
@@ -88,10 +88,44 @@ def _periodic_cleanup() -> None:
         logging.getLogger(__name__).warning("Очистка служебных таблиц не выполнена: %s", e)
 
 
-def _vacancy_retention_worker(stop_event: threading.Event) -> None:
-    """Переходит к следующей проверке TTL каждый час, пока жив backend."""
-    while not stop_event.wait(timeout=60 * 60):
+_CLEANUP_INTERVAL_S = 60 * 60
+
+
+class _LeaderDuties:
+    """Общая для процессов API работа: её выполняет только лидер (``backend.leader``).
+
+    Получив роль — очистка (синхронно, до «Backend готов» при старте), фоновая
+    синхронизация курсов и сервер ``/metrics``; дальше раз в час — очистка, а в
+    multiprocess-режиме метрик — уборка файлов умерших процессов.
+    """
+
+    def __init__(self) -> None:
+        self._metrics_server = None
+        self._last_cleanup = 0.0
+
+    def on_acquire(self) -> None:
+        import time
+
         _periodic_cleanup()
+        self._last_cleanup = time.monotonic()
+        threading.Thread(target=_sync_fx_on_startup, name="fx-startup-sync", daemon=True).start()
+        self._metrics_server = _start_metrics_server()
+
+    def on_tick(self) -> None:
+        import time
+
+        from backend.observability import collect_dead_process_metrics
+
+        collect_dead_process_metrics()
+        if time.monotonic() - self._last_cleanup >= _CLEANUP_INTERVAL_S:
+            self._last_cleanup = time.monotonic()
+            _periodic_cleanup()
+
+    def on_lose(self) -> None:
+        server, self._metrics_server = self._metrics_server, None
+        if server is not None:
+            server.shutdown()
+            server.server_close()
 
 
 def _start_inprocess_job_recovery() -> list[threading.Event]:
@@ -139,16 +173,19 @@ def _start_metrics_server():
 
     Порт API публикуется клиентам, порт метрик — нет: в compose Prometheus
     ходит на него по Docker-сети. Отдаёт тот же ``REGISTRY``, куда пишут
-    Instrumentator (HTTP), доменные и ``db_*``-метрики.
+    Instrumentator (HTTP), доменные и ``db_*``-метрики; при нескольких процессах
+    API — их сумму (``metrics_registry``). Поднимает только лидер (``_LeaderDuties``).
     """
     s = get_settings()
     if not s.api_metrics_port:
         return None
     from prometheus_client import start_http_server
 
+    from backend.observability import metrics_registry
+
     log = logging.getLogger(__name__)
     try:
-        server, _thread = start_http_server(s.api_metrics_port, addr=s.api_host)
+        server, _thread = start_http_server(s.api_metrics_port, addr=s.api_host, registry=metrics_registry())
     except OSError as e:
         log.warning("Не удалось стартовать metrics HTTP на %s:%s: %s", s.api_host, s.api_metrics_port, e)
         return None
@@ -162,6 +199,13 @@ async def lifespan(_app: FastAPI):
     warning = check_exposure(get_settings())
     if warning:
         log.warning(warning)
+    check_api_workers(get_settings())
+    # Потоков не больше, чем соединений пула процесса (при одном процессе — прежние 40).
+    import anyio.to_thread
+
+    from backend.db.session import api_thread_limit
+
+    anyio.to_thread.current_default_thread_limiter().total_tokens = api_thread_limit(get_settings())
     from backend.core_ports import register_core_ports
 
     # LLM в inprocess-режиме идёт в этом процессе; RPM общий с воркерами.
@@ -178,33 +222,26 @@ async def lifespan(_app: FastAPI):
     )
     log.info("Инициализация БД…")
     init_db()
-    _periodic_cleanup()
+    from backend.leader import ApiLeader
+    from backend.observability import start_pool_gauges
+
+    duties = _LeaderDuties()
+    leader = ApiLeader(on_acquire=duties.on_acquire, on_lose=duties.on_lose, on_tick=duties.on_tick)
+    # Первая попытка — синхронно: в одном процессе очистка при старте идёт до «Backend готов».
+    if not leader.try_become_leader():
+        log.info("Лидер API — другой процесс: очистка, курсы и /metrics выполняются там")
+    leader.start()
+    pool_gauges_stop = start_pool_gauges()
     log.info("Backend готов.")
-    threading.Thread(
-        target=_sync_fx_on_startup,
-        name="fx-startup-sync",
-        daemon=True,
-    ).start()
-    retention_stop = threading.Event()
-    retention_thread = threading.Thread(
-        target=_vacancy_retention_worker,
-        args=(retention_stop,),
-        name="vacancy-retention",
-        daemon=True,
-    )
-    retention_thread.start()
     recover_stops = _start_inprocess_job_recovery()
-    metrics_server = _start_metrics_server()
     try:
         yield
     finally:
-        if metrics_server is not None:
-            metrics_server.shutdown()
-            metrics_server.server_close()
         for stop in recover_stops:
             stop.set()
-        retention_stop.set()
-        retention_thread.join(timeout=1)
+        if pool_gauges_stop is not None:
+            pool_gauges_stop.set()
+        leader.stop()
         from backend.services.interactive_llm import reset_interactive_client
         from backend.services.llm_job_service import llm_job_runner
 
@@ -278,10 +315,42 @@ Instrumentator(
 ).instrument(app)
 
 
+def _prepare_multiprocess_metrics_dir() -> str:
+    """Пустой каталог multiprocess-метрик; путь — в окружение, его унаследуют процессы uvicorn.
+
+    Файлы прошлого запуска удаляются: иначе счётчики продолжили бы старые значения.
+    """
+    import os
+    import shutil
+    import tempfile
+
+    path = os.environ.get("PROMETHEUS_MULTIPROC_DIR") or os.path.join(tempfile.gettempdir(), "tg-jobs-api-metrics")
+    shutil.rmtree(path, ignore_errors=True)
+    os.makedirs(path, exist_ok=True)
+    os.environ["PROMETHEUS_MULTIPROC_DIR"] = path
+    return path
+
+
 def main() -> None:
     import uvicorn
 
     s = get_settings()
+    check_exposure(s)
+    check_api_workers(s)
+    if s.api_workers > 1:
+        path = _prepare_multiprocess_metrics_dir()
+        logging.getLogger(__name__).info("API: %s процессов, multiprocess-метрики в %s", s.api_workers, path)
+        # Строка импорта обязательна для нескольких воркеров: каждый процесс импортирует
+        # модуль заново (spawn) — и уже с PROMETHEUS_MULTIPROC_DIR в окружении.
+        uvicorn.run(
+            "backend.main:app",
+            host=s.api_host,
+            port=s.api_port,
+            workers=s.api_workers,
+            reload=False,
+            log_config=None,
+        )
+        return
     # Объект, а не строка "backend.main:app": при `python -m backend.main` строка
     # заставила бы uvicorn импортировать модуль второй раз — второй app без
     # OTel-инструментации (её получил первый, из `__main__`).

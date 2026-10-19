@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import case, func, literal, select, true
+from sqlalchemy import case, func, literal, literal_column, select, true, tuple_
 from sqlalchemy.orm import Session
 
 from backend.db.models import VacancyRow, VacancySightingRow
@@ -51,37 +51,63 @@ def _group_stats(
 ) -> list[SalaryGroupStats]:
     """Квантили через percentile_cont WITHIN GROUP; по убыванию числа вакансий."""
     sal = _salary_rub_expr_table(table) if table is not None else _salary_rub_expr()
-    stmt = select(
-        group_expr.label("grp"),
-        func.count().label("n"),
+    stmt = select(group_expr.label("grp"), *_quantile_columns(sal)).where(sal.isnot(None))
+    if from_clause is not None:
+        stmt = stmt.select_from(from_clause)
+    stmt = apply_vacancy_filters(stmt.group_by(group_expr), query, table=table)
+    out = [_group_row(grp, *stats) for grp, *stats in session.execute(stmt).all() if grp is not None and stats[0]]
+    out.sort(key=lambda r: (-r.count, r.group))
+    return out
+
+
+def _f(value) -> float | None:
+    return float(value) if value is not None else None
+
+
+def _quantile_columns(sal) -> list:
+    """count, mean, min, q1, median, q3, max — в порядке полей ``SalaryGroupStats``."""
+    return [
+        func.count(),
         func.avg(sal),
         func.min(sal),
         func.percentile_cont(0.25).within_group(sal),
         func.percentile_cont(0.5).within_group(sal),
         func.percentile_cont(0.75).within_group(sal),
         func.max(sal),
-    ).where(sal.isnot(None))
-    if from_clause is not None:
-        stmt = stmt.select_from(from_clause)
-    stmt = apply_vacancy_filters(stmt.group_by(group_expr), query, table=table)
-    out: list[SalaryGroupStats] = []
-    for grp, n, mean_v, min_v, q1, med, q3, max_v in session.execute(stmt).all():
-        if grp is None or not n:
-            continue
-        out.append(
-            SalaryGroupStats(
-                group=str(grp),
-                count=int(n),
-                mean=float(mean_v) if mean_v is not None else None,
-                min=float(min_v) if min_v is not None else None,
-                q1=float(q1) if q1 is not None else None,
-                median=float(med) if med is not None else None,
-                q3=float(q3) if q3 is not None else None,
-                max=float(max_v) if max_v is not None else None,
-            )
-        )
-    out.sort(key=lambda r: (-r.count, r.group))
-    return out
+    ]
+
+
+def _group_row(grp, n, mean_v, min_v, q1, med, q3, max_v) -> SalaryGroupStats:
+    return SalaryGroupStats(
+        group=str(grp),
+        count=int(n),
+        mean=_f(mean_v),
+        min=_f(min_v),
+        q1=_f(q1),
+        median=_f(med),
+        q3=_f(q3),
+        max=_f(max_v),
+    )
+
+
+def _grade_and_format_stats(session: Session, query: VacancyQuery, grade_expr, wf_expr):
+    """Квантили по грейду и по формату одним запросом (``GROUPING SETS``)."""
+    sal = _salary_rub_expr()
+    stmt = apply_vacancy_filters(
+        select(func.grouping(grade_expr), grade_expr, wf_expr, *_quantile_columns(sal))
+        .where(sal.isnot(None))
+        .group_by(func.grouping_sets(tuple_(grade_expr), tuple_(wf_expr))),
+        query,
+    )
+    by_grade: list[SalaryGroupStats] = []
+    by_format: list[SalaryGroupStats] = []
+    for g_grade, grade_v, wf_v, *stats in session.execute(stmt).all():
+        grp, target = (wf_v, by_format) if g_grade else (grade_v, by_grade)
+        if grp is not None and stats[0]:
+            target.append(_group_row(grp, *stats))
+    for rows in (by_grade, by_format):
+        rows.sort(key=lambda r: (-r.count, r.group))
+    return by_grade, by_format
 
 
 def _salary_by_spec(session: Session, query: VacancyQuery) -> list[SalaryGroupStats]:
@@ -91,83 +117,79 @@ def _salary_by_spec(session: Session, query: VacancyQuery) -> list[SalaryGroupSt
     return rows[:_TOP_SALARY_SPECS]
 
 
-def _salary_period_buckets(
-    session: Session,
-    query: VacancyQuery,
-    *,
-    grain: PeriodGrain,
-) -> list[SalaryMonthlyBucket]:
+def _salary_periods(
+    session: Session, query: VacancyQuery
+) -> tuple[list[SalaryMonthlyBucket], list[SalaryMonthlyBucket]]:
+    """Число, среднее и медиана зарплаты по месяцам и по годам — один запрос."""
     sal = _salary_rub_expr()
-    trunc = func.date_trunc(grain, VacancyRow.post_date)
+    month = func.date_trunc(literal_column("'month'"), VacancyRow.post_date)
+    year = func.date_trunc(literal_column("'year'"), VacancyRow.post_date)
     stmt = apply_vacancy_filters(
         select(
-            trunc.label("p"),
+            func.grouping(month),
+            month,
+            year,
             func.count(),
             func.avg(sal),
             func.percentile_cont(0.5).within_group(sal),
         )
         .where(VacancyRow.post_date.isnot(None), sal.isnot(None))
-        .group_by(trunc)
-        .order_by(trunc),
+        .group_by(func.grouping_sets(tuple_(month), tuple_(year))),
         query,
     )
-    fmt = "%Y" if grain == "year" else "%Y-%m"
-    return [
-        SalaryMonthlyBucket(
-            period=p.strftime(fmt),
-            count=int(n),
-            mean=float(mn) if mn is not None else None,
-            median=float(md) if md is not None else None,
-        )
-        for p, n, mn, md in session.execute(stmt).all()
-        if p is not None
-    ]
+    monthly: list[SalaryMonthlyBucket] = []
+    yearly: list[SalaryMonthlyBucket] = []
+    for g_month, m, y, n, mean_v, med in session.execute(stmt).all():
+        p, fmt, target = (y, "%Y", yearly) if g_month else (m, "%Y-%m", monthly)
+        if p is not None:
+            target.append(SalaryMonthlyBucket(period=p.strftime(fmt), count=int(n), mean=_f(mean_v), median=_f(med)))
+    monthly.sort(key=lambda b: b.period)
+    yearly.sort(key=lambda b: b.period)
+    return monthly, yearly
 
 
-def _salary_period_group(
-    session: Session,
-    query: VacancyQuery,
-    group_expr,
-    *,
-    grain: PeriodGrain,
-) -> list[SalaryPeriodGroupBucket]:
+def _salary_period_groups(session: Session, query: VacancyQuery, grade_expr, wf_expr) -> dict[str, list]:
+    """Квантили по (год | месяц) × (грейд | формат) — четыре разреза одним запросом."""
     sal = _salary_rub_expr()
-    trunc = func.date_trunc(grain, VacancyRow.post_date)
+    month = func.date_trunc(literal_column("'month'"), VacancyRow.post_date)
+    year = func.date_trunc(literal_column("'year'"), VacancyRow.post_date)
     stmt = apply_vacancy_filters(
         select(
-            trunc.label("p"),
-            group_expr.label("grp"),
-            func.count(),
-            func.avg(sal),
-            func.min(sal),
-            func.percentile_cont(0.25).within_group(sal),
-            func.percentile_cont(0.5).within_group(sal),
-            func.percentile_cont(0.75).within_group(sal),
-            func.max(sal),
+            func.grouping(month),
+            func.grouping(grade_expr),
+            month,
+            year,
+            grade_expr,
+            wf_expr,
+            *_quantile_columns(sal),
         )
         .where(VacancyRow.post_date.isnot(None), sal.isnot(None))
-        .group_by(trunc, group_expr)
-        .order_by(trunc, group_expr),
+        .group_by(
+            func.grouping_sets(
+                tuple_(year, grade_expr),
+                tuple_(year, wf_expr),
+                tuple_(month, grade_expr),
+                tuple_(month, wf_expr),
+            )
+        ),
         query,
     )
-    fmt = "%Y" if grain == "year" else "%Y-%m"
-    out: list[SalaryPeriodGroupBucket] = []
-    for p, grp, n, mean_v, min_v, q1, med, q3, max_v in session.execute(stmt).all():
+    out: dict[str, list[SalaryPeriodGroupBucket]] = {
+        "by_grade_yearly": [],
+        "by_work_format_yearly": [],
+        "by_grade_monthly": [],
+        "by_work_format_monthly": [],
+    }
+    for g_month, g_grade, m, y, grade_v, wf_v, n, *stats in session.execute(stmt).all():
+        grain = "yearly" if g_month else "monthly"
+        p, fmt = (y, "%Y") if g_month else (m, "%Y-%m")
+        dim, grp = ("work_format", wf_v) if g_grade else ("grade", grade_v)
         if p is None or grp is None or not n:
             continue
-        out.append(
-            SalaryPeriodGroupBucket(
-                period=p.strftime(fmt),
-                group=str(grp),
-                count=int(n),
-                mean=float(mean_v) if mean_v is not None else None,
-                min=float(min_v) if min_v is not None else None,
-                q1=float(q1) if q1 is not None else None,
-                median=float(med) if med is not None else None,
-                q3=float(q3) if q3 is not None else None,
-                max=float(max_v) if max_v is not None else None,
-            )
-        )
+        row = _group_row(grp, n, *stats)
+        out[f"by_{dim}_{grain}"].append(SalaryPeriodGroupBucket(period=p.strftime(fmt), **row.model_dump()))
+    for buckets in out.values():
+        buckets.sort(key=lambda b: (b.period, b.group))
     return out
 
 
@@ -185,18 +207,17 @@ def _salary_distribution(session: Session, query: VacancyQuery) -> list[SalaryDi
 def salary_analytics(session: Session, query: VacancyQuery) -> SalaryAnalytics:
     """Зарплатная аналитика по фильтрам списка вакансий."""
     salary_display = _prepare_fx(session)
-    wf_expr = func.coalesce(VacancyRow.work_format, literal("unknown"))
+    wf_expr = func.coalesce(VacancyRow.work_format, literal_column("'unknown'"))
     grade_expr = VacancyRow.detected_grade
+    by_grade, by_work_format = _grade_and_format_stats(session, query, grade_expr, wf_expr)
+    monthly, yearly = _salary_periods(session, query)
     return SalaryAnalytics(
-        by_grade=_group_stats(session, query, grade_expr),
-        by_work_format=_group_stats(session, query, wf_expr),
+        by_grade=by_grade,
+        by_work_format=by_work_format,
         by_specialization=_salary_by_spec(session, query),
-        monthly=_salary_period_buckets(session, query, grain="month"),
-        yearly=_salary_period_buckets(session, query, grain="year"),
-        by_grade_yearly=_salary_period_group(session, query, grade_expr, grain="year"),
-        by_work_format_yearly=_salary_period_group(session, query, wf_expr, grain="year"),
-        by_grade_monthly=_salary_period_group(session, query, grade_expr, grain="month"),
-        by_work_format_monthly=_salary_period_group(session, query, wf_expr, grain="month"),
+        monthly=monthly,
+        yearly=yearly,
+        **_salary_period_groups(session, query, grade_expr, wf_expr),
         distribution=_salary_distribution(session, query),
         salary_display=salary_display,
     )

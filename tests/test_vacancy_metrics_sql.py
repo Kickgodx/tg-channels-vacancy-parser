@@ -96,3 +96,67 @@ def test_daily_buckets_keep_latest_days(monkeypatch, pg_db):
         upsert_vacancies(session, vacancies, parse_run_id=new_parse_run(session))
         buckets = vacancy_metrics._daily_buckets(session, VacancyQuery(include_archived=True))
     assert [b.period for b in buckets] == ["2026-03-02", "2026-03-03"]
+
+
+def test_metrics_and_salary_analytics_query_count(db_session):
+    """Агрегаты собраны в несколько запросов (GROUPING SETS), а не по запросу на разрез.
+
+    Курсы в тестах выключены — запросов к ``exchange_rates`` нет.
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy import event
+
+    from backend.db.analytics import salary_analytics
+    from backend.db.repository import upsert_vacancies
+    from backend.db.session import get_engine
+    from backend.db.vacancy_metrics import aggregate_vacancy_metrics
+    from tg_jobs_parser.models.vacancy import Vacancy
+
+    upsert_vacancies(
+        db_session,
+        [
+            Vacancy(
+                id=f"v{i}",
+                source_post_key=f"c-{i}",
+                source_channel="c",
+                source_url="https://t.me/s/c",
+                post_date=datetime(2026, 9, 1 + i, tzinfo=UTC),
+                raw_text=f"t{i}",
+                cleaned_text=f"t{i}",
+                detected_specializations=["Backend"],
+                detected_grade=grade,
+                work_format=fmt,
+                detected_salary_avg=200_000.0,
+                detected_salary_avg_rub=200_000.0,
+                salary_currency="RUB",
+            )
+            for i, (grade, fmt) in enumerate([("senior", "remote"), ("middle", None)])
+        ],
+        parse_run_id=new_parse_run(db_session),
+    )
+    db_session.commit()
+
+    statements: list[str] = []
+
+    def _count(_conn, _cursor, statement, *_args):
+        statements.append(statement)
+
+    engine = get_engine()
+    event.listen(engine, "before_cursor_execute", _count)
+    try:
+        metrics = aggregate_vacancy_metrics(db_session, VacancyQuery())
+        n_metrics = len(statements)
+        salaries = salary_analytics(db_session, VacancyQuery())
+        n_salaries = len(statements) - n_metrics
+    finally:
+        event.remove(engine, "before_cursor_execute", _count)
+
+    assert n_metrics == 3  # грейды/форматы/итоги, специализации, дни
+    assert n_salaries == 5  # грейд+формат, специализации, периоды, периоды × группы, распределение
+    assert metrics.unique_vacancies == 2 and metrics.vacancies_with_salary == 2
+    assert metrics.vacancies_by_work_format == {"remote": 1, "unknown": 1}
+    assert metrics.salary_by_grade["senior"].count_with_salary == 1
+    assert [g.group for g in salaries.by_work_format] == ["remote", "unknown"]
+    assert {b.group for b in salaries.by_grade_monthly} == {"senior", "middle"}
+    assert [b.period for b in salaries.yearly] == ["2026"]

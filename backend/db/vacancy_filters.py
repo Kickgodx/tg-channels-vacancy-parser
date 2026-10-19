@@ -24,12 +24,9 @@ def _specializations_match(c, specs: list[str]) -> ColumnElement[bool]:
     return or_(*[c.detected_specializations.contains([spec]) for spec in specs])
 
 
-def fts_query(column, q: str):
-    """``to_tsvector`` / ``websearch_to_tsquery`` по русской конфигурации — для WHERE и ``ts_rank``."""
-    return (
-        func.to_tsvector(literal_column("'russian'"), column),
-        func.websearch_to_tsquery(literal_column("'russian'"), q),
-    )
+def fts_query(document, q: str):
+    """Документ (хранимый ``search_tsv``) и ``websearch_to_tsquery`` русской конфигурации — для WHERE и ``ts_rank``."""
+    return document, func.websearch_to_tsquery(literal_column("'russian'"), q)
 
 
 def vacancy_filter_conditions(
@@ -60,7 +57,7 @@ def vacancy_filter_conditions(
         dt_to = datetime.combine(query.date_to, time.max, tzinfo=UTC)
         conditions.append(c.post_date <= dt_to)
     if query.q:
-        document, ts_query = fts_query(c.cleaned_text, query.q)
+        document, ts_query = fts_query(c.search_tsv, query.q)
         conditions.append(document.op("@@")(ts_query))
     # «С зарплатой» — есть рублёвая сумма, как в метриках и аналитике: иначе список
     # и цифры над ним расходятся (зарплата в валюте без курса суммы не получает).

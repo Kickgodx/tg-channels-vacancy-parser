@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func, lateral, select, true
+from sqlalchemy import func, lateral, literal_column, select, true, tuple_
 from sqlalchemy.orm import Session
 
 from backend.db import fx_repository as fx_repo
 from backend.db.models import VacancyRow
-from backend.db.vacancy_filters import apply_vacancy_filters, vacancy_count_stmt
+from backend.db.vacancy_filters import apply_vacancy_filters
 from backend.schemas import VacancyQuery
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
@@ -56,38 +56,6 @@ def _prepare_fx(session: Session) -> SalaryDisplayMeta:
     )
 
 
-def _salary_by_grade(session: Session, query: VacancyQuery) -> dict[str, SalaryStats]:
-    sal = _salary_rub_expr()
-    stmt = apply_vacancy_filters(
-        select(
-            VacancyRow.detected_grade,
-            func.avg(sal),
-            func.count(VacancyRow.id),
-        )
-        .where(sal.isnot(None))
-        .group_by(VacancyRow.detected_grade),
-        query,
-    )
-    out: dict[str, SalaryStats] = {}
-    for grade, avg_val, cnt in session.execute(stmt).all():
-        if grade and cnt and avg_val is not None:
-            out[str(grade)] = SalaryStats(mean=float(avg_val), count_with_salary=int(cnt))
-    return out
-
-
-def _count_by_column(
-    session: Session,
-    query: VacancyQuery,
-    column,
-    *,
-    null_label: str | None = None,
-) -> dict[str, int]:
-    label = func.coalesce(column, null_label) if null_label else column
-    stmt = apply_vacancy_filters(select(label, func.count(VacancyRow.id)).group_by(label), query)
-    rows = session.execute(stmt).all()
-    return {str(k): int(c) for k, c in rows if k is not None}
-
-
 def _daily_buckets(session: Session, query: VacancyQuery) -> list[TimeSeriesBucket]:
     day = func.date(VacancyRow.post_date)
     stmt = apply_vacancy_filters(
@@ -113,74 +81,93 @@ def _spec_lateral(v):
     return lateral(spec_q).alias("spec_el")
 
 
-def _spec_counts(session: Session, query: VacancyQuery) -> dict[str, int]:
-    v = _vacancies_alias()
-    spec_lat = _spec_lateral(v)
+def _grade_and_format_stats(session: Session, query: VacancyQuery):
+    """Один проход: всего, с зарплатой, по грейду (число и зарплата) и по формату.
+
+    ``GROUPING SETS ((грейд), (формат), ())`` вместо пяти отдельных запросов;
+    ``grouping(col) = 1`` — колонка не входит в набор строки.
+    """
+    sal = _salary_rub_expr()
+    grade = VacancyRow.detected_grade
+    wf = func.coalesce(VacancyRow.work_format, literal_column("'unknown'"))
     stmt = apply_vacancy_filters(
-        select(spec_lat.c.spec, func.count(v.c.id))
-        .select_from(v.join(spec_lat, true()))
-        .group_by(spec_lat.c.spec)
-        .order_by(func.count(v.c.id).desc())
-        .limit(_TOP_SPECS),
+        select(
+            func.grouping(grade),
+            func.grouping(wf),
+            grade,
+            wf,
+            func.count(VacancyRow.id),
+            func.count(sal),
+            func.avg(sal),
+        ).group_by(func.grouping_sets(tuple_(grade), tuple_(wf), tuple_())),
         query,
-        table=v,
     )
-    return {str(s): int(c) for s, c in session.execute(stmt).all() if s}
+    total = with_salary = 0
+    by_grade: dict[str, int] = {}
+    by_format: dict[str, int] = {}
+    salary_by_grade: dict[str, SalaryStats] = {}
+    for g_grade, g_wf, grade_v, wf_v, n, n_sal, avg_sal in session.execute(stmt).all():
+        if g_grade and g_wf:
+            total, with_salary = int(n), int(n_sal)
+        elif not g_grade:
+            if grade_v is None:
+                continue
+            by_grade[str(grade_v)] = int(n)
+            if grade_v and n_sal and avg_sal is not None:
+                salary_by_grade[str(grade_v)] = SalaryStats(mean=float(avg_sal), count_with_salary=int(n_sal))
+        elif wf_v is not None:
+            by_format[str(wf_v)] = int(n)
+    return total, with_salary, by_grade, by_format, salary_by_grade
 
 
-def _salary_by_spec(session: Session, query: VacancyQuery) -> dict[str, SalaryStats]:
+def _spec_stats(session: Session, query: VacancyQuery) -> tuple[dict[str, int], dict[str, SalaryStats]]:
+    """Специализации одним запросом: число вакансий (топ-50) и зарплата (топ-25 по числу с зарплатой)."""
     v = _vacancies_alias()
     spec_lat = _spec_lateral(v)
     sal = _salary_rub_expr_table(v)
     stmt = apply_vacancy_filters(
-        select(
-            spec_lat.c.spec,
-            func.avg(sal),
-            func.count(v.c.id),
-        )
+        select(spec_lat.c.spec, func.count(v.c.id), func.count(sal), func.avg(sal))
         .select_from(v.join(spec_lat, true()))
-        .where(sal.isnot(None))
-        .group_by(spec_lat.c.spec)
-        .order_by(func.count(v.c.id).desc())
-        .limit(_TOP_SALARY_SPECS),
+        .group_by(spec_lat.c.spec),
         query,
         table=v,
     )
-    out: dict[str, SalaryStats] = {}
-    for s, avg_val, cnt in session.execute(stmt).all():
-        if s and cnt and avg_val is not None:
-            out[str(s)] = SalaryStats(mean=float(avg_val), count_with_salary=int(cnt))
-    return out
+    rows = [r for r in session.execute(stmt).all() if r[0]]
+    # При равном числе — по названию: граница топа не зависит от порядка строк из Postgres.
+    by_count = sorted(rows, key=lambda r: (-r[1], r[0]))[:_TOP_SPECS]
+    with_salary = (r for r in rows if r[2] and r[3] is not None)
+    by_salary = sorted(with_salary, key=lambda r: (-r[2], r[0]))[:_TOP_SALARY_SPECS]
+    counts = {str(spec): int(n) for spec, n, _, _ in by_count}
+    salary = {
+        str(spec): SalaryStats(mean=float(avg_sal), count_with_salary=int(n_sal))
+        for spec, _, n_sal, avg_sal in by_salary
+    }
+    return counts, salary
 
 
 def aggregate_vacancy_metrics(session: Session, query: VacancyQuery) -> MetricsSummary:
-    """Сводка для графиков; те же фильтры, что у GET /vacancies."""
+    """Сводка для графиков; те же фильтры, что у GET /vacancies.
+
+    Четыре запроса: курс, грейды/форматы/итоги, специализации, дни.
+    """
     salary_display = _prepare_fx(session)
-    total = int(session.scalar(vacancy_count_stmt(query)) or 0)
+    total, with_salary, by_grade, by_format, salary_by_grade = _grade_and_format_stats(session, query)
     if total == 0:
         return MetricsSummary(unique_vacancies=0, total_vacancies=0, salary_display=salary_display)
 
-    by_spec = _spec_counts(session, query)
-    salary_spec = _salary_by_spec(session, query)
-
-    sal_rub = _salary_rub_expr()
-    with_salary = int(
-        session.scalar(apply_vacancy_filters(select(func.count(VacancyRow.id)).where(sal_rub.isnot(None)), query)) or 0
-    )
-    by_grade = _count_by_column(session, query, VacancyRow.detected_grade)
-
+    by_spec, salary_spec = _spec_stats(session, query)
     return MetricsSummary(
         unique_vacancies=total,
         total_vacancies=total,
         duplicate_count=0,
         vacancies_by_specialization=by_spec,
         vacancies_by_grade=by_grade,
-        vacancies_by_work_format=_count_by_column(session, query, VacancyRow.work_format, null_label="unknown"),
+        vacancies_by_work_format=by_format,
         daily=_daily_buckets(session, query),
         vacancies_with_salary=with_salary,
         vacancies_without_salary=total - with_salary,
         salary_by_specialization=salary_spec,
-        salary_by_grade=_salary_by_grade(session, query),
+        salary_by_grade=salary_by_grade,
         grade_distribution=by_grade,
         salary_display=salary_display,
     )
