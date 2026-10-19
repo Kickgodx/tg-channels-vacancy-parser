@@ -131,3 +131,52 @@ def test_monthly_k_gross_pair_not_hourly():
     assert r.max_value == 320_000.0
     assert r.avg_value == 310_000.0
     assert r.currency == "RUB"
+
+
+def test_net_inside_word_is_not_salary_anchor():
+    """Регресс: «net» внутри слова не якорь — иначе «Posted: 08 Oct» давало зарплату 8."""
+    text = "Network & Internet forensics @ Acme 🗓️ Posted: 08 Oct 2026 💼 Employment: Full-time"
+    r = extract_salary(text)
+    assert r.min_value is None and r.max_value is None
+
+
+def test_dotnet_version_is_not_salary():
+    r = extract_salary("Интересуетесь технологиями, такими как .NET 10 и Blazor")
+    assert r.min_value is None
+
+
+def test_range_with_tys_suffix_is_scaled():
+    """Регресс: «ЗП до 180–260 тыс.» давало 180."""
+    r = extract_salary("Через год: • ЗП растёт до 180–260 тыс. • Переход в middle")
+    assert r.min_value == 180_000.0
+    assert r.max_value == 260_000.0
+
+
+def test_anchored_with_tys_suffix_is_scaled():
+    r = extract_salary("Вилка: от 250 тыс. на руки")
+    assert r.min_value == 250_000.0
+
+
+def test_small_anchored_number_without_currency_is_not_salary():
+    r = extract_salary("Зарплата: обсудим. Gross 7 дней отпуска сверху")
+    assert r.min_value is None
+
+
+def test_comma_thousands_separator():
+    """Регресс: «$120,000» читалось как 120."""
+    r = extract_salary("ЗП: ~$120,000 – $140,000 в год (гросс)")
+    assert r.min_value == 120_000.0
+    assert r.currency == "USD"
+
+
+def test_dot_thousands_separator_range():
+    r = extract_salary("Уровень дохода: 60.000-80.000")
+    assert r.min_value == 60_000.0
+    assert r.max_value == 80_000.0
+
+
+def test_hourly_range_without_currency_sign_is_rub():
+    r = extract_salary("Оплата 400 - 550/ч, парт-тайм")
+    assert r.min_value == 400.0
+    assert r.max_value == 550.0
+    assert r.currency == "RUB/HOUR"
