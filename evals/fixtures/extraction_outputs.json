@@ -14,7 +14,7 @@
   "go-senior-remote-salary": {
     "is_job_post": true,
     "detected_specializations": [
-      "Go"
+      "Backend"
     ],
     "detected_grade": "senior",
     "salary_min": 350000,
@@ -33,19 +33,22 @@
   "go-unit-tests-not-qa": {
     "is_job_post": true,
     "detected_specializations": [
-      "Go"
+      "Backend"
     ],
     "detected_grade": "middle",
     "salary_min": 250000,
     "salary_max": 300000,
     "salary_currency": "RUB",
-    "work_format": "office"
+    "work_format": "office",
+    "technologies": [
+      "Go",
+      "PostgreSQL"
+    ]
   },
   "salary-tr-monthly": {
     "is_job_post": true,
     "detected_specializations": [
-      "Backend",
-      "Python"
+      "Backend"
     ],
     "salary_min": 200000,
     "salary_max": 280000,
@@ -53,6 +56,9 @@
     "work_format": "remote",
     "application_urls": [
       "https://hh.ru/vacancy/123"
+    ],
+    "technologies": [
+      "Python"
     ]
   },
   "salary-k-monthly": {
@@ -125,7 +131,7 @@
   "java-middle-hybrid": {
     "is_job_post": true,
     "detected_specializations": [
-      "Java"
+      "Backend"
     ],
     "detected_grade": "middle",
     "salary_min": 300000,
@@ -134,6 +140,11 @@
     "work_format": "hybrid",
     "application_urls": [
       "https://example.com/jobs/java"
+    ],
+    "technologies": [
+      "Java",
+      "Spring",
+      "Kafka"
     ]
   },
   "exclude-tme-channel-link": {
@@ -163,7 +174,7 @@
   "staffing-not-staff-grade": {
     "is_job_post": true,
     "detected_specializations": [
-      "Python"
+      "Backend"
     ],
     "detected_grade": "middle",
     "salary_min": 250000,
@@ -191,7 +202,7 @@
   "unknown-grade-no-level": {
     "is_job_post": true,
     "detected_specializations": [
-      "Rust"
+      "Software Engineer"
     ],
     "detected_grade": "unknown",
     "work_format": "remote",
@@ -201,7 +212,7 @@
   "php-any-it-ok": {
     "is_job_post": true,
     "detected_specializations": [
-      "PHP"
+      "Backend"
     ],
     "detected_grade": "middle",
     "salary_min": 180000,
@@ -292,7 +303,7 @@
   "cicd-in-java-not-devops": {
     "is_job_post": true,
     "detected_specializations": [
-      "Java"
+      "Backend"
     ],
     "detected_grade": "senior",
     "salary_min": 350000,
@@ -306,7 +317,7 @@
   "analyst-word-not-role": {
     "is_job_post": true,
     "detected_specializations": [
-      "Go"
+      "Backend"
     ],
     "detected_grade": "middle",
     "salary_min": 280000,
@@ -376,7 +387,7 @@
   "only-tme-no-apply-url": {
     "is_job_post": true,
     "detected_specializations": [
-      "Python"
+      "Backend"
     ],
     "detected_grade": "middle",
     "salary_min": 220000,
@@ -439,5 +450,40 @@
   "grade-title-beats-exp-higher": {
     "is_job_post": true,
     "detected_grade": "middle"
+  },
+  "aqa-python-stack-not-role": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "Automation QA"
+    ],
+    "salary_min": 250000,
+    "salary_max": 300000,
+    "salary_currency": "RUB",
+    "work_format": "remote",
+    "technologies": [
+      "Python",
+      "Pytest",
+      "Playwright"
+    ],
+    "application_urls": [
+      "https://example.com/aqa"
+    ],
+    "confidence": 0.9
+  },
+  "ml-python-stack-not-role": {
+    "is_job_post": true,
+    "detected_specializations": [
+      "AI"
+    ],
+    "detected_grade": "senior",
+    "work_format": "hybrid",
+    "technologies": [
+      "Python",
+      "PyTorch"
+    ],
+    "application_urls": [
+      "https://example.com/ml"
+    ],
+    "confidence": 0.9
   }
 }

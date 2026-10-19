@@ -144,7 +144,8 @@ class VacancyRow(Base):
     company: Mapped[str | None] = mapped_column(String(256), nullable=True)
     contact: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
-    technologies: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # JSONB + GIN (миграция 037): фильтр по технологии идёт по индексу.
+    technologies: Mapped[list[str]] = mapped_column(JSONB, default=list)
     required_experience: Mapped[str | None] = mapped_column(Text, nullable=True)
     employment_type: Mapped[str | None] = mapped_column(String(256), nullable=True)
     application_urls: Mapped[list[str]] = mapped_column(JSON, default=list)

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
+import ReextractPanel from "../components/ReextractPanel";
 import VacancyModal from "../components/VacancyModal";
 import VacancyTable from "../components/VacancyTable";
 import type {
@@ -196,6 +197,8 @@ export default function ImportPage() {
           </table>
         )}
       </div>
+
+      <ReextractPanel />
 
       <div className="card">
         <h3>Недавно импортированные</h3>

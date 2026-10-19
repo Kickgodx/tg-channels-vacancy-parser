@@ -220,6 +220,23 @@ JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(4
 `preview`; полный текст — `GET /vacancies/{id}`. COUNT кэшируется ~1 с в
 процессе API.
 
+Специализация — это роль (QA, Automation QA, Backend, Frontend, AI, DevOps…),
+а языки, фреймворки, БД и инструменты (Python, Go, Java, PHP, C++, .NET, 1С,
+PostgreSQL, Kafka…) — **технологии** вакансии (`technologies`). AQA на Python —
+`["Automation QA"]` + технология `Python`, ML на Python — `["AI"]` + `Python`.
+Языки, которые LLM или пользовательский словарь всё же ставят специализацией,
+переносятся в технологии детерминированно (`split_specializations` в
+`tg_jobs_parser/config/schema.py`); «Python Developer» без другой роли получает роль
+`Software Engineer`. Имена технологий канонические: `Golang` → `Go`,
+`Apache Kafka` → `Kafka`, регистр — по словарю.
+
+Фильтр «Технологии» (`?technology=Python&technology=Go`) — любая из выбранных;
+вместе со специализациями — через **И**: «Automation QA» + «Python» — только AQA
+на Python. Чипы — 30 самых частых технологий под остальными фильтрами
+(`GET /vacancies/technologies`), прочие — через поле поиска. Старые ссылки и
+пресеты с языком в `specialization` превращаются в фильтр по технологии. Тот же
+фильтр есть у прогона (`filters.technologies`).
+
 Набор фильтров сохраняется как именованный пресет (`saved_filters`, JSON с
 полями `VacancyQuery`) и применяется одной кнопкой. Пресеты приватные —
 привязаны к пользователю.
@@ -249,6 +266,8 @@ JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(4
   берутся у самого поста, остальные фильтры — у вакансии. У HH дубли — это
   мультигородные копии.
 - `GET /analytics/companies` — топ компаний.
+- `GET /vacancies/metrics` — в том числе топ-50 технологий (`technology_top`,
+  график «Топ технологий»).
 
 Зарплаты приводятся к рублям по курсам ЦБ (`exchange_rates`), метка
 `salary_display` показывает дату курса (`null`, если курсов в базе нет). Зарплата без валюты считается в
@@ -256,7 +275,7 @@ JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(4
 рублёвую сумму, что и аналитика: `true` — только вакансии с ней, `false` — без неё.
 Пересчёт (`POST /fx/refresh`, `POST /fx/recalculate-rub`) обновляет и архивные вакансии.
 
-Агрегаты (`/vacancies/metrics`, `/analytics/*`) кэшируются в памяти API на `ANALYTICS_CACHE_SECONDS` (30 с) по набору фильтров; запись вакансий в том же процессе сбрасывает кэш сразу, запись из воркера видна не позже чем через TTL. Фильтр по специализации на Postgres идёт по GIN-индексу (`detected_specializations` — `JSONB`, миграция 019). `config.yaml` перечитывается только при изменении файла (кэш по mtime).
+Агрегаты (`/vacancies/metrics`, `/analytics/*`) кэшируются в памяти API на `ANALYTICS_CACHE_SECONDS` (30 с) по набору фильтров; запись вакансий в том же процессе сбрасывает кэш сразу, запись из воркера видна не позже чем через TTL. Фильтры по специализации и технологии на Postgres идут по GIN-индексам (`detected_specializations` — `JSONB`, миграция 019; `technologies` — `JSONB`, миграция 037). `config.yaml` перечитывается только при изменении файла (кэш по mtime).
 
 ### Матчинг резюме к вакансиям
 
@@ -475,6 +494,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `GET` | `/vacancies` | Глобальный список (slim: `preview` без полных текстов; фильтры, сортировка `sort_by`/`sort_order` + вторая ступень `then_by`/`then_order` для пары «дата ↔ зарплата ₽», пагинация, `resume_id`) |
 | `GET` | `/vacancies/{id}` | Полная вакансия (`raw_text` / `cleaned_text`) для карточки |
 | `POST` | `/vacancies/import` | Импорт вакансий из текста (admin): `{texts, source_url?}` → rules + LLM → запись в БД |
+| `GET` | `/vacancies/technologies` | Технологии по числу вакансий под фильтрами (без учёта собственного `technology`) — варианты фильтра |
+| `GET` `POST` | `/vacancies/reextract` | Переразбор LLM активных вакансий не из HH без специализации (admin): `GET` — сколько их, `POST` — 202 `{job_id}` (идёт — id текущей) |
 | `GET` | `/hh/status` | Статус HH sync (admin): токен задан?, TTL listings, счётчики кэша |
 | `POST` | `/hh/sync` | HH sync в фоне (admin): 202 `{job_id}`; 409, если sync уже идёт. Поиск → dedup → detail только для новых → БД |
 | `GET` | `/hh/sync-jobs` \| `/hh/sync-jobs/{id}` | Последние sync / один sync (admin): статус, прогресс, итог (у `failed` — частичный) |
@@ -496,7 +517,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 
 Без логина доступны только `/health`, `/auth/register` и `/auth/login`; всё остальное
 требует JWT. Только админ (`require_admin`, иначе 403): весь `/runs/*`,
-`POST /vacancies/import`, `POST /fx/*`, `POST /ai-cache/clear` и HH.
+`POST /vacancies/import`, `/vacancies/reextract`, `POST /fx/*`, `POST /ai-cache/clear` и HH.
 `API_KEY`, если задан, — дополнительный заголовок `X-API-Key` поверх JWT, а не замена ему.
 
 Query-параметры списка, метрик, аналитики и экспорта типизированы на уровне FastAPI:
@@ -527,6 +548,15 @@ Query-параметры списка, метрик, аналитики и эк�
 ретрай после падения воркера продолжает с первого необработанного текста. Импорт
 занимает один слот `ai.interactive_per_user_limit`; таймаут RQ — базовый плюс
 60 с на текст.
+
+`POST /vacancies/reextract` — та же механика для уже сохранённых вакансий
+(`kind=reextract`, итог в `reextract_result`): миграция 037 вынесла языки из
+специализаций в технологии, и у вакансий вида `["Go"]` роли не осталось. Цели —
+активные вакансии не из HH с пустыми `detected_specializations`, до 500 за джобу
+(свежие первыми); LLM разбирает их текст заново (промпт `extract-v10`, кэш прежней
+версии не используется), результат пишется тем же UPSERT, что у прогона. Ответ «не
+вакансия» строку не удаляет (`kept`). Одновременно идёт одна такая джоба — повторный
+`POST` возвращает её `job_id`. Кнопка — на странице «Импорт».
 
 Если LLM в воркере не запустился (нет ключа, неизвестная модель), импорт-задача
 завершается `error` с причиной, а тексты не сохраняются: без LLM нет проверки

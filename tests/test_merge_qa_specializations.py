@@ -67,7 +67,7 @@ def test_migration_merges_qa_specializations(pg_empty_db):
             )
         )
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "036_merge_qa_specializations")
     with engine.connect() as conn:
         specs = dict(conn.execute(text("SELECT id, detected_specializations FROM vacancies")).all())
         assert specs == {

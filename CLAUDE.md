@@ -104,7 +104,8 @@ pub/sub для SSE). Все три типа джоб устроены одина
 - прогресс прогона — колонка `parse_runs.progress`; SSE (`/runs/{id}/events`,
   `/llm-jobs/{id}/events`) читает Redis pub/sub с fallback на poll БД;
 - матчинг и письма: кэш в БД → 200, иначе `llm_jobs` + 202 `{job_id}`; ручной импорт
-  с LLM — тоже `llm_jobs` (`kind=import`, без резюме/вакансии, итог в `result`)
+  с LLM и переразбор сохранённых вакансий — тоже `llm_jobs` (`kind=import` / `reextract`,
+  пакетные `BATCH_KINDS`: без резюме/вакансии, итог по элементам в `result`)
   (`backend/services/llm_job_service.py`, `backend/workers/llm_tasks.py`);
 - мутации parse / HH sync / import принимают `Idempotency-Key`
   (`backend/services/idempotency.py`): резерв коммитится отдельной сессией до
@@ -122,6 +123,10 @@ pub/sub для SSE). Все три типа джоб устроены одина
 - Фильтры списка, метрик, аналитики и экспорта строятся одной функцией
   (`backend/db/vacancy_filters.py`) из `VacancyQuery` — новый фильтр добавлять там,
   иначе список и аналитика разойдутся.
+- Специализация — роль, технология — стек: языки и инструменты из специализаций
+  переносит `split_specializations` (`tg_jobs_parser/config/schema.py`) в каждой точке
+  входа (правила, ответ LLM, HH, `FiltersConfig`, `VacancyQuery`); имена технологий —
+  через `canonical_technologies`.
 - Только Postgres (`DATABASE_URL` другого диалекта отклоняет `Settings`): FTS,
   JSONB, advisory lock, `ON CONFLICT` пишутся напрямую, без веток под диалекты.
   Тесты — тоже на Postgres (testcontainers или `TEST_DATABASE_URL`, см. `AGENTS.md`).

@@ -27,17 +27,26 @@ _TRACER = trace.get_tracer(__name__)
 KIND_MATCH = "match"
 KIND_COVER_LETTER = "cover_letter"
 KIND_IMPORT = "import"
+KIND_REEXTRACT = "reextract"
+# Пакетные джобы (импорт текстов, переразбор вакансий): без резюме и вакансии, не
+# переиспользуются, мимо interactive-бюджета, квота — в воркере по элементам.
+BATCH_KINDS = frozenset({KIND_IMPORT, KIND_REEXTRACT})
 
 # Импорт — до 50 текстов, каждый со своим вызовом LLM: базового таймаута RQ на него мало.
 IMPORT_SECONDS_PER_TEXT = 60
 
 
+def _batch_size(kind: str, params: dict | None) -> int:
+    key = "texts" if kind == KIND_IMPORT else "vacancy_ids"
+    return len((params or {}).get(key) or [])
+
+
 def rq_job_timeout(kind: str, params: dict | None) -> int:
-    """Таймаут RQ-джобы: базовый LLM_RQ_JOB_TIMEOUT_SECONDS + запас на тексты импорта."""
+    """Таймаут RQ-джобы: базовый LLM_RQ_JOB_TIMEOUT_SECONDS + запас на элементы пакетной джобы."""
     base = get_settings().llm_rq_job_timeout_seconds
-    if kind != KIND_IMPORT:
+    if kind not in BATCH_KINDS:
         return base
-    return base + IMPORT_SECONDS_PER_TEXT * len((params or {}).get("texts") or [])
+    return base + IMPORT_SECONDS_PER_TEXT * _batch_size(kind, params)
 
 
 class LlmJobUserLimitError(RuntimeError):
@@ -149,7 +158,7 @@ class LlmJobRunner:
             with session_scope() as session:
                 lock_user_llm_enqueue(session, user_id=user_id)
                 existing = None
-                if kind != KIND_IMPORT:
+                if kind not in BATCH_KINDS:
                     existing = repo.find_active_llm_job(
                         session,
                         user_id=user_id,
@@ -170,13 +179,13 @@ class LlmJobRunner:
                     )
                 quota_day = None
                 budget = cfg.ai.interactive_daily_request_budget
-                if kind != KIND_IMPORT and interactive_daily_budget_exhausted(budget):
+                if kind not in BATCH_KINDS and interactive_daily_budget_exhausted(budget):
                     record_llm_job_enqueue(backend=backend, kind=kind, outcome="rejected_budget")
                     raise LlmDailyQuotaError(
                         f"Общий суточный бюджет LLM исчерпан ({budget} запросов в сутки): "
                         "оценки и письма недоступны до 00:00 UTC."
                     )
-                if kind != KIND_IMPORT:
+                if kind not in BATCH_KINDS:
                     try:
                         quota_day = reserve_user_llm_calls(session, user_id=user_id, calls=1)
                     except LlmDailyQuotaError:

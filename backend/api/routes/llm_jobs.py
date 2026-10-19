@@ -39,9 +39,9 @@ from backend.db.llm_job_repository import TERMINAL_LLM_STATUSES
 from backend.db.session import session_scope
 from backend.observability import LLM_JOB_SSE_CONNECTIONS
 from backend.schemas import LlmJobOut
-from backend.services import import_service, llm_job_service
+from backend.services import import_service, llm_job_service, reextract_service
 from backend.services.llm_job_events import channel_for
-from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_IMPORT, KIND_MATCH
+from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_IMPORT, KIND_MATCH, KIND_REEXTRACT
 from backend.services.llm_result_freshness import current_ai_config
 from backend.services.pubsub_hub import PubSubUnavailable, get_pubsub_hub
 from backend.settings import get_settings
@@ -57,7 +57,11 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
     match_out = None
     letter_out = None
     import_out = None
-    if row.kind == KIND_IMPORT:
+    reextract_out = None
+    if row.kind == KIND_REEXTRACT:
+        if row.result:
+            reextract_out = reextract_service.reextract_response(row.result)
+    elif row.kind == KIND_IMPORT:
         # Частичный итог тоже отдаём: по нему UI показывает прогресс импорта.
         if row.result:
             import_out = import_service.to_import_response(import_service.import_result_from_job(db, row.result))
@@ -81,6 +85,7 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
         match=match_out,
         cover_letter=letter_out,
         import_result=import_out,
+        reextract_result=reextract_out,
         cancel_requested=bool(row.cancel_requested),
         created_at=row.created_at,
         started_at=row.started_at,

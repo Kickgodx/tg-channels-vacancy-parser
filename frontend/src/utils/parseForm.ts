@@ -59,7 +59,8 @@ export function formFromDefaults(d: ConfigDefaults): ParseFormState {
     anySpecialization: d.filters.any_specialization,
     specializations: d.filters.specializations.length
       ? d.filters.specializations
-      : ["Python", "Backend", "QA", "AI"],
+      : ["Backend", "QA", "AI"],
+    technologies: [...(d.filters.technologies ?? [])],
     excludeKeywordsText: d.filters.exclude_keywords.join("\n"),
     countriesText: d.filters.countries.join(", "),
     citiesText: d.filters.cities.join(", "),
@@ -97,6 +98,8 @@ export function buildRunBody(form: ParseFormState, defaults: ConfigDefaults): Ru
     filters.specializations = form.specializations;
     filters.any_specialization = false;
   }
+  // Технологии — через «и» с ролями и независимо от «любой специализации».
+  filters.technologies = form.technologies;
 
   const ai: NonNullable<RunCreateBody["ai"]> = {
     enabled: form.useAi,

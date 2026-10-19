@@ -75,7 +75,7 @@ def test_detail_to_vacancy_fields():
     assert v.salary_currency == "RUB"
     assert v.detected_salary_min == 200000
     assert v.work_format == "remote"
-    assert "pytest" in v.technologies
+    assert v.technologies == ["Pytest", "Python"]  # каноническое написание каталога
     assert v.extraction_source == "hh_api"
     assert v.post_url == "https://hh.ru/vacancy/42"
     assert "pytest" in v.cleaned_text.lower() or "AQA" in v.cleaned_text

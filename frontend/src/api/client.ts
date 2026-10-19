@@ -22,12 +22,15 @@ import type {
   SavedFilterParams,
   SourceStats,
   SseTicketResponse,
+  TechnologyCount,
   TokenResponse,
   Vacancy,
   VacancyImportOutcome,
   VacancyImportResponse,
   VacancyListItem,
   VacancyMatch,
+  VacancyReextractInfo,
+  VacancyReextractResponse,
 } from "../types/api";
 
 // По умолчанию — тот же origin, что у UI (dev: прокси Vite, prod: nginx): refresh-cookie
@@ -570,6 +573,47 @@ export const api = {
   },
 
   getVacancy: (id: string) => request<Vacancy>(`/vacancies/${encodeURIComponent(id)}`),
+
+  /** Технологии по числу вакансий под фильтрами (собственный выбор технологий не учитывается). */
+  getTechnologyFacets: (params?: VacancyQueryParams) => {
+    const q = new URLSearchParams();
+    appendSearchParams(q, params);
+    const qs = q.toString();
+    return request<{ items: TechnologyCount[] }>(`/vacancies/technologies${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Сколько вакансий без специализации ждут переразбора LLM (admin). */
+  getReextractInfo: () => request<VacancyReextractInfo>("/vacancies/reextract"),
+
+  /**
+   * Переразобрать LLM вакансии без специализации (admin): 202 и джоба, `onProgress` — частичный итог.
+   * Уже идёт переразбор — backend вернёт её job_id, ожидание подхватит её.
+   */
+  reextractVacancies: async (
+    onProgress?: (partial: VacancyReextractResponse) => void,
+    signal?: AbortSignal,
+    onAccepted?: (jobId: string) => void,
+  ): Promise<{ result: VacancyReextractResponse; cancelled: boolean }> => {
+    let cancelled = false;
+    const empty: VacancyReextractResponse = { total: 0, items: [], updated: 0, kept: 0, errors: 0 };
+    const result = await postInteractiveLlm<VacancyReextractResponse>(
+      "/vacancies/reextract",
+      { method: "POST" },
+      (job) => job.reextract_result ?? empty,
+      (job) => {
+        if (job.reextract_result) onProgress?.(job.reextract_result);
+      },
+      signal,
+      {
+        onAccepted,
+        pickCancelled: (job) => {
+          cancelled = true;
+          return job.reextract_result ?? empty;
+        },
+      },
+    );
+    return { result, cancelled };
+  },
 
   /** Агрегаты для графиков (те же фильтры, что у listVacancies, без пагинации). */
   getFxRates: () =>

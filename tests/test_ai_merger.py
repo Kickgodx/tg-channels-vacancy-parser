@@ -16,7 +16,7 @@ def _vacancy(**kwargs) -> Vacancy:
         source_url="https://t.me/s/ch",
         raw_text="text",
         cleaned_text="text",
-        detected_specializations=["Python"],
+        detected_specializations=["Backend"],
         vacancy_score=2,
         parsed_at=datetime.now(UTC),
     )
@@ -30,7 +30,7 @@ def test_merge_ai_salary_and_specs():
     v = _vacancy(detected_salary_min=None, work_format=None)
     ai = VacancyAIExtraction(
         is_job_post=True,
-        detected_specializations=["Go", "Rust"],
+        detected_specializations=["Fullstack", "Go", "Rust"],
         salary_min=300000,
         salary_max=400000,
         salary_currency="RUB",
@@ -39,8 +39,8 @@ def test_merge_ai_salary_and_specs():
         confidence=0.85,
     )
     out = merge_rules_and_ai(v, ai, cfg)
-    assert "Go" in out.detected_specializations
-    assert "Rust" in out.detected_specializations
+    assert out.detected_specializations == ["Backend", "Fullstack"]
+    assert out.technologies == ["Go", "Rust"]
     assert out.detected_salary_min == 300000
     assert out.salary_currency == "RUB"
     assert out.work_format == "remote"
@@ -77,19 +77,19 @@ def test_primary_specs_only_from_ai_not_rules():
     v = _vacancy(
         detected_specializations=[
             "QA",
-            "Go",
-            "Golang",
             "System Analyst",
             "Business Analyst",
         ],
     )
     ai = VacancyAIExtraction(
         is_job_post=True,
-        detected_specializations=["Go"],
+        detected_specializations=["Backend"],
+        technologies=["golang"],
         confidence=0.95,
     )
     out = merge_rules_and_ai(v, ai, cfg)
-    assert out.detected_specializations == ["Go"]
+    assert out.detected_specializations == ["Backend"]
+    assert out.technologies == ["Go"]
 
 
 def test_primary_does_not_apply_regex_hourly_from_v_chasti():

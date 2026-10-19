@@ -125,17 +125,16 @@ search:
   max_days: 365
 
 filters:
+  # Роли. Языки (Python, Go, Java…) — технологии: см. filters.technologies.
   specializations:
-    - Python
-    - Java
     - QA
     - Automation QA
     - SDET
-    - Go
-    - Golang
     - Software Engineer
     - Backend
     - AI
+  # Технологии стека: любая из них; со specializations — через И. Пусто — без фильтра.
+  technologies: []
   exclude_keywords:
     - junior
     - intern

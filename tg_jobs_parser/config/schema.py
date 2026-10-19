@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -32,8 +33,8 @@ DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
         "автоматизатор тестирования",
     ],
     "SDET": ["sdet", "software development engineer in test"],
-    "Python": ["python", "питон", "python developer"],
-    "Java": ["java", "java developer"],
+    # Языки (Python, Java, Go…) — не специализации, а технологии: DEFAULT_TECHNOLOGIES
+    # и split_specializations (миграция 037).
     "Backend": ["backend", "бэкенд", "бэкэнд", "бэк-енд"],
     "DevOps": ["devops", "dev ops", "девопс"],
     "Data Engineer": ["data engineer", "дата инженер", "инженер данных"],
@@ -66,8 +67,6 @@ DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
         "инженер-программист",
         "программист",
     ],
-    "Go": ["go", "golang", "go developer", "golang developer"],
-    "Golang": ["golang", "go lang"],
     "Frontend": ["frontend", "front-end", "front end", "фронтенд", "react developer"],
     "Fullstack": ["fullstack", "full-stack", "full stack", "фулстек"],
     "Analyst": ["analyst", "аналитик"],
@@ -116,36 +115,217 @@ DEFAULT_EXCLUDE_KEYWORDS = [
 ]
 
 
+# Словарь rule-based поиска технологий по тексту поста (и канонические имена для
+# нормализации). Однобуквенные и двусмысленные имена (C, Unity) сюда не входят — их
+# узнаёт только _EXTRA_TECHNOLOGY_NAMES, когда LLM ставит их специализацией.
 DEFAULT_TECHNOLOGIES = [
     "Python",
     "Java",
     "Kotlin",
     "Swift",
     "Go",
-    "Golang",
     "JavaScript",
     "TypeScript",
+    "PHP",
+    "C++",
+    "C#",
+    ".NET",
+    "Rust",
+    "Ruby",
+    "Scala",
+    "Node.js",
+    "1С",
+    "SQL",
     "React",
+    "Vue",
+    "Angular",
+    "Flutter",
+    "Django",
+    "FastAPI",
+    "Flask",
     "Spring Boot",
     "Spring",
     "Kafka",
+    "RabbitMQ",
     "Docker",
     "Kubernetes",
+    "Terraform",
+    "Ansible",
     "PostgreSQL",
     "MySQL",
     "Redis",
     "MongoDB",
+    "ClickHouse",
+    "Elasticsearch",
+    "Airflow",
+    "Spark",
+    "PyTorch",
+    "TensorFlow",
     "Selenium",
     "Playwright",
     "Pytest",
     "Appium",
     "REST",
     "GraphQL",
+    "gRPC",
     "Linux",
     "AWS",
     "GCP",
     "Azure",
 ]
+
+# Технологии, которые узнаются в специализациях от LLM, но не ищутся по тексту.
+_EXTRA_TECHNOLOGY_NAMES = [
+    "C",
+    "Objective-C",
+    "Dart",
+    "Elixir",
+    "Erlang",
+    "Haskell",
+    "Clojure",
+    "Perl",
+    "Lua",
+    "Delphi",
+    "Solidity",
+    "Bitrix",
+    "Laravel",
+    "Symfony",
+    "Ruby on Rails",
+    "Next.js",
+    "Svelte",
+    "React Native",
+    "Unity",
+    "Unreal Engine",
+    "Godot",
+]
+
+# Варианты написания (lower) → каноническое имя технологии.
+TECHNOLOGY_ALIASES: dict[str, str] = {
+    "golang": "Go",
+    "go lang": "Go",
+    "go-lang": "Go",
+    "python3": "Python",
+    "python 3": "Python",
+    "postgres": "PostgreSQL",
+    "postgre": "PostgreSQL",
+    "postgre sql": "PostgreSQL",
+    "apache kafka": "Kafka",
+    "apache airflow": "Airflow",
+    "apache spark": "Spark",
+    "rest api": "REST",
+    "rest-api": "REST",
+    "restful": "REST",
+    "restful api": "REST",
+    "js": "JavaScript",
+    "ts": "TypeScript",
+    "node": "Node.js",
+    "nodejs": "Node.js",
+    "node js": "Node.js",
+    "k8s": "Kubernetes",
+    "dotnet": ".NET",
+    ".net core": ".NET",
+    "c#/.net": ".NET",
+    "c# .net": ".NET",
+    "c#.net": ".NET",
+    "1c": "1С",
+    "1c:предприятие": "1С",
+    "1с:предприятие": "1С",
+    "reactjs": "React",
+    "react.js": "React",
+    "vuejs": "Vue",
+    "vue.js": "Vue",
+    "angularjs": "Angular",
+    "spring framework": "Spring",
+    "elastic": "Elasticsearch",
+    "elastic search": "Elasticsearch",
+    "ror": "Ruby on Rails",
+    "nextjs": "Next.js",
+}
+
+_TECHNOLOGY_CATALOG: dict[str, str] = {t.lower(): t for t in DEFAULT_TECHNOLOGIES + _EXTRA_TECHNOLOGY_NAMES}
+
+# «Python Developer», «Go-разработчик», «Программист 1С» — роль «разработчик на технологии».
+_DEV_WORDS = r"(?:developer|engineer|dev|разработчик|программист)"
+_TECH_ROLE_RE = re.compile(
+    rf"^(?P<tech>.+?)[\s\-]+{_DEV_WORDS}$|^{_DEV_WORDS}[\s\-]+(?P<tech2>.+)$",
+    re.IGNORECASE,
+)
+# Роль, если LLM назвал только «<язык> developer» без функции (backend, frontend…).
+GENERIC_DEVELOPER_ROLE = "Software Engineer"
+
+
+def technology_name(name: str) -> str | None:
+    """Каноническое имя, если ``name`` — известная технология (каталог или алиас), иначе None."""
+    key = " ".join(name.strip().lower().split())
+    if not key:
+        return None
+    return TECHNOLOGY_ALIASES.get(key) or _TECHNOLOGY_CATALOG.get(key)
+
+
+def canonical_technologies(names: list[str]) -> list[str]:
+    """Технологии через алиасы и регистр каталога («golang» → Go); без повторов, порядок сохраняется.
+
+    Неизвестные имена остаются как есть — словарь LLM открытый.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in names:
+        name = " ".join(str(raw).split())
+        if not name:
+            continue
+        name = technology_name(name) or name
+        key = name.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(name)
+    return out
+
+
+def _technologies_in_spec(name: str) -> tuple[list[str], bool]:
+    """Технологии в имени специализации и признак «роль разработчика» (Python Developer)."""
+    if "/" in name:
+        # «C#/.NET» — технологии, только если технологии все части.
+        parts = [technology_name(p) for p in name.split("/")]
+        if all(parts):
+            return [p for p in parts if p], False
+    tech = technology_name(name)
+    if tech:
+        return [tech], False
+    m = _TECH_ROLE_RE.match(name.strip())
+    if m:
+        tech = technology_name(m.group("tech") or m.group("tech2") or "")
+        if tech:
+            return [tech], True
+    return [], False
+
+
+def split_specializations(
+    specializations: list[str],
+    technologies: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Разделить роли и технологии: языки и фреймворки из специализаций уходят в технологии.
+
+    ``["Automation QA", "Python"]`` → роли ``["Automation QA"]``, технологии ``[…, "Python"]``.
+    «Python Developer» без другой роли даёт ``GENERIC_DEVELOPER_ROLE``; голое «Python» —
+    без роли. Возвращает канонические имена обеих групп.
+    """
+    roles: list[str] = []
+    moved: list[str] = []
+    developer = False
+    for raw in specializations:
+        name = str(raw).strip()
+        if not name:
+            continue
+        techs, is_dev = _technologies_in_spec(name)
+        if techs:
+            moved.extend(techs)
+            developer = developer or is_dev
+        else:
+            roles.append(name)
+    roles = canonical_specializations(roles)
+    if developer and not roles:
+        roles = [GENERIC_DEVELOPER_ROLE]
+    return roles, canonical_technologies([*(technologies or []), *moved])
 
 
 WORK_FORMAT_SYNONYMS: dict[str, list[str]] = {
@@ -303,7 +483,7 @@ class AiConfig(BaseModel):
     )
     use_few_shot: bool = False
     prompt_version: str = Field(
-        default="extract-v9",
+        default="extract-v10",
         description=(
             "Должен совпадать с EXTRACT_PROMPT_VERSION в ai/prompts.py. "
             "Кэш всегда ключуется константой; расхождение → warning."
@@ -441,11 +621,22 @@ class FiltersConfig(BaseModel):
         description="Значения: remote, hybrid, office, relocation, any, exclude_office",
     )
 
-    @field_validator("specializations")
-    @classmethod
-    def canonical_specs(cls, v: list[str]) -> list[str]:
-        # Старые имена (AQA, Manual QA…) из config.yaml и снимков прогонов.
-        return canonical_specializations(v)
+    technologies: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Технологии стека (Python, Go…): вакансия проходит, если в technologies есть любая из них. "
+            "Вместе со specializations — через И. Пусто — без фильтра."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def split_roles_and_technologies(self) -> FiltersConfig:
+        # Старые имена (AQA, Manual QA…) и языки в specializations (Python, Go — до миграции 037)
+        # из config.yaml и снимков прогонов: языки переезжают в technologies.
+        roles, techs = split_specializations(self.specializations, self.technologies)
+        self.specializations = roles
+        self.technologies = techs
+        return self
 
 
 class ParserConfig(BaseModel):
@@ -686,6 +877,9 @@ class AppConfig(BaseModel):
         merged = dict(DEFAULT_SPECIALIZATIONS)
         for raw_name, synonyms in self.dictionaries.specializations.items():
             name = SPECIALIZATION_ALIASES.get(raw_name.strip(), raw_name.strip())
+            if technology_name(name):
+                # Язык — не специализация: его ищет словарь технологий.
+                continue
             merged.setdefault(name, [])
             merged[name] = list(dict.fromkeys(merged.get(name, []) + list(synonyms)))
         return merged

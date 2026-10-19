@@ -17,6 +17,7 @@ class SearchContext:
     allowed_specializations: list[str]
     allowed_work_formats: list[str]
     any_specialization: bool = False
+    target_technologies: tuple[str, ...] = ()
 
     def to_prompt_block(self) -> str:
         if self.any_specialization:
@@ -40,10 +41,12 @@ class SearchContext:
         lines = [
             "SEARCH_CONTEXT (what the user is looking for; do not invent facts to match it):",
             target_line,
+            f"  target_technologies: {list(self.target_technologies) or '(any)'}",
             f"  target_work_formats: {self.target_work_formats or '(any)'}",
             f"  exclude_keywords: {self.exclude_keywords[:30]}{'...' if len(self.exclude_keywords) > 30 else ''}",
             policy,
-            "ALLOWED_SPECIALIZATIONS (prefer these canonical names; you may add new role names if clearly stated):",
+            "ALLOWED_SPECIALIZATIONS (roles; prefer these canonical names; you may add new role names "
+            "if clearly stated, never languages or tools):",
             f"  {', '.join(self.allowed_specializations[:80])}",
             f"ALLOWED_WORK_FORMATS: {', '.join(self.allowed_work_formats)}",
         ]
@@ -66,4 +69,5 @@ def build_search_context(config: AppConfig) -> SearchContext:
         allowed_specializations=list(config.merged_specializations().keys()),
         allowed_work_formats=["remote", "hybrid", "office", "relocation", "unknown"],
         any_specialization=any_it,
+        target_technologies=tuple(config.filters.technologies),
     )

@@ -17,7 +17,8 @@ from tg_jobs_parser.ai.schema import VacancyAIExtraction
 def _sample() -> VacancyAIExtraction:
     return VacancyAIExtraction(
         is_job_post=True,
-        detected_specializations=["Python"],
+        detected_specializations=["Backend"],
+        technologies=["Python"],
         confidence=0.9,
     )
 
@@ -36,7 +37,8 @@ def test_cache_put_get_roundtrip(db_session):
     db_session.commit()
     got = cache_get(db_session, cache_key=key)
     assert got is not None
-    assert got.detected_specializations == ["Python"]
+    assert got.detected_specializations == ["Backend"]
+    assert got.technologies == ["Python"]
     assert cache_count(db_session) == 1
 
 

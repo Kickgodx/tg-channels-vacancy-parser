@@ -85,7 +85,7 @@ def _text_to_vacancy(text: str, config: AppConfig, *, source_url: str | None) ->
     return v.model_copy(update={"source_url": source_url or ""})
 
 
-def _enrich_status(
+def enrich_with_status(
     ai_service,
     vacancy: Vacancy,
     config: AppConfig,
@@ -312,7 +312,7 @@ def run_import_job(
                     ai_service = None
             if ai_service is not None:
                 calls_before = ai_service.stats.calls
-                enriched, reject_status, message = _enrich_status(
+                enriched, reject_status, message = enrich_with_status(
                     ai_service,
                     v,
                     ingest_config,

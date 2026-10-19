@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, model_validator
 
 from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
+from tg_jobs_parser.config.schema import split_specializations
 from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
 from tg_jobs_parser.models.vacancy import Vacancy
 
@@ -34,6 +35,7 @@ class RunSearchOverrides(_RunOverrides):
 class RunFiltersOverrides(_RunOverrides):
     specializations: list[str] | None = None
     any_specialization: bool | None = None
+    technologies: list[str] | None = None
     exclude_keywords: list[str] | None = None
     countries: list[str] | None = None
     cities: list[str] | None = None
@@ -181,6 +183,10 @@ class VacancyQuery(BaseModel):
         default_factory=list,
         description="Вакансии с любой из перечисленных специализаций в detected_specializations",
     )
+    technologies: list[str] = Field(
+        default_factory=list,
+        description="Вакансии с любой из перечисленных технологий; вместе со specializations — через И",
+    )
     work_format: str | None = None
     date_from: date | None = None
     date_to: date | None = None
@@ -213,6 +219,12 @@ class VacancyQuery(BaseModel):
         error = sort_pair_error(self.sort_by, self.then_by)
         if error:
             raise ValueError(error)
+        return self
+
+    @model_validator(mode="after")
+    def _split_technologies(self) -> VacancyQuery:
+        # Старые ссылки и закладки: ?specialization=Python — это фильтр по технологии.
+        self.specializations, self.technologies = split_specializations(self.specializations, self.technologies)
         return self
 
 
@@ -427,7 +439,8 @@ class LlmJobOut(BaseModel):
     """Статус фоновой LLM-задачи; при done — готовый match или cover_letter.
 
     Импорт (``kind=import``): резюме и вакансии нет, ``import_result`` — итог по
-    уже обработанным текстам (растёт, пока джоба ``running``).
+    уже обработанным текстам (растёт, пока джоба ``running``). Переразбор
+    (``kind=reextract``) — так же, итог в ``reextract_result``.
     """
 
     id: uuid.UUID
@@ -439,6 +452,7 @@ class LlmJobOut(BaseModel):
     match: VacancyMatchOut | None = None
     cover_letter: CoverLetterOut | None = None
     import_result: VacancyImportResponse | None = None
+    reextract_result: VacancyReextractResponse | None = None
     cancel_requested: bool = Field(
         default=False,
         description="Запрошена отмена; у running — воркер остановит задачу в ближайшей точке проверки.",
@@ -478,6 +492,47 @@ class VacancyImportResponse(BaseModel):
     warning: str | None = None
     # Текстов в запросе: у выполняемой джобы импорта items короче — это прогресс.
     total: int = 0
+
+
+VacancyReextractStatus = Literal["updated", "kept", "error"]
+
+
+class VacancyReextractItem(BaseModel):
+    index: int
+    vacancy_id: str
+    status: VacancyReextractStatus
+    message: str | None = None
+
+
+class VacancyReextractResponse(BaseModel):
+    """Итог переразбора LLM: по вакансиям, растёт, пока джоба ``running``."""
+
+    total: int = 0
+    items: list[VacancyReextractItem] = Field(default_factory=list)
+    updated: int = 0
+    kept: int = 0
+    errors: int = 0
+    warning: str | None = None
+
+
+class VacancyReextractInfo(BaseModel):
+    """Сколько вакансий без специализации ждут переразбора и активная джоба, если есть."""
+
+    missing_role: int
+    max_per_job: int
+    ai_enabled: bool
+    active_job_id: uuid.UUID | None = None
+
+
+class TechnologyCount(BaseModel):
+    name: str
+    count: int
+
+
+class TechnologyFacetResponse(BaseModel):
+    """Технологии по числу вакансий — варианты фильтра списка."""
+
+    items: list[TechnologyCount] = Field(default_factory=list)
 
 
 LlmJobOut.model_rebuild()

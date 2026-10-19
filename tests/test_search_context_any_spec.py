@@ -20,7 +20,18 @@ def test_any_specialization_empty_target_and_prompt_flag():
 
 
 def test_explicit_specs_keep_targets():
-    cfg = AppConfig(filters=FiltersConfig(specializations=["Go"], any_specialization=False))
+    cfg = AppConfig(filters=FiltersConfig(specializations=["Backend"], any_specialization=False))
     ctx = build_search_context(cfg)
-    assert ctx.target_specializations == ["Go"]
+    assert ctx.target_specializations == ["Backend"]
     assert "ANY_IT_SPECIALIZATION=true" not in ctx.to_prompt_block()
+
+
+def test_languages_in_filter_become_target_technologies():
+    # Старый config.yaml: Go в specializations — это технология.
+    cfg = AppConfig(filters=FiltersConfig(specializations=["Backend", "Go"]))
+    ctx = build_search_context(cfg)
+    assert ctx.target_specializations == ["Backend"]
+    assert ctx.target_technologies == ("Go",)
+    block = ctx.to_prompt_block()
+    assert "target_technologies: ['Go']" in block
+    assert "Go" not in ctx.allowed_specializations

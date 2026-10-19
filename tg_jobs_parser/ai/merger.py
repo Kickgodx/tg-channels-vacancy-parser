@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.config.schema import AppConfig
+from tg_jobs_parser.config.schema import AppConfig, canonical_technologies
 from tg_jobs_parser.extraction.salary_period import (
     apply_hourly_currency_from_text,
     normalize_annual_salary_to_monthly,
@@ -120,8 +120,7 @@ def merge_rules_and_ai(
         updates["application_urls"] = rules_urls or ai_urls
 
     if ai.technologies:
-        tech_set = list(dict.fromkeys(vacancy.technologies + ai.technologies))
-        updates["technologies"] = tech_set
+        updates["technologies"] = canonical_technologies(vacancy.technologies + ai.technologies)
 
     if ai.required_experience and (_use_ai("required_experience") or not vacancy.required_experience):
         updates["required_experience"] = ai.required_experience

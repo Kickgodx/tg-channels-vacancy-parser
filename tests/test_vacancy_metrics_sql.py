@@ -152,7 +152,7 @@ def test_metrics_and_salary_analytics_query_count(db_session):
     finally:
         event.remove(engine, "before_cursor_execute", _count)
 
-    assert n_metrics == 3  # грейды/форматы/итоги, специализации, дни
+    assert n_metrics == 4  # грейды/форматы/итоги, специализации, технологии, дни
     assert n_salaries == 5  # грейд+формат, специализации, периоды, периоды × группы, распределение
     assert metrics.unique_vacancies == 2 and metrics.vacancies_with_salary == 2
     assert metrics.vacancies_by_work_format == {"remote": 1, "unknown": 1}
