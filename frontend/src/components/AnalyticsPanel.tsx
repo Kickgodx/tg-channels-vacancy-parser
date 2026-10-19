@@ -220,24 +220,27 @@ function PeriodGroupChart({
 
 export default function AnalyticsPanel({ params }: Props) {
   const [analyticsYear, setAnalyticsYear] = useState<string | null>(null);
+  // По умолчанию с архивом: иначе TTL обрезает прошлые годы и YoY пустеет.
+  // Без него цифры совпадают со списком (он показывает только активные).
+  const [includeArchived, setIncludeArchived] = useState(true);
 
-  // Полная история (active+archived), без сужения дат списка — для YoY и селектора лет.
+  // Вся история без сужения дат списка — для YoY и селектора лет.
   const historyParams = useMemo(() => {
-    const base: VacancyQueryParams = { ...params, include_archived: true };
+    const base: VacancyQueryParams = { ...params, include_archived: includeArchived };
     delete base.date_from;
     delete base.date_to;
     return base;
-  }, [params]);
+  }, [params, includeArchived]);
 
   const yearParams = useMemo(() => {
     if (!analyticsYear) return null;
     return {
       ...params,
-      include_archived: true,
+      include_archived: includeArchived,
       date_from: `${analyticsYear}-01-01`,
       date_to: `${analyticsYear}-12-31`,
     } satisfies VacancyQueryParams;
-  }, [params, analyticsYear]);
+  }, [params, analyticsYear, includeArchived]);
 
   const historyQ = useQuery({
     queryKey: ["analytics-salaries", historyParams],
@@ -270,6 +273,11 @@ export default function AnalyticsPanel({ params }: Props) {
   const salaries = analyticsYear ? yearQ.data : history;
   const suffix = salarySuffix(salaries);
   const yearOptions = (history?.yearly ?? []).map((b) => b.period);
+  // Без архива выбранный год может пропасть из истории — оставляем его в списке.
+  if (analyticsYear && !yearOptions.includes(analyticsYear)) {
+    yearOptions.push(analyticsYear);
+    yearOptions.sort();
+  }
   const monthlyData = (salaries?.monthly ?? []).map((b) => ({
     period: b.period,
     median: b.median != null ? Math.round(b.median) : null,
@@ -304,9 +312,18 @@ export default function AnalyticsPanel({ params }: Props) {
             ))}
           </select>
         </label>
-        <span className="muted" style={{ fontSize: "0.85rem" }}>
-          В аналитику входят активные и архивные вакансии
-        </span>
+        <label
+          className="checkbox-row"
+          style={{ marginBottom: 0 }}
+          title="Список показывает только активные вакансии; с архивом цифры аналитики больше выборки, зато прошлые годы не обрезаны TTL"
+        >
+          <input
+            type="checkbox"
+            checked={includeArchived}
+            onChange={(e) => setIncludeArchived(e.target.checked)}
+          />
+          Учитывать архивные вакансии
+        </label>
       </div>
 
       <div className="charts-grid">
