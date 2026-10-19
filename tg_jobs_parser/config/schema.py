@@ -262,10 +262,26 @@ def technology_name(name: str) -> str | None:
     return TECHNOLOGY_ALIASES.get(key) or _TECHNOLOGY_CATALOG.get(key)
 
 
+# Любое упоминание 1С как отдельного токена («1С:Предприятие 8.3», «1С КА», «язык запросов 1С»,
+# латинская «1C») — одна технология 1С. «1С-Битрикс» — отдельный продукт (Bitrix).
+_ONE_C_RE = re.compile(r"(?<![0-9a-zа-яё])1[сc](?![0-9a-zа-яё])", re.IGNORECASE)
+_BITRIX_RE = re.compile(r"битрикс|bitrix", re.IGNORECASE)
+
+
+def _technology_family(name: str) -> str | None:
+    """Семейство технологии по вхождению (только для списка технологий, не для ролей)."""
+    if _BITRIX_RE.search(name):
+        return "Bitrix"
+    if _ONE_C_RE.search(name):
+        return "1С"
+    return None
+
+
 def canonical_technologies(names: list[str]) -> list[str]:
     """Технологии через алиасы и регистр каталога («golang» → Go); без повторов, порядок сохраняется.
 
-    Неизвестные имена остаются как есть — словарь LLM открытый.
+    Варианты 1С («1С:Предприятие 8.3», «1С КА») сводятся к 1С. Неизвестные имена остаются
+    как есть — словарь LLM открытый.
     """
     out: list[str] = []
     seen: set[str] = set()
@@ -273,7 +289,7 @@ def canonical_technologies(names: list[str]) -> list[str]:
         name = " ".join(str(raw).split())
         if not name:
             continue
-        name = technology_name(name) or name
+        name = technology_name(name) or _technology_family(name) or name
         key = name.lower()
         if key not in seen:
             seen.add(key)

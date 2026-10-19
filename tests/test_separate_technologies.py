@@ -183,3 +183,43 @@ def test_migration_separates_technologies(pg_empty_db):
             "c": {"grade": None},
         }
     engine.dispose()
+
+
+def test_one_c_variants_collapse_into_one_technology():
+    names = ["1С:Предприятие 8.3", "1C:ERP", "1С КА", "язык запросов 1С", "1C", "Python"]
+    assert canonical_technologies(names) == ["1С", "Python"]
+    # Битрикс — отдельный продукт; слово, где «1с» не отдельный токен, не трогается.
+    assert canonical_technologies(["1С-Битрикс", "Битрикс24", "1Сник"]) == ["Bitrix", "1Сник"]
+    # Для ролей правило не действует: «Руководитель отдела 1С» остаётся ролью.
+    assert split_specializations(["Руководитель отдела 1С"]) == (["Руководитель отдела 1С"], [])
+
+
+def test_migration_collapses_1c_technologies(pg_empty_db):
+    cfg = Config(str(alembic_ini_path()))
+    cfg.attributes["configure_logger"] = False
+    command.upgrade(cfg, "037_separate_technologies")
+
+    rows = {
+        "v1": '["1С:Предприятие 8.3", "1C:ERP", "SQL", "1С"]',
+        "v2": '["1C-Bitrix", "Битрикс24", "PHP"]',
+        "v3": '["Python"]',
+    }
+    engine = create_engine(pg_empty_db)
+    with engine.begin() as conn:
+        for vid, techs in rows.items():
+            conn.execute(
+                text(
+                    "INSERT INTO vacancies (id, source_post_key, source_channel, source_url, raw_text,"
+                    " cleaned_text, detected_specializations, detected_grade, technologies, application_urls,"
+                    " extraction_source, vacancy_score, vacancy_substantive_score, is_duplicate, parsed_at,"
+                    " updated_at) VALUES (:id, :id, 'chan', 'https://t.me/s/chan', 'x', 'x',"
+                    " '[]', 'unknown', CAST(:t AS jsonb), '[]', 'ai', 0, 0, false, now(), now())"
+                ),
+                {"id": vid, "t": techs},
+            )
+
+    command.upgrade(cfg, "038_collapse_1c_technologies")
+    with engine.connect() as conn:
+        got = dict(conn.execute(text("SELECT id, technologies FROM vacancies")).all())
+    engine.dispose()
+    assert got == {"v1": ["1С", "SQL"], "v2": ["Bitrix", "PHP"], "v3": ["Python"]}
