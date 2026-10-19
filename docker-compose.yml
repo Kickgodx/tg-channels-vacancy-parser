@@ -142,6 +142,10 @@ services:
       # по нему backend решает, доступен ли он из сети (dev на не-loopback не стартует).
       API_HOST: 0.0.0.0
       API_PUBLIC_ADDR: ${BIND_ADDR:-127.0.0.1}
+      # Процессов API в контейнере: GIL держит один процесс на ~1 ядре. Пул БД (20 + 20)
+      # делится между ними, очистку и /metrics ведёт один (лидер). Нужны REDIS_URL,
+      # JWT_SECRET и rq у всех задач — ниже они заданы. Подбор под хост — scripts/loadtest.
+      API_WORKERS: ${API_WORKERS:-4}
       # /metrics — отдельный порт только в Docker-сети (Prometheus), на хост не публикуется.
       API_METRICS_PORT: "9100"
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
@@ -253,6 +257,12 @@ services:
     image: prom/prometheus:v3.2.1
     profiles: ["observability"]
     logging: *default-logging
+    # remote-write-receiver: метрики k6 нагрузочного теста (scripts/loadtest/run.sh PROM_RW=1).
+    # Запись без аутентификации — порт опубликован только на INFRA_BIND_ADDR (loopback).
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-remote-write-receiver
     ports:
       - "${INFRA_BIND_ADDR:-127.0.0.1}:9090:9090"
     volumes:

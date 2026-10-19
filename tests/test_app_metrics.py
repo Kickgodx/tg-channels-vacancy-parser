@@ -396,3 +396,45 @@ def test_register_db_stats_collector_is_idempotent():
     register_db_stats_collector()
     register_db_stats_collector()
     assert sum(isinstance(c, _DBStatsCollector) for c in REGISTRY._collector_to_names) == 1
+
+
+def test_multiprocess_metrics_are_summed_and_dead_gauges_collected(tmp_path, monkeypatch):
+    """Несколько процессов API: сервер лидера отдаёт сумму, live-gauge'и умерших убираются."""
+    import os
+    import subprocess
+    import sys
+
+    from prometheus_client import generate_latest
+
+    from backend import observability
+
+    child = (
+        "from backend.observability import AUTH_EVENTS, LLM_JOB_SSE_CONNECTIONS\n"
+        "AUTH_EVENTS.labels(event='login', outcome='success').inc(3)\n"
+        "LLM_JOB_SSE_CONNECTIONS.inc()\n"
+    )
+    env = {**os.environ, "PROMETHEUS_MULTIPROC_DIR": str(tmp_path)}
+    for _ in range(2):
+        subprocess.run([sys.executable, "-c", child], env=env, check=True, cwd=os.getcwd(), timeout=60)
+
+    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(tmp_path))
+    body = generate_latest(observability.metrics_registry()).decode()
+    assert 'auth_events_total{event="login",outcome="success"} 6.0' in body
+    assert "llm_job_sse_connections 2.0" in body
+
+    # Оба процесса завершились: их live-gauge'и убраны, счётчики остались.
+    assert len(observability.collect_dead_process_metrics()) == 2
+    body = generate_latest(observability.metrics_registry()).decode()
+    assert 'auth_events_total{event="login",outcome="success"} 6.0' in body
+    assert "llm_job_sse_connections 2.0" not in body
+
+
+def test_single_process_metrics_use_global_registry(monkeypatch):
+    from prometheus_client import REGISTRY
+
+    from backend import observability
+
+    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
+    assert observability.metrics_registry() is REGISTRY
+    assert observability.start_pool_gauges() is None
+    assert observability.collect_dead_process_metrics() == []

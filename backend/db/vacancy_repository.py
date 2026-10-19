@@ -21,6 +21,7 @@ from backend.db.models import (
     VacancyMatchRow,
     VacancyRow,
     VacancySightingRow,
+    writable_columns,
 )
 from backend.db.vacancy_filters import apply_vacancy_filters, fts_query, vacancy_count_stmt
 from backend.db.vacancy_mapper import (
@@ -129,15 +130,53 @@ _SORT_COLUMNS: dict[VacancySortField, object] = {
 }
 
 
-def _vacancy_order_by(query: VacancyQuery) -> list:
-    if query.sort_by == "match_score" and query.resume_id is not None:
-        col = VacancyMatchRow.overall_score
+# С ``q`` релевантность упорядочивает только первые FTS_RANK_WINDOW совпадений выбранной
+# сортировки: ``ts_rank`` по всем совпадениям частого слова стоил сотни миллисекунд.
+FTS_RANK_WINDOW = 1000
+
+
+def _sorts_by_match(query: VacancyQuery) -> bool:
+    return query.sort_by == "match_score" and query.resume_id is not None
+
+
+def _selected_order(query: VacancyQuery, *, vacancy=None, match=None):
+    """Выбранная сортировка (без ``id``) по ORM-моделям или по алиасам ``vacancy`` / ``match``."""
+    if _sorts_by_match(query):
+        col = (match.c if match is not None else VacancyMatchRow).overall_score
     else:
         col = _SORT_COLUMNS.get(query.sort_by, VacancyRow.post_date)
-    order = col.asc().nulls_last() if query.sort_order == "asc" else col.desc().nulls_last()
-    if query.q:
-        return [func.ts_rank(*fts_query(VacancyRow.cleaned_text, query.q)).desc(), order]
-    return [order]
+        if vacancy is not None:
+            col = vacancy.c[col.key]
+    return col.asc().nulls_last() if query.sort_order == "asc" else col.desc().nulls_last()
+
+
+def _rank_window_ids(query: VacancyQuery):
+    """id первых FTS_RANK_WINDOW совпадений под фильтрами в выбранной сортировке.
+
+    На алиасах: подзапрос внутри выборки из ``vacancies`` иначе скоррелировался бы с ней.
+    """
+    v = VacancyRow.__table__.alias("rank_window")
+    stmt = select(v.c.id)
+    if _sorts_by_match(query):
+        m = VacancyMatchRow.__table__.alias("rank_window_match")
+        stmt = stmt.select_from(v.outerjoin(m, and_(m.c.vacancy_id == v.c.id, m.c.resume_id == query.resume_id)))
+        order = _selected_order(query, vacancy=v, match=m)
+    else:
+        order = _selected_order(query, vacancy=v)
+    stmt = apply_vacancy_filters(stmt, query, table=v)
+    return stmt.order_by(order, v.c.id.asc()).limit(FTS_RANK_WINDOW)
+
+
+def _vacancy_order_by(query: VacancyQuery) -> list:
+    order = _selected_order(query)
+    if not query.q:
+        return [order]
+    # CASE вычисляется лениво: ts_rank считается только для строк окна.
+    rank = case(
+        (VacancyRow.id.in_(_rank_window_ids(query)), func.ts_rank(*fts_query(VacancyRow.search_tsv, query.q))),
+        else_=null(),
+    )
+    return [rank.desc().nulls_last(), order]
 
 
 def _fx_config(fx_config: FxConfig | None) -> FxConfig:
@@ -219,7 +258,7 @@ def upsert_vacancies(
         is_existing = v.id in existing_ids
         apply_salary_rub_for_vacancy(v, session, fx, rates_cache=rates_cache, force=is_existing)
         row = vacancy_to_row(v, parse_run_id=parse_run_id)
-        data = {c.name: getattr(row, c.name) for c in VacancyRow.__table__.columns}
+        data = {c.name: getattr(row, c.name) for c in writable_columns(VacancyRow)}
         data.pop("updated_at", None)
         if not data.get("parsed_at"):
             data["parsed_at"] = now
@@ -402,6 +441,42 @@ def _list_text_defer():
     return (defer(VacancyRow.raw_text), defer(VacancyRow.cleaned_text))
 
 
+# Колонки элемента списка: без полных текстов и документа поиска.
+_LIST_EXCLUDED_COLUMNS = frozenset({"raw_text", "cleaned_text", "search_tsv"})
+
+
+def _list_columns() -> list:
+    """Колонки ``vacancies`` для Core-выборки списка.
+
+    Не ORM-сущность: identity map и состояние 50 объектов на страницу стоили
+    заметную долю CPU запроса. ``row_to_list_item`` читает атрибуты ``Row`` так же.
+    """
+    return [c for c in VacancyRow.__table__.c if c.name not in _LIST_EXCLUDED_COLUMNS]
+
+
+def _needs_page_ids_first(query: VacancyQuery) -> bool:
+    """Нужна полная сортировка совпадений, а не обход индекса ``ix_vacancies_active_post_date``.
+
+    Тогда страница выбирается в два запроса: сначала id (узкие строки, без текстов),
+    затем колонки и превью только для них. Иначе Postgres строил бы превью — с чтением
+    ``cleaned_text`` из TOAST — для каждого совпадения до сортировки: на 15 тыс.
+    совпадениях это ~0.5 с вместо десятков миллисекунд.
+    """
+    return bool(query.q) or (query.sort_by, query.sort_order) != ("post_date", "desc")
+
+
+def _fetch_page(session: Session, stmt, id_stmt, query: VacancyQuery, order: list, offset: int) -> list:
+    """Строки страницы ``stmt`` в порядке ``order``; ``id_stmt`` — та же выборка, но только ``id``."""
+    if not _needs_page_ids_first(query):
+        return session.execute(stmt.order_by(*order).offset(offset).limit(query.page_size)).all()
+    ids = list(session.scalars(id_stmt.order_by(*order).offset(offset).limit(query.page_size)))
+    if not ids:
+        return []
+    position = {vid: i for i, vid in enumerate(ids)}
+    rows = session.execute(stmt.where(VacancyRow.id.in_(ids))).all()
+    return sorted(rows, key=lambda r: position[r.id])
+
+
 def list_vacancies(
     session: Session,
     query: VacancyQuery,
@@ -418,24 +493,23 @@ def list_vacancies(
     order = [*_vacancy_order_by(query), VacancyRow.id.asc()]
     preview = vacancy_preview_expr()
     if query.resume_id is not None:
+        match_on = and_(VacancyMatchRow.vacancy_id == VacancyRow.id, VacancyMatchRow.resume_id == query.resume_id)
         stmt = (
-            apply_vacancy_filters(select(VacancyRow, VacancyMatchRow, preview), query)
-            .outerjoin(
-                VacancyMatchRow,
-                and_(
-                    VacancyMatchRow.vacancy_id == VacancyRow.id,
-                    VacancyMatchRow.resume_id == query.resume_id,
-                ),
-            )
-            .options(*_list_text_defer())
+            apply_vacancy_filters(select(*_list_columns(), VacancyMatchRow, preview), query)
+            .select_from(VacancyRow)
+            .outerjoin(VacancyMatchRow, match_on)
         )
-        rows = session.execute(stmt.order_by(*order).offset(offset).limit(query.page_size)).all()
+        id_stmt = apply_vacancy_filters(
+            select(VacancyRow.id).select_from(VacancyRow).outerjoin(VacancyMatchRow, match_on), query
+        )
+        rows = _fetch_page(session, stmt, id_stmt, query, order, offset)
         items: list[VacancyListItem] = []
-        for vrow, mrow, prev in rows:
+        for row in rows:
+            mrow = row.VacancyMatchRow
             items.append(
                 row_to_list_item(
-                    vrow,
-                    prev or "",
+                    row,
+                    row.preview or "",
                     match_score=mrow.overall_score if mrow is not None else None,
                     match_explanation=mrow.explanation if mrow is not None else None,
                     match_stale=(match_is_stale(mrow, match_ai) if mrow is not None and match_ai is not None else None),
@@ -445,9 +519,10 @@ def list_vacancies(
         if query.page == 1 and len(items) < query.page_size:
             return items, len(items)
         return items, counted_vacancies(session, query)
-    stmt = apply_vacancy_filters(select(VacancyRow, preview), query).options(*_list_text_defer())
-    rows = session.execute(stmt.order_by(*order).offset(offset).limit(query.page_size)).all()
-    items = [row_to_list_item(vrow, prev or "") for vrow, prev in rows]
+    stmt = apply_vacancy_filters(select(*_list_columns(), preview), query)
+    id_stmt = apply_vacancy_filters(select(VacancyRow.id), query)
+    rows = _fetch_page(session, stmt, id_stmt, query, order, offset)
+    items = [row_to_list_item(row, row.preview or "") for row in rows]
     if query.page == 1 and len(items) < query.page_size:
         return items, len(items)
     return items, counted_vacancies(session, query)

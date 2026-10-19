@@ -26,6 +26,7 @@ docker compose up --build                 # UI :5173, API :9000/docs
 # DATABASE_URL не нужен: без него — tgjobs:<POSTGRES_PASSWORD из .env>@127.0.0.1:5432/tgjobs
 # (127.0.0.1, не localhost: порт опубликован только на IPv4, через ::1 psycopg на Windows ждёт connect timeout)
 .venv/Scripts/python.exe -m uvicorn backend.main:app --reload --port 8000
+# (всегда один процесс; несколько — API_WORKERS у tg-jobs-api, нужны Redis, JWT_SECRET и rq)
 
 # frontend локально: /api проксируется Vite (VITE_API_PROXY_TARGET=http://localhost:9000 для
 # compose-backend, по умолчанию :8000 — uvicorn); same-origin нужен refresh-cookie SameSite=Strict

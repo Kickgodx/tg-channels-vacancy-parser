@@ -106,6 +106,8 @@ GRAFANA_ADMIN_PASSWORD=...      # только с профилем observability
 # LLM_JOB_LEASE_SECONDS=120       # lease running LLM
 # JOB_RECOVER_INTERVAL_SECONDS=60 # периодический recover: в worker (rq) или в API (inprocess)
 # ANALYTICS_CACHE_SECONDS=30      # кэш агрегатов дашборда/аналитики в памяти API (сек); 0 — выключить
+# API_WORKERS=1                  # процессов API (tg-jobs-api; в compose — 4); >1 требует REDIS_URL, JWT_SECRET и rq у всех задач
+# DB_POOL_SIZE= / DB_MAX_OVERFLOW= # пул БД процесса; у API — на все процессы вместе (по умолчанию 20 + 20)
 # LLM_USER_DAILY_CALLS=100        # суточная квота вызовов LLM на не-админа (мэтч, письма, импорт); 0 — без квоты
 # PARSE_JOB_MAX_ATTEMPTS=3        # после стольких попыток зависший прогон → failed вместо requeue
 # LLM_JOB_MAX_ATTEMPTS=2          # то же для LLM-джоб → error
@@ -119,7 +121,7 @@ GRAFANA_ADMIN_PASSWORD=...      # только с профилем observability
 #                                  (те же пути не трассируются)
 # OTEL_ENABLED=false              # OpenTelemetry-трассировка (в compose — true)
 # OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # куда слать OTLP (в compose — http://alloy:4318)
-# OTEL_TRACES_SAMPLE_RATIO=1.0    # доля сохраняемых трасс (head sampling)
+# OTEL_TRACES_SAMPLE_RATIO=1.0    # доля сохраняемых трасс (head sampling); под нагрузкой — 0.1
 # OTEL_SERVICE_NAME=tg-jobs-parser-backend
 ```
 
@@ -197,10 +199,17 @@ JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(4
 
 ### Поиск и пресеты фильтров
 
-Поиск по тексту — полнотекстовый (Postgres FTS): функциональный GIN-индекс
-`to_tsvector('russian', cleaned_text)`, запрос через `websearch_to_tsquery`,
-сортировка по `ts_rank`. Со стеммингом: «разработчик» находит
-«разработчиков».
+Поиск по тексту — полнотекстовый (Postgres FTS): хранимая generated-колонка
+`vacancies.search_tsv = to_tsvector('russian', cleaned_text)` с GIN-индексом
+`ix_vacancies_search_tsv`, запрос через `websearch_to_tsquery`. Со стеммингом:
+«разработчик» находит «разработчиков».
+
+С `q` релевантность (`ts_rank`) упорядочивает первые 1000 совпадений в выбранной
+сортировке (`FTS_RANK_WINDOW` в `backend/db/vacancy_repository.py`; по умолчанию —
+1000 самых свежих). Остальные совпадения идут за ними в выбранной сортировке,
+`total` считает все. Тот же порядок — в экспорте. Без окна `ts_rank` по всем
+совпадениям частого слова на 45 тыс. вакансий стоил ~1.4 с на запрос, с окном —
+десятки миллисекунд.
 
 Список вакансий по умолчанию опирается на частичный индекс
 `ix_vacancies_active_post_date (post_date DESC NULLS LAST, id) WHERE NOT is_duplicate AND archived_at IS NULL`
@@ -417,7 +426,8 @@ uvicorn backend.main:app --reload --port 8000
 - **LLM не запустился в `primary` — `failed`.** Если LLM не удалось запустить (нет ключа, неизвестная модель), прогон в `ai.mode: primary` сразу завершается `failed` — до чтения Telegram, без записи вакансий и чекпоинтов и без повторной попытки; что исправить — в `error_message`. В `assist` прогон в этом случае идёт на правилах с предупреждением.
 - **Docker Compose:** у сервисов приложения `restart: unless-stopped` и healthcheck; воркеры стартуют после того, как backend стал healthy (то есть применил миграции).
 - **Миграции под замком.** `alembic upgrade head` при старте выполняется под `pg_advisory_lock`: второй процесс или реплика API ждёт, пока первый применит миграции, вместо гонки DDL.
-- **Пул соединений по роли процесса.** API — 20 + 20 overflow (по числу потоков sync-эндпоинтов), `parse-worker` — 4 + 12 (LLM-потоки прогона ходят в AI-кэш), `llm-worker` и `hh-worker` — 2 + 2. Так `--scale llm-worker=4` укладывается в `max_connections=100` Postgres. Переопределение — `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`; фактические значения — метрики `db_pool_*`.
+- **Пул соединений по роли процесса.** API — 20 + 20 overflow на все процессы API вместе (`API_WORKERS=4` → 5 + 5 у каждого; потоков threadpool у процесса столько же, сколько соединений), `parse-worker` — 4 + 12 (LLM-потоки прогона ходят в AI-кэш), `llm-worker` и `hh-worker` — 2 + 2. Так `--scale llm-worker=4` укладывается в `max_connections=100` Postgres. Переопределение — `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`; фактические значения — метрики `db_pool_*` (при нескольких процессах — сумма).
+- **Несколько процессов API.** `API_WORKERS` (в compose — 4) запускает столько процессов uvicorn на одном порту: один процесс Python под GIL использует ~1 ядро. Нужны `REDIS_URL` (лимиты входа и одноразовость SSE-тикетов), `JWT_SECRET` (иначе у каждого процесса свой эфемерный секрет) и `rq` у всех задач — без них API не стартует и называет переменную. Общую работу — очистку при старте и раз в час, синхронизацию курсов, сервер `/metrics` — выполняет один процесс-лидер (`pg_try_advisory_lock` на своём соединении, `backend/leader.py`); если он упал, роль за ≤30 с берёт другой процесс или перезапущенный uvicorn воркер. `/metrics` лидера суммирует метрики всех процессов (multiprocess-режим prometheus_client). `uvicorn backend.main:app --reload` всегда один процесс.
 - **Liveness воркеров.** Healthcheck воркера проверяет не ответ порта, а возраст heartbeat в `/metrics` (`worker_heartbeat_timestamp_seconds`): его обновляют цикл RQ (в простое раз в 45 с) и продление lease выполняемой джобы. Старше `WORKER_HEARTBEAT_MAX_AGE_SECONDS` (180 с) — `unhealthy`. Docker unhealthy-контейнер сам не перезапускает, поэтому воркер, чей heartbeat молчит дольше `WORKER_STALL_EXIT_SECONDS` (900 с), завершается сам, restart policy поднимает его, а recover возвращает джобу в очередь.
 
 SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`): один подписчик `redis.asyncio` на процесс API раздаёт события всем стримам — соединения не занимают потоки, а БД читается вне event loop. Каждые 15 с тишины стрим шлёт комментарий `: ping` (прокси не рвут соединение по idle-timeout), раз в 5 с сверяет статус с БД на случай пропущенного `done`. Без Redis или при его сбое стрим переходит на опрос БД и живёт до терминального статуса.
@@ -893,22 +903,22 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 
 **Пул БД:** дашборд **DB pool** — `db_pool_checked_out` / `db_pool_checked_in` / `db_pool_overflow` / `db_pool_max_connections`. Утилизация ≈ `checked_out / max_connections` (по job).
 
+**Нагрузочный тест:** дашборд **k6 load test** — RPS, p50/p95/p99, ошибки и VU k6 (remote write, `PROM_RW=1`) рядом с RPS, задержками и пулом БД стенда `lt-api` (job `tg-jobs-loadtest`). Порядок — [scripts/loadtest/README.md](scripts/loadtest/README.md).
+
 Конфигурация: `observability/prometheus.yml`, `observability/loki-config.yml`, `observability/tempo-config.yml`, `observability/alloy-config.alloy`, provisioning Grafana — `observability/grafana/provisioning/` (datasources Prometheus, Loki и Tempo с переходами лог ↔ трасса).
 
-**HTTP-лог** (`backend/http_logging.py`, логгер `backend.http`, вместо `uvicorn.access`). Каждому запросу присваивается `request_id` (UUID; валидный входящий `X-Request-ID` переиспользуется), он возвращается в заголовке ответа `X-Request-ID` и попадает в **каждую** строку лога, записанную во время запроса (и в логи роутов/сервисов): `... | backend.http | request_id=<uuid> | ...`. На запрос — две записи:
+**HTTP-лог** (`backend/http_logging.py`, логгер `backend.http`, вместо `uvicorn.access`). Каждому запросу присваивается `request_id` (UUID; валидный входящий `X-Request-ID` переиспользуется), он возвращается в заголовке ответа `X-Request-ID` и попадает в **каждую** строку лога, записанную во время запроса (и в логи роутов/сервисов): `... | backend.http | request_id=<uuid> | ...`. На запрос — одна запись после ответа:
+`RESPONSE METHOD path status Nms {json}`. В JSON — `status`, `duration_ms`, `headers` и `body` ответа, а в `request` — `client`, `headers` и `body` запроса. Начало долгого запроса (SSE, экспорт) видно в трассе.
 
-- `REQUEST METHOD path {json}` — до обработки: клиент, заголовки, тело;
-- `RESPONSE METHOD path status Nms {json}` — после ответа: статус, длительность, заголовки, тело.
-
-Тела пишутся для JSON / form / `text/*` / XML (SSE, бинарные ответы и `Content-Disposition: attachment` — без тела). Маскируются `Authorization` (остаётся схема: `Bearer ***`), `Cookie`/`Set-Cookie`, `X-API-Key`, query-параметры и ключи тела вида `password`/`token`/`access_token`/`ticket`/`secret`/`api_key`. Уровень `RESPONSE`: 4xx — `WARNING`, 5xx — `ERROR`. Не логируются шумные эндпоинты из `HTTP_LOG_EXCLUDE_PATHS` (по умолчанию health-check, агрегаты `/vacancies/metrics` и `/analytics/*`, Swagger/ReDoc/OpenAPI, favicon) и CORS preflight (`OPTIONS` с `Access-Control-Request-Method`).
+Тела пишутся до `HTTP_LOG_BODY_LIMIT` байт для JSON / form / `text/*` / XML (SSE, бинарные ответы и `Content-Disposition: attachment` — без тела). Маскируются `Authorization` (остаётся схема: `Bearer ***`), `Cookie`/`Set-Cookie`, `X-API-Key`, query-параметры и ключи тела вида `password`/`token`/`access_token`/`ticket`/`secret`/`api_key`. Уровень `RESPONSE`: 4xx — `WARNING`, 5xx — `ERROR`. Тело не длиннее лимита разбирается целиком; длиннее — пишется началом с пометкой `…[truncated, N bytes]`, секреты в начале маскируются регулярными выражениями, включая значение, обрезанное на границе. Не логируются шумные эндпоинты из `HTTP_LOG_EXCLUDE_PATHS` (по умолчанию health-check, агрегаты `/vacancies/metrics` и `/analytics/*`, Swagger/ReDoc/OpenAPI, favicon) и CORS preflight (`OPTIONS` с `Access-Control-Request-Method`).
 
 Alloy кладёт `request_id` в **structured metadata** Loki (не label — уникален на запрос). В Grafana Explore:
 
 ```logql
-# всё по одному запросу: REQUEST, логи обработчика, RESPONSE
+# всё по одному запросу: логи обработчика и запись RESPONSE
 {service="backend"} | request_id="3f2b8c1e-0d4a-4c7e-9a51-2b6f1d9e8a70"
 
-# разобрать JSON HTTP-записей (поля event, status, body_*, headers_*)
+# разобрать JSON HTTP-записей (поля status, duration_ms, body_*, headers_*, request_*)
 {service="backend", logger="backend.http"} | regexp `(?P<http>\{.*\})$` | line_format "{{.http}}" | json
 ```
 
@@ -936,6 +946,23 @@ Sampling: доля трасс — `OTEL_TRACES_SAMPLE_RATIO`. Sampler отбра
 Из health-check и OpenAPI HTTP-метрики не собираются (шум от probes и документации). LLM-метрики пишутся при парсинге с `ai.enabled: true` в том же процессе backend. При недоступной БД `db_*` gauges отдают пустой набор — scrape не падает.
 
 ---
+
+## Производительность и нагрузочный тест
+
+Нагрузочный тест без LLM — `scripts/loadtest/` (k6, копия базы, стенд, HTML-отчёт,
+метрики в Prometheus/Grafana), порядок работы — [scripts/loadtest/README.md](scripts/loadtest/README.md).
+
+Что влияет на пропускную способность API:
+
+- **`API_WORKERS`** — главный рычаг: один процесс упирается в GIL на ~1 ядре, 4 процесса
+  дают ×2–2.7, 8 — ~×3.6 (на машине, где k6 и Postgres делят те же ядра).
+- **`APP_ENV=prod`** (или `HTTP_LOG_BODIES=false`): тела не пишутся в HTTP-лог — +15–25%
+  на списках.
+- **`OTEL_TRACES_SAMPLE_RATIO=0.1`**: трассы создаются для 10% запросов — +10–20%.
+- Поиск `q=` упирается в Postgres: ранжирование ограничено окном 1000 совпадений
+  (см. [Поиск и пресеты фильтров](#поиск-и-пресеты-фильтров)).
+
+Замеры и разбор узких мест — `openspec/changes/archive/*-api-throughput/design.md`.
 
 ## Тесты
 

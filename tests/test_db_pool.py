@@ -16,8 +16,8 @@ def _restore_role():
     session.set_pool_role("api")
 
 
-def _settings(size=None, overflow=None):
-    return SimpleNamespace(db_pool_size=size, db_max_overflow=overflow)
+def _settings(size=None, overflow=None, workers=1):
+    return SimpleNamespace(db_pool_size=size, db_max_overflow=overflow, api_workers=workers)
 
 
 def test_pool_limits_by_role_and_env_override():
@@ -78,3 +78,19 @@ def test_migration_lock_released_on_failure():
     with pytest.raises(RuntimeError), migrate.migration_lock(_fake_engine(log)):
         raise RuntimeError("DDL failed")
     assert log[-1] == "pg_advisory_unlock"
+
+
+def test_api_pool_is_shared_between_api_workers():
+    """Лимит API (20 + 20) — на все процессы вместе."""
+    assert session.pool_limits(_settings(workers=4)) == (5, 5)
+    assert session.api_thread_limit(_settings(workers=4)) == 10
+    assert session.pool_limits(_settings(workers=1)) == (20, 20)
+    assert session.api_thread_limit(_settings()) == 40
+    # Не меньше одного соединения; overflow 0 остаётся 0.
+    assert session.pool_limits(_settings(size=2, overflow=0, workers=8)) == (1, 0)
+    assert session.pool_limits(_settings(size=2, overflow=3, workers=8)) == (1, 1)
+
+
+def test_worker_pool_ignores_api_workers():
+    session.set_pool_role("llm-worker")
+    assert session.pool_limits(_settings(workers=4)) == (2, 2)

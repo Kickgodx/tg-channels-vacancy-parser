@@ -24,6 +24,7 @@ from backend.db.models import (
     VacancyMatchRow,
     VacancyRow,
     VacancySightingRow,
+    writable_columns,
 )
 from backend.db.vacancy_repository import backfill_original_sightings
 
@@ -77,8 +78,7 @@ def _serialize_value(value: Any) -> Any:
 
 
 def _row_to_dict(row: object) -> dict[str, Any]:
-    table = row.__table__  # type: ignore[attr-defined]
-    return {col.name: _serialize_value(getattr(row, col.name)) for col in table.columns}
+    return {col.name: _serialize_value(getattr(row, col.name)) for col in writable_columns(type(row))}
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -98,7 +98,7 @@ def _parse_date(value: str | None) -> date | None:
 
 def _deserialize_row(model: type, data: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
-    for col in model.__table__.columns:  # type: ignore[attr-defined]
+    for col in writable_columns(model):
         if col.name not in data:
             continue
         raw = data[col.name]

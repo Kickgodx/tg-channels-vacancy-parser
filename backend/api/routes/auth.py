@@ -7,7 +7,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_current_user, get_db, verify_api_key
+from backend.api.deps import CurrentUser, get_current_user, get_db, verify_api_key
 from backend.db import user_content_repository as users_repo
 from backend.db.models import UserRow
 from backend.errors import CODE_EMAIL_TAKEN, CODE_NOT_AUTHENTICATED, CODE_VALIDATION, http_error
@@ -28,7 +28,7 @@ _LOG = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _to_out(row: UserRow) -> UserOut:
+def _to_out(row: UserRow | CurrentUser) -> UserOut:
     return UserOut(
         id=row.id,
         email=row.email,
@@ -219,7 +219,7 @@ def logout(refresh_token: str | None = _REFRESH_COOKIE, db: Session = Depends(ge
 
 
 @router.post("/sse-ticket", response_model=SseTicketResponse, dependencies=[Depends(verify_api_key)])
-def sse_ticket(user: UserRow = Depends(get_current_user)) -> SseTicketResponse:
+def sse_ticket(user: CurrentUser = Depends(get_current_user)) -> SseTicketResponse:
     """Одноразовый короткоживущий тикет для ``?ticket=`` SSE-эндпоинта.
 
     EventSource не шлёт заголовки; JWT в query оседал бы в логах прокси, тикет
@@ -232,7 +232,7 @@ def sse_ticket(user: UserRow = Depends(get_current_user)) -> SseTicketResponse:
 
 
 @router.get("/me", response_model=UserOut)
-def me(user: UserRow = Depends(get_current_user)) -> UserOut:
+def me(user: CurrentUser = Depends(get_current_user)) -> UserOut:
     return _to_out(user)
 
 
@@ -241,11 +241,12 @@ def change_password(
     body: ChangePasswordRequest,
     request: Request,
     response: Response,
-    user: UserRow = Depends(get_current_user),
+    current: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TokenResponse:
     """Смена пароля отзывает все выданные токены и сессии; эта получает новые."""
-    _enforce_limits("change_password", request, user.email)
+    _enforce_limits("change_password", request, current.email)
+    user = db.get(UserRow, current.id)
     if not auth_service.verify_password(body.current_password, user.password_hash):
         # Неверный текущий пароль — тот же перебор, что и на /login.
         auth_rate_limit.record_login_failure(user.email)
@@ -262,8 +263,9 @@ def change_password(
 
 
 @router.post("/logout-all", status_code=204)
-def logout_all(user: UserRow = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
+def logout_all(current: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
     """Отозвать все выданные токены и refresh-сессии пользователя, включая текущие."""
+    user = db.get(UserRow, current.id)
     user.token_version += 1
     db.flush()
     record_auth_event("logout_all", "success")

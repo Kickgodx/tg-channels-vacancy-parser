@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from backend.api.deps import (
+    CurrentUser,
     SseCredentials,
     authenticate_sse,
     get_db,
@@ -35,7 +36,6 @@ from backend.api.sse import (
 )
 from backend.config_builder import RunOverrideError, build_config
 from backend.db import repository as repo
-from backend.db.models import UserRow
 from backend.db.repository import metrics_from_run
 from backend.db.session import session_scope
 from backend.errors import (
@@ -92,7 +92,7 @@ def _row_to_summary(row) -> RunSummary:
 @router.post("", response_model=RunCreateResponse, status_code=202)
 def create_run(
     body: RunCreateRequest,
-    admin: UserRow = Depends(require_admin),
+    admin: CurrentUser = Depends(require_admin),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> RunCreateResponse | JSONResponse:
     # Ключ принадлежит администратору, как у HH sync и импорта: чужой ключ не вернёт чужой ответ.
@@ -178,7 +178,7 @@ def _row_to_detail(row) -> RunDetail:
 def cancel_run(
     run_id: uuid.UUID,
     db: Session = Depends(get_db),
-    admin: UserRow = Depends(require_admin),
+    admin: CurrentUser = Depends(require_admin),
 ) -> RunDetail:
     """Отменить прогон; ответ — его текущее состояние (и для уже завершённого, как у LLM и HH)."""
     if run_service.cancel_run(run_id):

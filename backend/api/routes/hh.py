@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from backend.api.deps import (
+    CurrentUser,
     SseCredentials,
     authenticate_sse,
     require_admin,
@@ -42,7 +43,7 @@ from backend.api.sse import (
 )
 from backend.db import hh_repository as hh_repo
 from backend.db import hh_sync_job_repository as hh_jobs
-from backend.db.models import HhSyncJobRow, UserRow
+from backend.db.models import HhSyncJobRow
 from backend.db.session import get_db, session_scope
 from backend.errors import (
     CODE_FORBIDDEN,
@@ -175,7 +176,7 @@ def _job_to_out(row: HhSyncJobRow) -> HhSyncJobOut:
 @router.get("/status", response_model=HhStatusResponse)
 def hh_status(
     db: Session = Depends(get_db),
-    _admin: UserRow = Depends(require_admin),
+    _admin: CurrentUser = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> HhStatusResponse:
     cfg = load_config(settings.config_path)
@@ -196,7 +197,7 @@ def hh_status(
 @router.post("/sync", response_model=HhSyncAccepted, status_code=202)
 def hh_sync(
     body: HhSyncRequest = HhSyncRequest(),
-    admin: UserRow = Depends(require_admin),
+    admin: CurrentUser = Depends(require_admin),
     settings: Settings = Depends(get_settings),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> HhSyncAccepted | JSONResponse:
@@ -253,7 +254,7 @@ def hh_sync(
 def list_hh_sync_jobs(
     limit: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
-    _admin: UserRow = Depends(require_admin),
+    _admin: CurrentUser = Depends(require_admin),
 ) -> list[HhSyncJobOut]:
     """Последние sync, новые первыми: UI показывает активный или последний после перезагрузки."""
     return [_job_to_out(row) for row in hh_jobs.list_hh_sync_jobs(db, limit=limit)]
@@ -263,7 +264,7 @@ def list_hh_sync_jobs(
 def get_hh_sync_job(
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
-    _admin: UserRow = Depends(require_admin),
+    _admin: CurrentUser = Depends(require_admin),
 ) -> HhSyncJobOut:
     row = hh_jobs.get_hh_sync_job(db, job_id)
     if row is None:
@@ -275,7 +276,7 @@ def get_hh_sync_job(
 def cancel_hh_sync_job(
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
-    _admin: UserRow = Depends(require_admin),
+    _admin: CurrentUser = Depends(require_admin),
 ) -> HhSyncJobOut:
     """Отменить sync; ответ — его текущее состояние (и для уже завершённого)."""
     if not hh_sync_job_service.cancel_hh_sync_job(job_id):

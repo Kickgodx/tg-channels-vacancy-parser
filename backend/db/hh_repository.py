@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
-from backend.db.models import HhListingRow, VacancyRow
+from backend.db.models import HhListingRow, VacancyRow, writable_columns
 from backend.db.vacancy_mapper import vacancy_to_row
 from backend.db.vacancy_repository import VacancyUpsertStats, invalidate_vacancy_count_cache
 from backend.fx.apply import (
@@ -280,7 +280,7 @@ def upsert_hh_vacancies(
         is_existing = existing is not None
         apply_salary_rub_for_vacancy(v, session, fx, rates_cache=rates_cache, force=is_existing)
         row = vacancy_to_row(v, parse_run_id=None)
-        data = {c.name: getattr(row, c.name) for c in VacancyRow.__table__.columns}
+        data = {c.name: getattr(row, c.name) for c in writable_columns(VacancyRow)}
         data.pop("updated_at", None)
         if not data.get("parsed_at"):
             data["parsed_at"] = now

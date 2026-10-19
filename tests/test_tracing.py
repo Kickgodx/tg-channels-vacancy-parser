@@ -105,7 +105,9 @@ def test_server_span_has_request_id_and_masked_query(traced_client, exporter, lo
     lines = log_stream.getvalue().splitlines()
     assert f"backend.test_route | request_id={rid} trace_id={trace_id} | inside route" in lines
     assert any(
-        line.startswith(f"backend.http | request_id={rid} trace_id={trace_id} | REQUEST GET /items?access_token=***")
+        line.startswith(
+            f"backend.http | request_id={rid} trace_id={trace_id} | RESPONSE GET /items?access_token=***&page=2 200 "
+        )
         for line in lines
     )
     assert not any("supersecret" in line for line in lines if line.startswith("backend."))

@@ -145,3 +145,23 @@ def test_count_replace_losses(db_session):
     losses = count_replace_losses(db_session)
 
     assert (losses.vacancy_matches, losses.cover_letters, losses.llm_jobs) == (2, 1, 3)
+
+
+def test_dump_skips_generated_search_tsv_and_reimports(db_session, tmp_path):
+    from sqlalchemy import func, select
+
+    _seed(db_session)
+    dump_path = tmp_path / "dump.json"
+    write_dump_file(db_session, dump_path)
+    payload = load_dump_file(dump_path)
+    assert all("search_tsv" not in row for row in payload["tables"]["vacancies"])
+
+    db_session.query(VacancyRow).delete()
+    db_session.commit()
+    import_dump_file(db_session, dump_path, mode="merge")
+    db_session.commit()
+    # Postgres сам посчитал документ поиска для импортированной строки.
+    found = db_session.scalar(
+        select(func.count()).where(VacancyRow.search_tsv.op("@@")(func.plainto_tsquery("russian", "text")))
+    )
+    assert found == 1

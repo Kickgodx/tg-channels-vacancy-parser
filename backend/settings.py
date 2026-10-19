@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "prod"] = Field(default="dev", alias="APP_ENV")
     api_host: str = Field(default="127.0.0.1", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
+    # Процессов API на одном порту (tg-jobs-api / backend.main:main). Больше 1 — только с
+    # общим состоянием в Redis и задачами в rq (см. check_api_workers). `uvicorn --reload`
+    # всегда один процесс.
+    api_workers: int = Field(default=1, ge=1, alias="API_WORKERS")
     # Адрес, на котором API доступен снаружи процесса. В compose процесс слушает 0.0.0.0
     # внутри контейнера, а наружу порт публикуется на BIND_ADDR — его и передаём сюда.
     # Пусто → API_HOST. dev на не-loopback адресе backend не запускает (см. check_exposure).
@@ -229,6 +233,33 @@ def check_exposure(settings: Settings) -> str | None:
     if settings.allow_public_dev:
         return f"{message} (разрешено ALLOW_PUBLIC_DEV=true)"
     raise RuntimeError(f"{message}; осознанно разрешить — ALLOW_PUBLIC_DEV=true")
+
+
+def check_api_workers(settings: Settings) -> None:
+    """Отказ стартовать API с ``API_WORKERS`` > 1 без общего для процессов состояния.
+
+    Не в валидаторе ``Settings``: воркеры RQ читают тот же ``.env`` и не должны
+    падать из-за настройки процесса API. Без Redis лимиты входа и одноразовость
+    SSE-тикетов живут в памяти процесса, без ``JWT_SECRET`` у каждого процесса свой
+    эфемерный секрет (токен одного не примет другой), а задачи ``inprocess``
+    выполнялись бы в потоках того процесса, что принял запрос.
+    """
+    if settings.api_workers <= 1:
+        return
+    missing: list[str] = []
+    if not (settings.redis_url or "").strip():
+        missing.append("REDIS_URL")
+    if not (settings.jwt_secret or "").strip():
+        missing.append("JWT_SECRET")
+    for name, backend in (
+        ("PARSE_JOB_BACKEND", settings.parse_job_backend),
+        ("LLM_JOB_BACKEND", settings.llm_job_backend),
+        ("HH_SYNC_JOB_BACKEND", settings.hh_sync_job_backend),
+    ):
+        if backend != "rq":
+            missing.append(f"{name}=rq")
+    if missing:
+        raise RuntimeError(f"API_WORKERS={settings.api_workers}: несколько процессов API требуют " + ", ".join(missing))
 
 
 @lru_cache

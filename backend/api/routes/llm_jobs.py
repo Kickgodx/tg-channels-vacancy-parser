@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from backend.api.deps import (
+    CurrentUser,
     SseCredentials,
     authenticate_sse,
     get_current_user,
@@ -35,7 +36,6 @@ from backend.api.sse import (
 )
 from backend.db import repository as repo
 from backend.db.llm_job_repository import TERMINAL_LLM_STATUSES
-from backend.db.models import UserRow
 from backend.db.session import session_scope
 from backend.observability import LLM_JOB_SSE_CONNECTIONS
 from backend.schemas import LlmJobOut
@@ -92,7 +92,7 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
 def get_llm_job(
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> LlmJobOut:
     row = repo.get_llm_job(db, job_id)
     if row is None or row.user_id != user.id:
@@ -104,7 +104,7 @@ def get_llm_job(
 def cancel_llm_job(
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: UserRow = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> LlmJobOut:
     """Отменить свою задачу; ответ — её текущее состояние (и для уже завершённой)."""
     if not llm_job_service.cancel_llm_job(job_id, user_id=user.id):

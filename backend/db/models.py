@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, date, datetime
+from typing import ClassVar
 
 from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    Computed,
     Date,
     DateTime,
     Float,
@@ -20,7 +22,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.db.base import Base
@@ -75,6 +77,15 @@ class ExchangeRateRow(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+def writable_columns(model: type[Base]) -> list:
+    """Колонки, которые пишет приложение: generated-колонки (``Computed``) считает Postgres.
+
+    INSERT/UPDATE со значением в generated-колонке Postgres отклоняет, а чтение
+    deferred-колонки по одной строке — лишний запрос на каждую.
+    """
+    return [c for c in model.__table__.columns if c.computed is None]
+
+
 class VacancyRow(Base):
     """Уникальная вакансия по тексту (``id`` = sha256 normalize(cleaned_text))."""
 
@@ -89,6 +100,9 @@ class VacancyRow(Base):
             postgresql_where=text("is_duplicate IS false AND archived_at IS NULL"),
         ),
     )
+    # Без RETURNING серверных значений после INSERT: единственное такое — search_tsv,
+    # он deferred и вычитывать его на каждую вставку незачем.
+    __mapper_args__: ClassVar[dict] = {"eager_defaults": False}
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     source_post_key: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
@@ -138,6 +152,13 @@ class VacancyRow(Base):
         server_default=func.now(),
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    # Документ полнотекстового поиска (миграция 033, GIN ix_vacancies_search_tsv). Считает Postgres:
+    # ORM колонку не пишет, а deferred — не тянет в каждый SELECT сущности.
+    search_tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('russian', cleaned_text)", persisted=True),
+        deferred=True,
+    )
 
 
 class ParseRunVacancyRow(Base):

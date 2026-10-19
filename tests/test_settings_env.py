@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from backend.settings import Settings, check_exposure
+from backend.settings import Settings, check_api_workers, check_exposure
 
 _PROD_SECRET = "x" * 32
 _ENV_KEYS = (
@@ -21,6 +21,8 @@ _ENV_KEYS = (
     "PARSE_JOB_BACKEND",
     "LLM_JOB_BACKEND",
     "HH_SYNC_JOB_BACKEND",
+    "API_WORKERS",
+    "REDIS_URL",
 )
 
 
@@ -173,3 +175,51 @@ def test_database_url_defaults_to_compose_postgres_password(make_settings):
 def test_database_url_must_be_postgres(make_settings):
     with pytest.raises(ValueError, match="только PostgreSQL"):
         make_settings(DATABASE_URL="sqlite:///tgjobs.db")
+
+
+_MULTI_OK = {
+    "API_WORKERS": "4",
+    "REDIS_URL": "redis://localhost:6379/0",
+    "JWT_SECRET": _PROD_SECRET,
+    "PARSE_JOB_BACKEND": "rq",
+    "LLM_JOB_BACKEND": "rq",
+    "HH_SYNC_JOB_BACKEND": "rq",
+}
+
+
+def test_api_workers_default_is_one(make_settings):
+    s = make_settings()
+    assert s.api_workers == 1
+    check_api_workers(s)  # один процесс — без требований
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "four"])
+def test_api_workers_invalid_value_names_variable(make_settings, raw):
+    with pytest.raises(ValidationError) as exc:
+        make_settings(API_WORKERS=raw)
+    assert "API_WORKERS" in str(exc.value)
+
+
+def test_several_api_workers_with_shared_state_start(make_settings):
+    check_api_workers(make_settings(**_MULTI_OK))
+
+
+@pytest.mark.parametrize(
+    ("drop", "named"),
+    [
+        ({"REDIS_URL": ""}, "REDIS_URL"),
+        ({"JWT_SECRET": ""}, "JWT_SECRET"),
+        ({"LLM_JOB_BACKEND": "inprocess"}, "LLM_JOB_BACKEND"),
+        ({"PARSE_JOB_BACKEND": "inprocess"}, "PARSE_JOB_BACKEND"),
+        ({"HH_SYNC_JOB_BACKEND": "inprocess"}, "HH_SYNC_JOB_BACKEND"),
+    ],
+)
+def test_several_api_workers_require_shared_state(make_settings, drop, named):
+    with pytest.raises(RuntimeError, match=named):
+        check_api_workers(make_settings(**{**_MULTI_OK, **drop}))
+
+
+def test_rq_worker_settings_ignore_api_workers(make_settings):
+    """Воркер RQ читает тот же .env: API_WORKERS=4 с его inprocess-бэкендами не мешает старту."""
+    s = make_settings(API_WORKERS="4", LLM_JOB_BACKEND="rq")
+    assert s.api_workers == 4

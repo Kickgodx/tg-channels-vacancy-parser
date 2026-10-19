@@ -10,11 +10,18 @@ Instrumentator (HTTP): прогоны парсинга, UPSERT вакансий,
 
 ``_DBPoolCollector`` — состояние SQLAlchemy QueuePool (занято / свободно /
 overflow / лимит). Регистрируется и на backend, и на llm-worker.
+
+Несколько процессов API (``API_WORKERS`` > 1) пишут метрики в каталог
+``PROMETHEUS_MULTIPROC_DIR`` (multiprocess-режим prometheus_client), лидер отдаёт
+их сумму (``metrics_registry``). У gauge'ей поэтому задан ``multiprocess_mode``;
+пул БД в этом режиме публикуют gauge'и ``livesum`` (``start_pool_gauges``), а
+файлы умерших процессов убирает ``collect_dead_process_metrics``.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from datetime import UTC, datetime
@@ -35,11 +42,13 @@ PARSE_RUNS = Counter(
 PARSE_RUNS_ACTIVE = Gauge(
     "parse_runs_active",
     "Прогоны парсинга, выполняющиеся прямо сейчас",
+    multiprocess_mode="livesum",
 )
 
 PARSE_RUN_STARTED_TIMESTAMP = Gauge(
     "parse_run_started_timestamp_seconds",
     "Unix-время старта активного прогона (0 если нет)",
+    multiprocess_mode="livemax",
 )
 
 PARSE_RUN_DURATION = Histogram(
@@ -215,6 +224,7 @@ LLM_RQ_QUEUE_JOBS = Gauge(
     "llm_rq_queue_jobs",
     "Глубина очередей RQ (llm, parse)",
     labelnames=("queue",),
+    multiprocess_mode="livemax",  # очередь одна на всех — не суммировать по процессам
 )
 
 LLM_WORKER_JOBS = Counter(
@@ -239,6 +249,7 @@ LLM_JOBS_RECOVER = Counter(
 LLM_JOB_SSE_CONNECTIONS = Gauge(
     "llm_job_sse_connections",
     "Активные SSE-подписки на статус LLM-джоб",
+    multiprocess_mode="livesum",
 )
 
 
@@ -714,3 +725,120 @@ def register_db_stats_collector() -> None:
         if not _db_stats_registered:
             REGISTRY.register(_DBStatsCollector())
             _db_stats_registered = True
+
+
+# --- Несколько процессов API (multiprocess) ---------------------------------
+
+_POOL_GAUGE_INTERVAL_S = 10.0
+_POOL_GAUGE_HELP = {
+    "checked_out": "Соединения, выданные из пула",
+    "checked_in": "Простаивающие соединения в пуле",
+    "size": "Настроенный размер постоянного пула",
+    "overflow": "Текущий overflow сверх pool_size (≥0)",
+    "max_overflow": "Максимальный overflow (настройка)",
+    "max_connections": "Верхняя граница соединений процесса (pool_size + max_overflow)",
+}
+
+
+def multiprocess_dir() -> str | None:
+    """Каталог multiprocess-метрик, если процессов API несколько (его задаёт ``backend.main.main``)."""
+    return os.environ.get("PROMETHEUS_MULTIPROC_DIR") or None
+
+
+def metrics_registry():
+    """Registry для сервера ``/metrics``: глобальный, а при нескольких процессах — их сумма.
+
+    В multiprocess-режиме custom collectors глобального ``REGISTRY`` других процессов
+    не видны: COUNT-агрегаты таблиц считает тот процесс, что отдаёт ``/metrics``.
+    """
+    path = multiprocess_dir()
+    if path is None:
+        return REGISTRY
+    from prometheus_client import CollectorRegistry
+    from prometheus_client.multiprocess import MultiProcessCollector
+
+    registry = CollectorRegistry()
+    MultiProcessCollector(registry, path=path)
+    if _db_stats_registered:
+        registry.register(_DBStatsCollector())
+    return registry
+
+
+def start_pool_gauges() -> threading.Event | None:
+    """Пул БД процесса в multiprocess-метрики (``livesum``) раз в 10 с; без multiprocess — None.
+
+    ``_DBPoolCollector`` читает пул на scrape, но scrape обслуживает один процесс:
+    пулы остальных он не видит. Gauge'и не регистрируются в ``REGISTRY`` — там те же
+    имена отдаёт коллектор; в multiprocess-режиме значения уходят в файлы каталога.
+    """
+    if multiprocess_dir() is None:
+        return None
+    gauges = {
+        key: Gauge(f"db_pool_{key}", help_text, registry=None, multiprocess_mode="livesum")
+        for key, help_text in _POOL_GAUGE_HELP.items()
+    }
+    stop = threading.Event()
+
+    def _loop() -> None:
+        while True:
+            stats = _DBPoolCollector._read_pool()
+            if stats is not None:
+                for key, gauge in gauges.items():
+                    gauge.set(stats[key])
+            if stop.wait(timeout=_POOL_GAUGE_INTERVAL_S):
+                return
+
+    threading.Thread(target=_loop, name="db-pool-gauges", daemon=True).start()
+    return stop
+
+
+def _pid_alive(pid: int) -> bool:
+    if os.name == "nt":
+        # На Windows os.kill(pid, 0) не проверяет, а завершает процесс (TerminateProcess).
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def collect_dead_process_metrics(path: str | None = None) -> list[int]:
+    """Убрать live-gauge'и процессов, которых больше нет (упавший воркер uvicorn перезапущен).
+
+    Счётчики и гистограммы умерших процессов остаются — их сумма не должна падать.
+    Возвращает pid, чьи файлы убраны.
+    """
+    path = path or multiprocess_dir()
+    if path is None or not os.path.isdir(path):
+        return []
+    from prometheus_client.multiprocess import mark_process_dead
+
+    dead: set[int] = set()
+    for name in os.listdir(path):
+        if not (name.startswith("gauge_live") and name.endswith(".db")):
+            continue
+        try:
+            pid = int(name[: -len(".db")].rsplit("_", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        if pid != os.getpid() and not _pid_alive(pid):
+            dead.add(pid)
+    for pid in sorted(dead):
+        mark_process_dead(pid, path)
+    return sorted(dead)
