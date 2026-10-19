@@ -34,7 +34,7 @@ flowchart LR
 ### Shared ingestion и AI cache (ports)
 
 - **Ingestion** — общий путь Telegram / manual import: `RawPost` → rules → optional AI → policy gates. HH sync остаётся на `hh/mapper` + `hh/dedup`.
-- **AI cache** — port `AIExtractionCacheBackend` в `tg_jobs_parser.ai.cache`; Postgres-адаптер `DbAIExtractionCache` регистрируется при старте backend/CLI (`register_db_ai_cache`), без импорта `backend` из core.
+- **Core ports** — `backend.core_ports.register_core_ports()` при старте каждого процесса с LLM (FastAPI lifespan, `parse-worker`, `llm-worker`) регистрирует Postgres-кэш extraction (`AIExtractionCacheBackend` → `DbAIExtractionCache`) и общий лимит запросов к LLM (`GlobalRateGate` → Redis), без импорта `backend` из core. Без кэша `AIEnrichmentService` не создаётся, и разбор молча уходит в правила.
 - **Repositories** — bounded contexts: `parse_run_repository`, `vacancy_repository`, `user_content_repository`, `llm_job_repository`; `backend.db.repository` — совместимый re-export.
 
 ## Боковые потоки
@@ -70,7 +70,8 @@ flowchart TB
   end
 
   subgraph Analytics
-    A1["Фильтры списка"] --> A2["SQL-агрегаты"] --> A3["salaries / sources / companies"]
+    A1["Фильтры списка<br/>vacancy_filters"] --> A2["SQL-агрегаты"] --> A3["salaries / sources / companies"]
+    A1 --> A4["Поиск q: сохранённый FTS<br/>ранжирование первых 1000"]
   end
 ```
 
@@ -80,4 +81,13 @@ flowchart TB
 - **Per-user** — resumes, saved_filters, matches, cover_letters, llm_jobs
 - **Shared** (чтение — любой залогиненный, мутации — админ) — vacancies, analytics, FX, AI cache
 - **Admin-only** — parse_runs (`/runs/*`), ручной импорт, HH sync
+- **Квота LLM** — `LLM_USER_DAILY_CALLS` вызовов в сутки на пользователя (админ — без лимита). Списывается при постановке джобы: исчерпанная квота отклоняется сразу, а не в воркере. Если модель так и не ответила, вызов возвращается в квоту.
+- **Актуальность результатов** — сохранённые матч и письмо становятся `stale`, если сменилась запрошенная модель или версия промпта (`backend/services/llm_result_freshness.py`), и пересчитываются при следующем запросе без `force`.
+
+### Жизненный цикл джоб
+
+Parse runs, `llm_jobs` и `hh_sync_jobs` устроены одинаково: статус в Postgres, Redis — только транспорт.
+
+- claim с lease и heartbeat → `running`; истёкший lease или `queued` без живой RQ-джобы поднимает recover-цикл, после `*_MAX_ATTEMPTS` — `failed` / `error`.
+- **Отмена** — флаг `cancel_requested` в БД (`POST /runs/{id}/cancel`, `/llm-jobs/{id}/cancel`, `/hh/sync-jobs/{id}/cancel`). `queued` сразу становится `cancelled`; `running` проверяет флаг сам (прогон — поток-поллер, импорт — перед каждым текстом, HH — перед страницей и группой деталей, матч/письмо — после ответа модели, результат отбрасывается). Зависшую джобу с флагом recover закрывает `cancelled`.
 - **Interactive LLM** — Task Queue (RQ) + Competing Consumers (`llm-worker`); Postgres = статус, Redis = очередь + pub/sub для SSE. Fallback `LLM_JOB_BACKEND=inprocess` для тестов. Scale: `--scale llm-worker=N`. `ai.requests_per_minute` общий для всех процессов (окно в Redis, `backend/services/llm_rate_gate.py`).
