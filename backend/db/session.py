@@ -22,6 +22,16 @@ POOL_BY_ROLE: dict[str, tuple[int, int]] = {
     "llm-worker": (2, 2),
     "hh-worker": (2, 2),
 }
+# Ожидание свободного соединения (сек), если DB_POOL_TIMEOUT не задан. У API лимит
+# одновременных запросов равен пулу (backend/overload.py), и долгое ожидание означает цикл
+# «держу соединение — жду второе»: лучше быстро ответить ошибкой. Воркерам — умолчание
+# SQLAlchemy: их LLM-потоки законно ждут соединение для AI-кэша.
+POOL_TIMEOUT_BY_ROLE: dict[str, float] = {
+    "api": 5.0,
+    "parse-worker": 30.0,
+    "llm-worker": 30.0,
+    "hh-worker": 30.0,
+}
 _pool_role = "api"
 
 
@@ -49,6 +59,13 @@ def pool_limits(settings) -> tuple[int, int]:
         size = max(1, size // workers)
         overflow = max(1, overflow // workers) if overflow > 0 else 0
     return size, overflow
+
+
+def pool_timeout(settings) -> float:
+    """Сколько секунд процесс ждёт соединение из пула: ``DB_POOL_TIMEOUT`` или умолчание роли."""
+    if settings.db_pool_timeout is not None:
+        return settings.db_pool_timeout
+    return POOL_TIMEOUT_BY_ROLE[_pool_role]
 
 
 def api_thread_limit(settings) -> int:
@@ -88,6 +105,7 @@ def get_engine():
             pool_pre_ping=True,
             pool_size=pool_size,
             max_overflow=max_overflow,
+            pool_timeout=pool_timeout(settings),
         )
         _SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False)
     return _engine

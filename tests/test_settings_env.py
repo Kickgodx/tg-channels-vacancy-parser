@@ -23,6 +23,8 @@ _ENV_KEYS = (
     "HH_SYNC_JOB_BACKEND",
     "API_WORKERS",
     "REDIS_URL",
+    "DB_POOL_TIMEOUT",
+    "API_QUEUE_TIMEOUT_SECONDS",
 )
 
 
@@ -223,3 +225,21 @@ def test_rq_worker_settings_ignore_api_workers(make_settings):
     """Воркер RQ читает тот же .env: API_WORKERS=4 с его inprocess-бэкендами не мешает старту."""
     s = make_settings(API_WORKERS="4", LLM_JOB_BACKEND="rq")
     assert s.api_workers == 4
+
+
+def test_queue_and_pool_timeouts_default(make_settings):
+    s = make_settings()
+    assert s.api_queue_timeout_seconds == 2.0
+    assert s.db_pool_timeout is None  # умолчание по роли процесса (backend/db/session.py)
+    s = make_settings(API_QUEUE_TIMEOUT_SECONDS="0", DB_POOL_TIMEOUT="1.5")
+    assert (s.api_queue_timeout_seconds, s.db_pool_timeout) == (0.0, 1.5)
+
+
+@pytest.mark.parametrize(
+    ("name", "raw"),
+    [("DB_POOL_TIMEOUT", "0"), ("DB_POOL_TIMEOUT", "-1"), ("API_QUEUE_TIMEOUT_SECONDS", "-1")],
+)
+def test_invalid_timeouts_name_variable(make_settings, name, raw):
+    with pytest.raises(ValidationError) as exc:
+        make_settings(**{name: raw})
+    assert name in str(exc.value)

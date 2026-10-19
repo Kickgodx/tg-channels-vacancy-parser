@@ -30,6 +30,25 @@ def test_pool_limits_by_role_and_env_override():
     assert session.pool_limits(_settings()) == (20, 20)
 
 
+def test_pool_timeout_by_role_and_env_override():
+    assert session.pool_timeout(SimpleNamespace(db_pool_timeout=None)) == 5.0
+    assert session.pool_timeout(SimpleNamespace(db_pool_timeout=12.5)) == 12.5
+    session.set_pool_role("llm-worker")
+    assert session.pool_timeout(SimpleNamespace(db_pool_timeout=None)) == 30.0
+
+
+def test_api_engine_waits_for_connection_briefly(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@127.0.0.1:1/x")
+    monkeypatch.delenv("DB_POOL_TIMEOUT", raising=False)
+    get_settings.cache_clear()
+    session.reset_engine()
+    try:
+        assert session.get_engine().pool._timeout == 5.0
+    finally:
+        session.reset_engine()
+        get_settings.cache_clear()
+
+
 def test_worker_role_shrinks_postgres_pool(monkeypatch):
     """Движок создаётся без подключения — проверяем настроенный QueuePool."""
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@127.0.0.1:1/x")
@@ -39,6 +58,7 @@ def test_worker_role_shrinks_postgres_pool(monkeypatch):
         session.set_pool_role("parse-worker")
         pool = session.get_engine().pool
         assert (pool.size(), pool._max_overflow) == (4, 12)
+        assert pool._timeout == 30.0
     finally:
         session.reset_engine()
         get_settings.cache_clear()

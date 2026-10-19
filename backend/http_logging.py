@@ -292,7 +292,14 @@ class HttpLoggingMiddleware:
         )
         if body is not None:
             record["body"] = body
-        level = logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO
+        # 503 — плановый отказ под перегрузкой (backend/overload.py), а не сбой: под всплеском
+        # их тысячи, и ERROR поднимал бы ложные алерты.
+        if status >= 500 and status != 503:
+            level = logging.ERROR
+        elif status >= 400:
+            level = logging.WARNING
+        else:
+            level = logging.INFO
         _LOG.log(
             level,
             "RESPONSE %s %s %s %sms %s",

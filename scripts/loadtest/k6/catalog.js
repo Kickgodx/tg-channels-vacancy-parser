@@ -2,26 +2,47 @@
 //
 // EP   — сценарий (см. ENDPOINTS ниже), по умолчанию mix;
 // VUS  — параллельных клиентов (закрытая модель: каждый шлёт запрос сразу после ответа);
+// RATE — запросов в секунду (открытая модель: поток не ждёт ответов; VUS — сколько клиентов
+//        k6 держит наготове, при нехватке добавит до 4×RATE);
 // DUR  — длительность (20s, 1m…);
 // BASE — адрес API, по умолчанию стенд lt-api из stand.sh.
 //
 // Пользователь нагрузки регистрируется в setup() (или входит, если уже есть).
 import http from 'k6/http';
 import { check } from 'k6';
+import { Counter } from 'k6/metrics';
 
 const BASE = __ENV.BASE || 'http://lt-api:8000/api/v1';
 const EP = __ENV.EP || 'mix';
 const VUS = Number(__ENV.VUS || 16);
+const RATE = Number(__ENV.RATE || 0);
+const DUR = __ENV.DUR || '20s';
 const EMAIL = __ENV.LT_EMAIL || 'loadtest@example.com';
 const PASSWORD = __ENV.LT_PASSWORD || 'LoadTest-Password-123';
 
 export const options = {
-  scenarios: { load: { executor: 'constant-vus', vus: VUS, duration: __ENV.DUR || '20s' } },
+  scenarios: {
+    load: RATE
+      ? {
+          executor: 'constant-arrival-rate',
+          rate: RATE,
+          timeUnit: '1s',
+          duration: DUR,
+          preAllocatedVUs: VUS,
+          maxVUs: Math.max(VUS, RATE * 4),
+        }
+      : { executor: 'constant-vus', vus: VUS, duration: DUR },
+  },
   summaryTrendStats: ['avg', 'med', 'p(95)', 'p(99)', 'max'],
   discardResponseBodies: true,
+  // Порог-заглушка: без него k6 не считает задержку только успешных ответов.
+  thresholds: { 'http_req_duration{expected_response:true}': ['max>=0'] },
   setupTimeout: '60s',
   tags: { ep: EP },
 };
+
+// 503 OVERLOADED: API отклонил запрос под перегрузкой (backend/overload.py), а не упал.
+const rejected = new Counter('rejected_503');
 
 const json = { headers: { 'Content-Type': 'application/json' }, responseType: 'text' };
 
@@ -93,20 +114,30 @@ export default function (d) {
   }
   const r = http.get(`${BASE}${path(EP, d)}`, { headers: { Authorization: `Bearer ${d.token}` } });
   check(r, { 'status 200': (x) => x.status === 200 });
+  if (r.status === 503) rejected.add(1);
 }
 
 // Итог — одна JSON-строка (удобно собирать серию прогонов) плюс стандартный текст k6.
 export function handleSummary(data) {
   const m = data.metrics;
   const t = m.http_req_duration.values;
+  const ok = (m['http_req_duration{expected_response:true}'] || m.http_req_duration).values;
   const line = {
     ep: EP,
-    vus: VUS,
+    ...(RATE ? { rate: RATE } : { vus: VUS }),
     rps: Number(m.http_reqs.values.rate.toFixed(1)),
     p50_ms: Number(t.med.toFixed(1)),
     p95_ms: Number(t['p(95)'].toFixed(1)),
     p99_ms: Number(t['p(99)'].toFixed(1)),
+    // Только успешные ответы: быстрые 503 не должны «улучшать» задержку.
+    ok_p99_ms: Number(ok['p(99)'].toFixed(1)),
     failed_pct: Number(((1 - m.checks.values.rate) * 100).toFixed(2)),
+    rejected_503: m.rejected_503 ? m.rejected_503.values.count : 0,
   };
+  // Открытая модель: k6 не успел отправить запрос — свободных клиентов не было, сервис не держит поток.
+  if (RATE) {
+    line.dropped = m.dropped_iterations ? m.dropped_iterations.values.count : 0;
+    line.max_vus = m.vus_max.values.max;
+  }
   return { stdout: `${JSON.stringify(line)}\n` };
 }
