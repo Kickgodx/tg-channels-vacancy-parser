@@ -7,7 +7,12 @@ import MetricsCharts from "../components/MetricsCharts";
 import ResumePanel from "../components/ResumePanel";
 import VacancyTable from "../components/VacancyTable";
 import type { SavedFilter, SavedFilterParams } from "../types/api";
-import { SORTABLE_COLUMNS, type VacancySortField, type VacancySortOrder } from "../types/sort";
+import {
+  parseThenSort,
+  SORTABLE_COLUMNS,
+  type VacancySortField,
+  type VacancySortOrder,
+} from "../types/sort";
 
 /** Совпадает с MAX_LIST_DEPTH в backend/api/params.py. */
 const MAX_LIST_DEPTH = 10_000;
@@ -84,6 +89,8 @@ export default function VacanciesPage() {
     ? (rawSortBy as VacancySortField)
     : "post_date";
   const sortOrder: VacancySortOrder = searchParams.get("sort_order") === "asc" ? "asc" : "desc";
+  const thenBy = parseThenSort(sortBy, searchParams.get("then_by"));
+  const thenOrder: VacancySortOrder = searchParams.get("then_order") === "asc" ? "asc" : "desc";
   const tab: VacanciesTab = searchParams.get("tab") === "analytics" ? "analytics" : "list";
   const rawResumeId = Number(searchParams.get("resume_id"));
   const resumeId = Number.isInteger(rawResumeId) && rawResumeId > 0 ? rawResumeId : null;
@@ -139,6 +146,15 @@ export default function VacanciesPage() {
     [q, sourceChannel, grade, specializations, workFormat, dateFrom, dateTo, hasSalaryOnly],
   );
 
+  const sortParams = useMemo(() => {
+    const params: VacancyQueryParams = { sort_by: sortBy, sort_order: sortOrder };
+    if (thenBy != null) {
+      params.then_by = thenBy;
+      params.then_order = thenOrder;
+    }
+    return params;
+  }, [sortBy, sortOrder, thenBy, thenOrder]);
+
   const metricsQ = useQuery({
     queryKey: ["vacancy-metrics", filterParams],
     queryFn: () => api.getVacancyMetrics(filterParams),
@@ -148,13 +164,12 @@ export default function VacanciesPage() {
   });
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["vacancies", page, filterParams, sortBy, sortOrder, resumeId],
+    queryKey: ["vacancies", page, filterParams, sortParams, resumeId],
     queryFn: () =>
       api.listVacancies({
         page,
         page_size: 50,
-        sort_by: sortBy,
-        sort_order: sortOrder,
+        ...sortParams,
         ...(resumeId != null ? { resume_id: resumeId } : {}),
         ...filterParams,
       }),
@@ -195,10 +210,16 @@ export default function VacanciesPage() {
     has_salary: hasSalaryOnly || null,
     sort_by: sortBy,
     sort_order: sortOrder,
+    then_by: thenBy,
+    then_order: thenOrder,
   });
 
   const applyPreset = (f: SavedFilter) => {
     const p = f.params;
+    const presetSortBy = SORTABLE_COLUMNS.includes(p.sort_by as VacancySortField)
+      ? (p.sort_by as VacancySortField)
+      : null;
+    const presetThenBy = parseThenSort(presetSortBy ?? "post_date", p.then_by);
     updateParams({
       q: p.q ?? null,
       source_channel: p.source_channel ?? null,
@@ -208,8 +229,10 @@ export default function VacanciesPage() {
       date_from: p.date_from ?? null,
       date_to: p.date_to ?? null,
       has_salary: p.has_salary ? "true" : null,
-      sort_by: SORTABLE_COLUMNS.includes(p.sort_by as VacancySortField) ? p.sort_by ?? null : null,
+      sort_by: presetSortBy,
       sort_order: p.sort_order === "asc" || p.sort_order === "desc" ? p.sort_order : null,
+      then_by: presetThenBy,
+      then_order: presetThenBy != null && p.then_order === "asc" ? "asc" : null,
     });
   };
 
@@ -287,6 +310,8 @@ export default function VacanciesPage() {
           updateParams({
             resume_id: id,
             sort_by: id != null ? "match_score" : null,
+            then_by: null,
+            then_order: null,
           })
         }
       />
@@ -366,7 +391,13 @@ export default function VacanciesPage() {
             setExportError(null);
             setExportNote(null);
             void api
-              .downloadExport(api.exportVacanciesPath(filterParams), "vacancies.xlsx")
+              .downloadExport(
+                api.exportVacanciesPath({
+                  ...filterParams,
+                  ...(sortBy !== "match_score" ? sortParams : {}),
+                }),
+                "vacancies.xlsx",
+              )
               .then(setExportNote)
               .catch((e: Error) => setExportError(e.message));
           }}
@@ -474,7 +505,17 @@ export default function VacanciesPage() {
                   resumeId={resumeId}
                   sortBy={sortBy}
                   sortOrder={sortOrder}
-                  onSortChange={(by, order) => updateParams({ sort_by: by, sort_order: order })}
+                  thenBy={thenBy}
+                  thenOrder={thenOrder}
+                  multiSort
+                  onSortChange={(by, order, then, thenOrd) =>
+                    updateParams({
+                      sort_by: by,
+                      sort_order: order,
+                      then_by: then,
+                      then_order: then != null ? thenOrd : null,
+                    })
+                  }
                 />
               ) : (
                 <p>Нет вакансий по выбранным фильтрам.</p>

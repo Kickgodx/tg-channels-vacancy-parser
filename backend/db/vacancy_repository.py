@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
-from sqlalchemy import and_, case, false, func, null, or_, select, update
+from sqlalchemy import Date, and_, case, cast, false, func, literal_column, null, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, defer
 
@@ -35,7 +35,7 @@ from backend.fx.apply import (
     preload_fx_rates_for_vacancies,
 )
 from backend.observability import record_vacancies_archived, record_vacancy_upsert
-from backend.schemas import VacancyListItem, VacancyQuery, VacancySortField
+from backend.schemas import VacancyListItem, VacancyQuery, VacancySortField, VacancySortOrder
 from backend.services.llm_result_freshness import match_is_stale
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
@@ -64,7 +64,7 @@ _count_cache: dict[str, tuple[float, int]] = {}
 
 
 def _vacancy_count_cache_key(query: VacancyQuery) -> str:
-    payload = query.model_dump(exclude={"page", "page_size", "sort_by", "sort_order"})
+    payload = query.model_dump(exclude={"page", "page_size", "sort_by", "sort_order", "then_by", "then_order"})
     return repr(sorted(payload.items()))
 
 
@@ -139,15 +139,44 @@ def _sorts_by_match(query: VacancyQuery) -> bool:
     return query.sort_by == "match_score" and query.resume_id is not None
 
 
-def _selected_order(query: VacancyQuery, *, vacancy=None, match=None):
-    """Выбранная сортировка (без ``id``) по ORM-моделям или по алиасам ``vacancy`` / ``match``."""
+def _post_day(post_date):
+    """День поста по UTC — ровно выражение индекса ``ix_vacancies_active_day_salary``.
+
+    ``'UTC'`` — литерал, а не bind-параметр: с параметром планировщик не сопоставил бы
+    выражение с индексом в generic-плане подготовленного запроса.
+    """
+    return cast(func.timezone(literal_column("'UTC'"), post_date), Date)
+
+
+def _directed(expr, order: VacancySortOrder):
+    return expr.asc().nulls_last() if order == "asc" else expr.desc().nulls_last()
+
+
+def _selected_order(query: VacancyQuery, *, vacancy=None, match=None) -> list:
+    """Выбранная сортировка (без ``id``) по ORM-моделям или по алиасам ``vacancy`` / ``match``.
+
+    - ``post_date`` — по времени поста; с ``then_by`` зарплатой — по дню (UTC), внутри
+      дня по зарплате, затем по времени;
+    - другое поле — по нему, равные — по ``then_by=post_date`` (по умолчанию новые выше).
+    """
     if _sorts_by_match(query):
-        col = (match.c if match is not None else VacancyMatchRow).overall_score
-    else:
-        col = _SORT_COLUMNS.get(query.sort_by, VacancyRow.post_date)
-        if vacancy is not None:
-            col = vacancy.c[col.key]
-    return col.asc().nulls_last() if query.sort_order == "asc" else col.desc().nulls_last()
+        return [_directed((match.c if match is not None else VacancyMatchRow).overall_score, query.sort_order)]
+
+    def col(field: str):
+        name = _SORT_COLUMNS.get(field, VacancyRow.post_date).key
+        return vacancy.c[name] if vacancy is not None else getattr(VacancyRow, name)
+
+    post_date = col("post_date")
+    if query.sort_by == "post_date":
+        if query.then_by is None:
+            return [_directed(post_date, query.sort_order)]
+        return [
+            _directed(_post_day(post_date), query.sort_order),
+            _directed(col(query.then_by), query.then_order),
+            _directed(post_date, query.sort_order),
+        ]
+    then_order = query.then_order if query.then_by is not None else "desc"
+    return [_directed(col(query.sort_by), query.sort_order), _directed(post_date, then_order)]
 
 
 def _rank_window_ids(query: VacancyQuery):
@@ -164,19 +193,19 @@ def _rank_window_ids(query: VacancyQuery):
     else:
         order = _selected_order(query, vacancy=v)
     stmt = apply_vacancy_filters(stmt, query, table=v)
-    return stmt.order_by(order, v.c.id.asc()).limit(FTS_RANK_WINDOW)
+    return stmt.order_by(*order, v.c.id.asc()).limit(FTS_RANK_WINDOW)
 
 
 def _vacancy_order_by(query: VacancyQuery) -> list:
     order = _selected_order(query)
     if not query.q:
-        return [order]
+        return order
     # CASE вычисляется лениво: ts_rank считается только для строк окна.
     rank = case(
         (VacancyRow.id.in_(_rank_window_ids(query)), func.ts_rank(*fts_query(VacancyRow.search_tsv, query.q))),
         else_=null(),
     )
-    return [rank.desc().nulls_last(), order]
+    return [rank.desc().nulls_last(), *order]
 
 
 def _fx_config(fx_config: FxConfig | None) -> FxConfig:
@@ -454,15 +483,31 @@ def _list_columns() -> list:
     return [c for c in VacancyRow.__table__.c if c.name not in _LIST_EXCLUDED_COLUMNS]
 
 
-def _needs_page_ids_first(query: VacancyQuery) -> bool:
-    """Нужна полная сортировка совпадений, а не обход индекса ``ix_vacancies_active_post_date``.
+# Сортировки, у которых есть частичный индекс активных вакансий с тем же ORDER BY:
+# (sort_by, sort_order, then_by, then_order); then_order без then_by не важен — None.
+_INDEXED_SORTS = frozenset(
+    {
+        ("post_date", "desc", None, None),  # ix_vacancies_active_post_date
+        ("post_date", "desc", "detected_salary_avg_rub", "desc"),  # ix_vacancies_active_day_salary
+        ("detected_salary_avg_rub", "desc", None, None),  # ix_vacancies_active_salary_date
+        ("detected_salary_avg_rub", "desc", "post_date", "desc"),
+    }
+)
 
-    Тогда страница выбирается в два запроса: сначала id (узкие строки, без текстов),
-    затем колонки и превью только для них. Иначе Postgres строил бы превью — с чтением
-    ``cleaned_text`` из TOAST — для каждого совпадения до сортировки: на 15 тыс.
-    совпадениях это ~0.5 с вместо десятков миллисекунд.
+
+def _needs_page_ids_first(query: VacancyQuery) -> bool:
+    """Выбирать страницу в два запроса: сначала id (узкие строки, без текстов), затем
+    колонки и превью только для них.
+
+    Одним запросом — только первая страница сортировки из ``_INDEXED_SORTS``: Index Scan
+    останавливается на LIMIT, превью строится для 50 строк. Иначе Postgres строил бы
+    превью — с чтением ``cleaned_text`` из TOAST — для каждой строки до сортировки или
+    до OFFSET: на 1.7 тыс. активных 30-я страница — 36 мс одним запросом против 6 мс двумя,
+    на 15 тыс. совпадений полной сортировки — ~0.5 с вместо десятков миллисекунд.
     """
-    return bool(query.q) or (query.sort_by, query.sort_order) != ("post_date", "desc")
+    then_order = query.then_order if query.then_by is not None else None
+    indexed = (query.sort_by, query.sort_order, query.then_by, then_order) in _INDEXED_SORTS
+    return bool(query.q) or query.page > 1 or not indexed
 
 
 def _fetch_page(session: Session, stmt, id_stmt, query: VacancyQuery, order: list, offset: int) -> list:

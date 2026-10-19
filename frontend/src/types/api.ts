@@ -216,6 +216,8 @@ export interface SavedFilterParams {
   include_archived?: boolean;
   sort_by?: string;
   sort_order?: string;
+  then_by?: string | null;
+  then_order?: string;
 }
 
 export interface SavedFilter {

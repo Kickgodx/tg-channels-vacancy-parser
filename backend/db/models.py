@@ -99,6 +99,22 @@ class VacancyRow(Base):
             text("id"),
             postgresql_where=text("is_duplicate IS false AND archived_at IS NULL"),
         ),
+        # Сортировки «день ↓ + зарплата ₽ ↓» и «зарплата ₽ ↓ + дата ↓» — миграция 034.
+        Index(
+            "ix_vacancies_active_day_salary",
+            text("((post_date AT TIME ZONE 'UTC')::date) DESC NULLS LAST"),
+            text("detected_salary_avg_rub DESC NULLS LAST"),
+            text("post_date DESC NULLS LAST"),
+            text("id"),
+            postgresql_where=text("is_duplicate IS false AND archived_at IS NULL"),
+        ),
+        Index(
+            "ix_vacancies_active_salary_date",
+            text("detected_salary_avg_rub DESC NULLS LAST"),
+            text("post_date DESC NULLS LAST"),
+            text("id"),
+            postgresql_where=text("is_duplicate IS false AND archived_at IS NULL"),
+        ),
     )
     # Без RETURNING серверных значений после INSERT: единственное такое — search_tsv,
     # он deferred и вычитывать его на каждую вставку незачем.
