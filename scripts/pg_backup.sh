@@ -13,6 +13,10 @@
 # не прошедший — суффикс .unverified (удаляется после следующего удачного бэкапа).
 # Ротация: хранятся последние BACKUP_KEEP проверенных дампов.
 #
+# Состояние для алертов — $BACKUP_DIR/pg_backup.prom (текстовый формат Prometheus; Alloy
+# читает его textfile-коллектором): время последнего проверенного дампа, интервал, время и
+# итог последней попытки. Итог попытки хранится в .last_attempt и переживает рестарт.
+#
 # Подключение к источнику — стандартные PGHOST / PGUSER / PGPASSWORD / PGDATABASE.
 
 BACKUP_DIR=${BACKUP_DIR:-/backups}
@@ -21,11 +25,39 @@ RETRY_MINUTES=${BACKUP_RETRY_MINUTES:-60}
 KEEP=${BACKUP_KEEP:-7}
 DB=${PGDATABASE:?PGDATABASE не задан}
 STAMP="$BACKUP_DIR/.last_verified"
+ATTEMPT="$BACKUP_DIR/.last_attempt"   # «<unix time> <1|0>» — итог последней попытки
+METRICS="$BACKUP_DIR/pg_backup.prom"
 CHECK_DIR=/tmp/restore-check
 SRC_COUNTS=/tmp/source.counts
 LOCK=/tmp/pg-backup.lock
 
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) pg-backup: $*"; }
+
+# Целое ≥ 0 или 0: файл состояния мог остаться пустым или битым.
+uint_or_zero() { case $1 in ''|*[!0-9]*) echo 0 ;; *) echo "$1" ;; esac; }
+
+# Файл метрик целиком заново: временный файл без суффикса .prom, затем mv — коллектор
+# не прочитает недописанный.
+write_metrics() {
+    last=$(uint_or_zero "$(cat "$STAMP" 2>/dev/null)")
+    tmp="$BACKUP_DIR/.pg_backup.prom.tmp"
+    {
+        echo "# HELP pg_backup_last_verified_timestamp_seconds Время последнего дампа, прошедшего проверку восстановления (0 — такого нет)"
+        echo "# TYPE pg_backup_last_verified_timestamp_seconds gauge"
+        echo "pg_backup_last_verified_timestamp_seconds $last"
+        echo "# HELP pg_backup_interval_seconds Период бэкапа, BACKUP_INTERVAL_HOURS"
+        echo "# TYPE pg_backup_interval_seconds gauge"
+        echo "pg_backup_interval_seconds $(( INTERVAL_HOURS * 3600 ))"
+        if [ -f "$ATTEMPT" ] && read -r at ok <"$ATTEMPT"; then
+            echo "# HELP pg_backup_last_attempt_timestamp_seconds Время окончания последней попытки бэкапа"
+            echo "# TYPE pg_backup_last_attempt_timestamp_seconds gauge"
+            echo "pg_backup_last_attempt_timestamp_seconds $(uint_or_zero "$at")"
+            echo "# HELP pg_backup_last_attempt_success 1 — последняя попытка дала проверенный дамп, 0 — провал"
+            echo "# TYPE pg_backup_last_attempt_success gauge"
+            echo "pg_backup_last_attempt_success $(uint_or_zero "$ok")"
+        fi
+    } >"$tmp" && mv -f "$tmp" "$METRICS" || log "не удалось записать $METRICS"
+}
 
 # Таблицы схемы public и число строк в них: «таблица<TAB>count», по алфавиту.
 table_counts() {
@@ -102,7 +134,7 @@ prune() {
     rm -f "$BACKUP_DIR"/*.dump.unverified
 }
 
-backup_once() {
+backup_attempt() {
     mkdir -p "$BACKUP_DIR" || return 1
     rm -f "$BACKUP_DIR"/*.partial
     name="${DB}_$(date -u +%Y%m%d_%H%M%S)"
@@ -136,6 +168,17 @@ backup_once() {
     stop_check_cluster
     rm -f "$SRC_COUNTS"
     return $rc
+}
+
+# Попытка с записью итога: провал любой ветки backup_attempt — неуспех. Запуск, не
+# получивший lock (другой бэкап идёт), сюда не доходит и попыткой не считается.
+backup_once() {
+    backup_attempt
+    result=$?
+    if [ "$result" -eq 0 ]; then ok=1; else ok=0; fi
+    echo "$(date +%s) $ok" >"$ATTEMPT" || log "не удалось записать $ATTEMPT"
+    write_metrics
+    return $result
 }
 
 check_file() {
@@ -175,6 +218,7 @@ trap 'stop_check_cluster; exit 0' TERM INT
 pause() { sleep "$1" & wait $!; }
 
 log "старт: каждые $INTERVAL_HOURS ч, хранить $KEEP, каталог $BACKUP_DIR"
+mkdir -p "$BACKUP_DIR" && write_metrics
 while :; do
     last=$(cat "$STAMP" 2>/dev/null || echo 0)
     wait_s=$(( last + INTERVAL_HOURS * 3600 - $(date +%s) ))

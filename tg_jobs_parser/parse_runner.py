@@ -29,6 +29,7 @@ from tg_jobs_parser.ingestion.rules import (
 )
 from tg_jobs_parser.models.parse_result import ParseResult
 from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.observability.llm_metrics import record_llm_disabled
 from tg_jobs_parser.observability.parse_metrics import record_phase_duration, record_post_processed
 from tg_jobs_parser.parse_cancel import (
     ParseCancellationToken,
@@ -484,6 +485,7 @@ def run_parse(
                 config.ai.concurrency,
             )
         except Exception as e:
+            record_llm_disabled("init_failed")
             if config.ai.mode == "primary":
                 # Без LLM primary сохранил бы одни правила и сдвинул чекпоинты — эти посты
                 # никто бы не перечитал. Вычитка ещё не начата: падаем до Telegram.

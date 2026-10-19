@@ -5,6 +5,8 @@
 //    → loki.write.
 // 2) трассы: OTLP от backend и воркеров (http :4318 / grpc :4317) → filter
 //    (шумные span'ы) → batch → Tempo.
+// 3) метрики бэкапа: pg_backup.prom из каталога дампов (пишет scripts/pg_backup.sh)
+//    → textfile-коллектор → remote write в Prometheus (алерты PgBackup*).
 
 // Docker API — через docker-socket-proxy (только чтение контейнеров/сетей/логов),
 // сам docker.sock в Alloy не монтируется.
@@ -124,5 +126,46 @@ otelcol.exporter.otlp "tempo" {
 		tls {
 			insecure = true
 		}
+	}
+}
+
+// --- Метрики бэкапа ----------------------------------------------------------
+// pg-backup — контейнер без HTTP, поэтому его состояние лежит файлом в каталоге дампов
+// (смонтирован сюда только на чтение). Из коллекторов node_exporter — только textfile.
+prometheus.exporter.unix "pg_backup" {
+	set_collectors = ["textfile"]
+
+	textfile {
+		directory = "/backups"
+	}
+}
+
+// Цель экспортера несёт job="integrations/unix" и instance = hostname контейнера Alloy
+// (меняется при пересоздании — ряды рвутся, и for: у алертов начинается заново).
+discovery.relabel "pg_backup" {
+	targets = prometheus.exporter.unix.pg_backup.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "pg-backup"
+	}
+
+	rule {
+		target_label = "instance"
+		replacement  = "pg-backup"
+	}
+}
+
+prometheus.scrape "pg_backup" {
+	targets         = discovery.relabel.pg_backup.output
+	job_name        = "pg-backup"
+	scrape_interval = "60s"
+	forward_to      = [prometheus.remote_write.local.receiver]
+}
+
+// Prometheus принимает remote write (--web.enable-remote-write-receiver).
+prometheus.remote_write "local" {
+	endpoint {
+		url = "http://prometheus:9090/api/v1/write"
 	}
 }

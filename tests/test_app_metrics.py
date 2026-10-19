@@ -241,6 +241,47 @@ def test_db_parse_runs_finished_24h_counts_recent(api_client):
     assert _sample("db_parse_posts_fetched_24h", {}) >= 12
 
 
+def test_db_jobs_lease_expired_counts_running_with_stale_lease(api_client):
+    from tests.conftest import new_user
+
+    from backend.db.models import HhSyncJobRow, LlmJobRow, ParseRunRow
+
+    now = datetime.now(UTC)
+    factory = get_session_factory()
+    session = factory()
+    try:
+        uid = new_user(session)
+        # Один активный прогон на базу — истёкший lease у running.
+        session.add(ParseRunRow(status="running", config_snapshot={}, lease_until=now - timedelta(minutes=10)))
+        session.add(LlmJobRow(user_id=uid, kind="import", status="running", lease_until=now - timedelta(minutes=1)))
+        session.add(LlmJobRow(user_id=uid, kind="import", status="running", lease_until=now + timedelta(minutes=2)))
+        # Не running — не считается, даже без lease.
+        session.add(LlmJobRow(user_id=uid, kind="import", status="queued"))
+        session.add(HhSyncJobRow(status="completed", params={}))
+        session.commit()
+    finally:
+        session.close()
+
+    assert _sample("db_jobs_lease_expired", {"kind": "parse"}) == 1
+    assert _sample("db_jobs_lease_expired", {"kind": "llm"}) == 1
+    # Серия с нулём есть: алерт не путает «нет зависших» с «нет метрики».
+    assert REGISTRY.get_sample_value("db_jobs_lease_expired", {"kind": "hh_sync"}) == 0
+
+
+def test_db_jobs_lease_expired_counts_running_without_lease(api_client):
+    from backend.db.models import HhSyncJobRow
+
+    factory = get_session_factory()
+    session = factory()
+    try:
+        session.add(HhSyncJobRow(status="running", params={}))
+        session.commit()
+    finally:
+        session.close()
+
+    assert _sample("db_jobs_lease_expired", {"kind": "hh_sync"}) == 1
+
+
 def test_parse_run_duration_has_fine_buckets():
     from backend.observability import PARSE_RUN_DURATION
 
@@ -316,6 +357,7 @@ def _empty_db_stats():
         None,
         {"total": 0, "with_detail": 0, "without_detail": 0},
         {},
+        {"parse": 0, "llm": 0, "hh_sync": 0},
     )
 
 

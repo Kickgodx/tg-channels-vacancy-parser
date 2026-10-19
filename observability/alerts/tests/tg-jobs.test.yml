@@ -1,0 +1,335 @@
+# Юнит-тесты правил: promtool test rules (scripts/check_alerts.sh).
+# Сценарии — из openspec/specs/platform/alerting. Шаг рядов 1m: при более редких точках
+# значения «устаревают» через 5 минут (lookback delta) и ряд выглядит пустым.
+
+rule_files:
+  - ../tg-jobs.yml
+
+evaluation_interval: 1m
+
+tests:
+  # --- JobLeaseExpired ---------------------------------------------------------
+  - name: lease истёк и recover его не поднимает
+    interval: 1m
+    input_series:
+      - series: 'db_jobs_lease_expired{job="tg-jobs-backend", instance="backend:9100", kind="parse"}'
+        values: '1x10'
+      - series: 'db_jobs_lease_expired{job="tg-jobs-backend", instance="backend:9100", kind="llm"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: JobLeaseExpired
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: JobLeaseExpired
+        exp_alerts:
+          - exp_labels: {severity: critical, kind: parse}
+            exp_annotations:
+              summary: "Задача parse в running с истёкшим lease"
+              description: "Recover не возвращает её в очередь больше 5 минут. Проверьте воркер и логи recover."
+
+  - name: recover вернул задачу через минуту
+    interval: 1m
+    input_series:
+      - series: 'db_jobs_lease_expired{job="tg-jobs-backend", instance="backend:9100", kind="llm"}'
+        values: '1 1 0x10'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: JobLeaseExpired
+        exp_alerts: []
+
+  # --- LlmQueueGrowing ---------------------------------------------------------
+  - name: очередь llm не пустеет и растёт
+    interval: 1m
+    input_series:
+      - series: 'llm_rq_queue_jobs{job="tg-jobs-backend", instance="backend:9100", queue="llm"}'
+        values: '0x10 1+1x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: LlmQueueGrowing
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: LlmQueueGrowing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: tg-jobs-backend, instance: "backend:9100", queue: llm}
+            exp_annotations:
+              summary: "Очередь LLM растёт и не разбирается"
+              description: "Очередь RQ llm не пустела 15 минут и выросла. Проверьте llm-worker и лимиты провайдера (дашборд LLM jobs / queue)."
+
+  - name: короткий всплеск llm разобран
+    interval: 1m
+    input_series:
+      - series: 'llm_rq_queue_jobs{job="tg-jobs-backend", instance="backend:9100", queue="llm"}'
+        values: '0x5 30 25 20 15 10 5 0x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: LlmQueueGrowing
+        exp_alerts: []
+
+  - name: очередь llm стоит на месте, а не растёт
+    interval: 1m
+    input_series:
+      - series: 'llm_rq_queue_jobs{job="tg-jobs-backend", instance="backend:9100", queue="llm"}'
+        values: '5x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: LlmQueueGrowing
+        exp_alerts: []
+
+  # --- ParseQueueStuck ---------------------------------------------------------
+  - name: прогон висит в очереди parse
+    interval: 1m
+    input_series:
+      - series: 'llm_rq_queue_jobs{job="tg-jobs-backend", instance="backend:9100", queue="parse"}'
+        values: '1x15'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: ParseQueueStuck
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: ParseQueueStuck
+        exp_alerts:
+          - exp_labels: {severity: critical, job: tg-jobs-backend, instance: "backend:9100", queue: parse}
+            exp_annotations:
+              summary: "Прогон висит в очереди parse"
+              description: "Задача в очереди RQ parse дольше 10 минут — parse-worker не берёт её."
+
+  # --- ParseRunFailed ----------------------------------------------------------
+  - name: прогон упал
+    interval: 1m
+    input_series:
+      - series: 'db_parse_runs_finished_24h{job="tg-jobs-backend", instance="backend:9100", status="failed"}'
+        values: '0 1x5'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: ParseRunFailed
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: ParseRunFailed
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Прогон парсинга завершился ошибкой"
+              description: "За последние 24 часа есть прогон со статусом failed. Причина — error_message прогона на вкладке «Парсинг»."
+
+  - name: отменённый и partial прогон — не ошибка
+    interval: 1m
+    input_series:
+      - series: 'db_parse_runs_finished_24h{job="tg-jobs-backend", instance="backend:9100", status="cancelled"}'
+        values: '1x5'
+      - series: 'db_parse_runs_finished_24h{job="tg-jobs-backend", instance="backend:9100", status="partial"}'
+        values: '1x5'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ParseRunFailed
+        exp_alerts: []
+
+  # --- LlmDisabled -------------------------------------------------------------
+  - name: квота кончилась — алерт держится 24 часа
+    interval: 1m
+    input_series:
+      - series: 'llm_enrich_disabled_total{job="tg-jobs-parse-worker", instance="10.0.0.5:9102", reason="quota"}'
+        values: '0x10 1x1500'
+      - series: 'llm_enrich_disabled_total{job="tg-jobs-parse-worker", instance="10.0.0.5:9102", reason="circuit_breaker"}'
+        values: '0x1510'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: LlmDisabled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: LlmDisabled
+        exp_alerts:
+          - exp_labels: {severity: warning, reason: quota}
+            exp_annotations:
+              summary: "LLM отключался при разборе: quota"
+              description: "За последние 24 часа прогон или LLM-импорт продолжал без LLM (circuit_breaker — ошибки подряд, quota — квота/лимит/бюджет, init_failed — AI не запустился). Причина — в предупреждениях прогона."
+      - eval_time: 25h
+        alertname: LlmDisabled
+        exp_alerts: []
+
+  # --- FxRatesStale ------------------------------------------------------------
+  - name: курс ЦБ не обновляется
+    interval: 1m
+    input_series:
+      # Последний курс датирован моментом 0, синк больше не идёт.
+      - series: 'fx_latest_rate_timestamp_seconds{job="tg-jobs-backend", instance="backend:9100"}'
+        values: '0x4500'
+    alert_rule_test:
+      - eval_time: 72h30m
+        alertname: FxRatesStale
+        exp_alerts: []
+      - eval_time: 74h
+        alertname: FxRatesStale
+        exp_alerts:
+          - exp_labels: {severity: warning, job: tg-jobs-backend, instance: "backend:9100"}
+            exp_annotations:
+              summary: "Курс ЦБ старше 3 суток"
+              description: "Последний курс в exchange_rates старше 3 суток — рублёвые суммы зарплат считаются по устаревшему курсу. Проверьте синк курсов (логи backend, fx_cbr_requests_total)."
+
+  - name: курс ЦБ свежий
+    interval: 1m
+    input_series:
+      # Курс всегда на сутки моложе текущего момента.
+      - series: 'fx_latest_rate_timestamp_seconds{job="tg-jobs-backend", instance="backend:9100"}'
+        values: '-86400+60x4500'
+    alert_rule_test:
+      - eval_time: 74h
+        alertname: FxRatesStale
+        exp_alerts: []
+
+  # --- ApiOverloaded -----------------------------------------------------------
+  - name: устойчивая перегрузка
+    interval: 1m
+    input_series:
+      # 0,5 отказа/с при 10 запросах/с — 5%.
+      - series: 'api_overload_rejections_total{job="tg-jobs-backend", instance="backend:9100"}'
+        values: '0+30x30'
+      - series: 'http_requests_total{job="tg-jobs-backend", instance="backend:9100", handler="/api/v1/vacancies", method="GET", status="200"}'
+        values: '0+570x30'
+      - series: 'http_requests_total{job="tg-jobs-backend", instance="backend:9100", handler="/api/v1/vacancies", method="GET", status="503"}'
+        values: '0+30x30'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ApiOverloaded
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: ApiOverloaded
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "API отклоняет запросы: 503 OVERLOADED"
+              description: "Больше 1% запросов получают 503 OVERLOADED. Нужны процессы API (API_WORKERS) или разбор медленных запросов (дашборды API и DB pool)."
+
+  - name: редкие отказы — не перегрузка
+    interval: 1m
+    input_series:
+      # 0,05 отказа/с при 10 запросах/с — 0,5%.
+      - series: 'api_overload_rejections_total{job="tg-jobs-backend", instance="backend:9100"}'
+        values: '0+3x30'
+      - series: 'http_requests_total{job="tg-jobs-backend", instance="backend:9100", handler="/api/v1/vacancies", method="GET", status="200"}'
+        values: '0+600x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ApiOverloaded
+        exp_alerts: []
+
+  - name: перегрузка стенда нагрузочного теста не считается
+    interval: 1m
+    input_series:
+      - series: 'api_overload_rejections_total{job="tg-jobs-loadtest", instance="172.18.0.9:9100"}'
+        values: '0+300x30'
+      - series: 'http_requests_total{job="tg-jobs-loadtest", instance="172.18.0.9:9100", handler="/api/v1/vacancies", method="GET", status="200"}'
+        values: '0+600x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ApiOverloaded
+        exp_alerts: []
+
+  # --- TargetDown / WorkerMissing ----------------------------------------------
+  - name: backend не отвечает, parse-worker пропал
+    interval: 1m
+    input_series:
+      - series: 'up{job="tg-jobs-backend", instance="backend:9100"}'
+        values: '0x10'
+      - series: 'up{job="tg-jobs-llm-worker", instance="10.0.0.4:9101", dns_name="llm-worker"}'
+        values: '1x10'
+      - series: 'up{job="tg-jobs-hh-worker", instance="10.0.0.6:9103", dns_name="hh-worker"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TargetDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: TargetDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: tg-jobs-backend, instance: "backend:9100"}
+            exp_annotations:
+              summary: "tg-jobs-backend не отвечает на scrape"
+              description: "Цель backend:9100 не отдаёт /metrics больше 5 минут."
+      - eval_time: 6m
+        alertname: WorkerMissing
+        exp_alerts:
+          - exp_labels: {severity: critical, job: tg-jobs-parse-worker}
+            exp_annotations:
+              summary: "Нет ни одного tg-jobs-parse-worker"
+              description: "У воркера нет целей скрейпа больше 5 минут — контейнер не запущен."
+
+  - name: все процессы на месте
+    interval: 1m
+    input_series:
+      - series: 'up{job="tg-jobs-backend", instance="backend:9100"}'
+        values: '1x10'
+      - series: 'up{job="tg-jobs-llm-worker", instance="10.0.0.4:9101", dns_name="llm-worker"}'
+        values: '1x10'
+      - series: 'up{job="tg-jobs-parse-worker", instance="10.0.0.5:9102", dns_name="parse-worker"}'
+        values: '1x10'
+      - series: 'up{job="tg-jobs-hh-worker", instance="10.0.0.6:9103", dns_name="hh-worker"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: TargetDown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: WorkerMissing
+        exp_alerts: []
+
+  # --- Бэкап -------------------------------------------------------------------
+  - name: бэкап не делается
+    interval: 1m
+    input_series:
+      # Интервал 24 ч, проверенный дамп снят в момент 0 и больше не обновлялся.
+      - series: 'pg_backup_last_verified_timestamp_seconds{job="pg-backup", instance="pg-backup"}'
+        values: '0x2500'
+      - series: 'pg_backup_interval_seconds{job="pg-backup", instance="pg-backup"}'
+        values: '86400x2500'
+    alert_rule_test:
+      - eval_time: 36h30m
+        alertname: PgBackupStale
+        exp_alerts: []
+      - eval_time: 40h
+        alertname: PgBackupStale
+        exp_alerts:
+          - exp_labels: {severity: critical, job: pg-backup, instance: pg-backup}
+            exp_annotations:
+              summary: "Нет свежего проверенного бэкапа"
+              description: "Последний проверенный дамп старше 1,5 интервала бэкапа. Проверьте контейнер pg-backup и его логи."
+      - eval_time: 40h
+        alertname: PgBackupMetricsMissing
+        exp_alerts: []
+
+  - name: попытка провалилась, следующая прошла
+    interval: 1m
+    input_series:
+      - series: 'pg_backup_last_attempt_success{job="pg-backup", instance="pg-backup"}'
+        values: '1x5 0x60 1x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PgBackupFailed
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: PgBackupFailed
+        exp_alerts:
+          - exp_labels: {severity: critical, job: pg-backup, instance: pg-backup}
+            exp_annotations:
+              summary: "Последняя попытка бэкапа провалилась"
+              description: "pg_dump или проверка восстановления не прошли; повтор — через BACKUP_RETRY_MINUTES. Подробности — в логах pg-backup."
+      - eval_time: 70m
+        alertname: PgBackupFailed
+        exp_alerts: []
+
+  - name: метрик бэкапа нет
+    interval: 1m
+    input_series:
+      - series: 'up{job="tg-jobs-backend", instance="backend:9100"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: PgBackupMetricsMissing
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: PgBackupMetricsMissing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Нет метрик бэкапа"
+              description: "pg_backup.prom не доходит до Prometheus: pg-backup не пишет файл или Alloy его не читает."

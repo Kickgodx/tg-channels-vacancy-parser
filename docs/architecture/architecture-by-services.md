@@ -19,6 +19,7 @@ flowchart LR
   subgraph Data
     PG[("postgres<br/>:5432")]
     RD[("redis<br/>:6379 · RQ")]
+    PGB["pg-backup<br/>pg_dump + проверка"]
   end
 
   subgraph Obs
@@ -27,6 +28,7 @@ flowchart LR
     LOKI["loki<br/>:3100"]
     TEMPO["tempo<br/>:3200"]
     GRAF["grafana<br/>:3000"]
+    AM["alertmanager<br/>:9093 · без доставки"]
   end
 
   subgraph Ext["Внешние"]
@@ -62,6 +64,11 @@ flowchart LR
   HW -->|"OTLP"| ALLOY
   ALLOY --> LOKI
   ALLOY --> TEMPO
+  PGB --> PG
+  PGB -.->|"pg_backup.prom"| ALLOY
+  ALLOY -->|"remote write"| PROM
+  PROM -->|"алерты"| AM
+  AM --> GRAF
   PROM --> GRAF
   LOKI --> GRAF
   TEMPO --> GRAF
@@ -76,9 +83,11 @@ flowchart LR
 | hh-worker | 9103 (только Docker-сеть) | RQ `SimpleWorker`: фоновый HH sync (очередь `hh`) |
 | redis | 6379 | Очереди RQ `llm` / `parse` / `hh` (AOF на томе `redis_data`) + pub/sub статуса SSE |
 | postgres | 5432 | Вакансии, runs, users, FX, cache, `llm_jobs` |
-| prometheus | 9090 | Scrape backend + воркеры (`dns_sd`); remote-write receiver для метрик k6 (`scripts/loadtest`) |
-| grafana | 3000 | Дашборды / Explore (в т.ч. **DB pool**, **LLM jobs / queue**) |
-| alloy | 12345 | Логи Docker + OTLP → Loki/Tempo |
+| pg-backup | — | `pg_dump` по расписанию с проверкой восстановления; состояние — файл `pg_backup.prom` в каталоге дампов |
+| prometheus | 9090 | Scrape backend + воркеры (`dns_sd`); правила алертов (`observability/alerts/`); remote-write receiver для метрик k6 (`scripts/loadtest`) и бэкапа (Alloy) |
+| alertmanager | 9093 | Сработавшие алерты Prometheus; доставки наружу нет — UI и Grafana → Alerting |
+| grafana | 3000 | Дашборды / Explore (в т.ч. **DB pool**, **LLM jobs / queue**), Alerting |
+| alloy | 12345 | Логи Docker + OTLP → Loki/Tempo; `pg_backup.prom` → Prometheus |
 | loki | 3100 | Логи |
 | tempo | 3200 | Трассы |
 

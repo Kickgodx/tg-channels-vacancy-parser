@@ -66,6 +66,17 @@ _ENRICH_EVENTS = (
 for _event in _ENRICH_EVENTS:
     LLM_ENRICH_EVENTS.labels(event=_event)
 
+LLM_ENRICH_DISABLED = Counter(
+    "llm_enrich_disabled_total",
+    "AI-разбор (прогон, LLM-импорт) перестал использовать LLM — раз за разбор",
+    # circuit_breaker — ошибки подряд; quota — квота / дневной лимит провайдера / суточный
+    # бюджет; init_failed — AI включён, но клиент не создан.
+    labelnames=("reason",),
+)
+LLM_DISABLED_REASONS = ("circuit_breaker", "quota", "init_failed")
+for _reason in LLM_DISABLED_REASONS:
+    LLM_ENRICH_DISABLED.labels(reason=_reason)
+
 
 def _norm_model(model: str) -> str:
     m = (model or "").strip()
@@ -122,3 +133,7 @@ def record_cost(*, model: str, usd: float) -> None:
 
 def record_enrich_event(event: str) -> None:
     LLM_ENRICH_EVENTS.labels(event=event).inc()
+
+
+def record_llm_disabled(reason: str) -> None:
+    LLM_ENRICH_DISABLED.labels(reason=reason).inc()

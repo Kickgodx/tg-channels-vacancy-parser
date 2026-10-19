@@ -267,8 +267,26 @@ services:
       - "${INFRA_BIND_ADDR:-127.0.0.1}:9090:9090"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts:/etc/prometheus/alerts:ro
     depends_on:
       - backend
+      - alertmanager
+    restart: unless-stopped
+
+  # Алерты Prometheus без доставки наружу: UI на :9093 и Grafana → Alerting
+  # (observability/alertmanager.yml — как подключить канал).
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: ["observability"]
+    logging: *default-logging
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "${INFRA_BIND_ADDR:-127.0.0.1}:9093:9093"
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
     restart: unless-stopped
 
   grafana:
@@ -345,6 +363,8 @@ services:
     volumes:
       - ./observability/alloy-config.alloy:/etc/alloy/config.alloy:ro
       - alloy_data:/var/lib/alloy/data
+      # pg_backup.prom (метрики бэкапа для алертов) — только чтение.
+      - ${BACKUP_HOST_DIR:-./backup/pg}:/backups:ro
     networks:
       - default
       - docker-api
@@ -352,6 +372,7 @@ services:
       - docker-socket-proxy
       - loki
       - tempo
+      - prometheus
     restart: unless-stopped
 
   tempo:
@@ -378,6 +399,7 @@ volumes:
   pgdata:
   redis_data:
   grafana_data:
+  alertmanager_data:
   loki_data:
   alloy_data:
   tempo_data:

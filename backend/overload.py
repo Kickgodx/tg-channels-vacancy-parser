@@ -19,6 +19,7 @@ import anyio
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from backend.errors import CODE_OVERLOADED, error_detail
+from backend.observability import API_OVERLOAD_REJECTIONS
 
 # Отвечают без очереди: liveness не должен падать из-за перегрузки.
 EXEMPT_PATHS = frozenset({"/api/v1/health"})
@@ -74,6 +75,7 @@ def _is_event_stream(message: Message) -> bool:
 
 
 async def _reject(send: Send) -> None:
+    API_OVERLOAD_REJECTIONS.inc()
     await send(
         {
             "type": "http.response.start",

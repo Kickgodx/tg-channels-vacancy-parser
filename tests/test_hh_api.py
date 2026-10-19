@@ -100,9 +100,15 @@ def test_hh_status_requires_admin(client: TestClient):
 
 
 def test_hh_sync_503_without_token(client: TestClient):
+    from prometheus_client import REGISTRY
+
     admin = _register(client, "admin2@example.com")
+    before = REGISTRY.get_sample_value("api_overload_rejections_total") or 0.0
     r = client.post("/api/v1/hh/sync", headers=_auth(admin))
     assert r.status_code == 503
+    assert r.json()["detail"]["code"] != "OVERLOADED"
+    # Алерт перегрузки не должен видеть 503 от HH.
+    assert (REGISTRY.get_sample_value("api_overload_rejections_total") or 0.0) == before
 
 
 def test_hh_sync_skip_detail_on_second_run(client: TestClient, monkeypatch):

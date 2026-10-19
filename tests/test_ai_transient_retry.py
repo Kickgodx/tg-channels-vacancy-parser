@@ -147,6 +147,21 @@ def _run_with_quota_exhausted_after(monkeypatch, *, mode: str, ok_calls: int, po
     return parse_runner.run_parse(config)
 
 
+def _disabled(reason: str) -> float:
+    from prometheus_client import REGISTRY
+
+    value = REGISTRY.get_sample_value("llm_enrich_disabled_total", {"reason": reason})
+    assert value is not None  # серия заведена нулём до первого события
+    return value
+
+
+def test_quota_exhausted_counts_llm_disabled_once(monkeypatch):
+    before = _disabled("quota")
+    _run_with_quota_exhausted_after(monkeypatch, mode="assist", ok_calls=1, posts=6)
+    # Квота кончилась на 2-м посте, ещё 4 прошли без LLM — событие одно.
+    assert _disabled("quota") == before + 1
+
+
 def test_primary_mode_marks_run_incomplete_when_llm_disabled(monkeypatch):
     result = _run_with_quota_exhausted_after(monkeypatch, mode="primary", ok_calls=2, posts=5)
 
@@ -196,9 +211,12 @@ def test_circuit_breaker_stops_llm_after_consecutive_errors(monkeypatch):
         calls += 1
         raise RuntimeError("OpenRouter API: upstream error 503")
 
+    breaker_before, quota_before = _disabled("circuit_breaker"), _disabled("quota")
     result = _run_with_extract(monkeypatch, always_fails, mode="primary", posts=10, circuit_breaker_errors=3)
 
     assert calls == 3  # остальные 7 постов не ждут повторов и таймаутов
+    assert _disabled("circuit_breaker") == breaker_before + 1
+    assert _disabled("quota") == quota_before
     assert result.vacancies_unique == []
     assert result.incomplete_reason is not None
     assert "circuit breaker" in result.incomplete_reason
