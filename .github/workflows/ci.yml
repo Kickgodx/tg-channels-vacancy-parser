@@ -1,0 +1,156 @@
+name: CI
+
+# Только ручной запуск: Actions → CI → Run workflow (ветка выбирается там же).
+# Автозапусков на push / pull_request нет намеренно — в MVP они тратили бы минуты GitHub.
+# Минуты считаются по каждой джобе с округлением вверх, поэтому проверки собраны в
+# несколько крупных джоб, а необязательные выключаются галочками при запуске.
+on:
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: "Backend: ruff (lint + format) и pytest на Postgres 16"
+        type: boolean
+        default: true
+      coverage:
+        description: "pytest с покрытием (HTML-отчёт — артефакт htmlcov)"
+        type: boolean
+        default: false
+      frontend:
+        description: "Frontend: oxlint и сборка (tsc -b + vite build)"
+        type: boolean
+        default: true
+      alerts:
+        description: "Алерты: promtool / amtool (scripts/check_alerts.sh)"
+        type: boolean
+        default: true
+      docker:
+        description: "Docker: docker compose config и сборка образов backend / frontend (без push)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Повторный запуск на той же ветке отменяет предыдущий — не платим за устаревший прогон.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12" # как в Dockerfile.backend
+  NODE_VERSION: "22" # как в frontend/Dockerfile
+  # Те же версии, что в Dockerfile.backend: зависимости ставятся ровно по poetry.lock.
+  POETRY_VERSION: "2.3.2"
+  POETRY_EXPORT_VERSION: "1.10.1"
+
+jobs:
+  backend:
+    name: Backend (ruff + pytest)
+    if: inputs.backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: poetry.lock
+
+      - name: Install dependencies from poetry.lock
+        run: |
+          # Poetry — в отдельном venv, чтобы его зависимости не смешивались с проектными
+          # и не мешали pip check.
+          python -m venv "$RUNNER_TEMP/poetry"
+          "$RUNNER_TEMP/poetry/bin/pip" install -q "poetry==$POETRY_VERSION" "poetry-plugin-export==$POETRY_EXPORT_VERSION"
+          poetry="$RUNNER_TEMP/poetry/bin/poetry"
+          "$poetry" check --lock
+          "$poetry" export --extras dev --format requirements.txt --output "$RUNNER_TEMP/requirements.txt"
+          python -m pip install -q --require-hashes -r "$RUNNER_TEMP/requirements.txt"
+          python -m pip install -q --no-deps -e .
+          python -m pip check
+
+      - name: Ruff lint
+        run: ruff check --output-format=github .
+
+      - name: Ruff format
+        run: ruff format --check .
+
+      # Postgres 16 поднимает tests/conftest.py через testcontainers (Docker на раннере есть).
+      # Live-тесты LLM (-m llm) исключены addopts в pyproject.toml.
+      - name: Pytest
+        run: >-
+          python -m pytest -n auto -q
+          ${{ inputs.coverage && '--cov --cov-report=term --cov-report=html' || '' }}
+
+      - name: Upload coverage report
+        if: inputs.coverage && !cancelled()
+        uses: actions/upload-artifact@v7
+        with:
+          name: htmlcov
+          path: htmlcov/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend (oxlint + build)
+    if: inputs.frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  alerts:
+    name: Alerts (promtool + amtool)
+    if: inputs.alerts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check Prometheus / Alertmanager configs and rule tests
+        run: bash scripts/check_alerts.sh
+
+  docker:
+    name: Docker (compose config + image builds)
+    if: inputs.docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # Compose требует .env (env_file) и пароли (${...:?}); значения не важны —
+      # проверяется только синтаксис и подстановка, стек не запускается.
+      - name: Validate docker-compose.yml
+        env:
+          POSTGRES_PASSWORD: ci
+          REDIS_PASSWORD: ci
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          docker compose --profile observability config --quiet
+
+      - name: Build backend image
+        run: docker build --file Dockerfile.backend --tag tg-jobs-backend:ci .
+
+      - name: Build frontend image
+        run: docker build --tag tg-jobs-frontend:ci frontend
