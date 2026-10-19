@@ -609,6 +609,7 @@ tg_jobs_parser/
                              frontend, pg-backup; observability — profile `observability`
   Dockerfile.backend
   scripts/pg_backup.sh     — плановый pg_dump + проверка восстановления (сервис pg-backup)
+  .github/workflows/ci.yml — CI, только ручной запуск (см. «Тесты» → CI)
 
   backend/                 — FastAPI, SQLAlchemy, RunService, SSE
     api/routes/            — health, auth, config, runs, vacancies, hh,
@@ -1049,6 +1050,25 @@ CREATEDB; тесты создают и удаляют свои базы `tgjobs_
 
 Тесты офлайновые: `tests/conftest.py` подставляет `CONFIG_PATH` на конфиг с
 выключенным `fx` — иначе агрегаты ходят за курсами в ЦБ на каждый запрос.
+
+### CI (GitHub Actions)
+
+Workflow `.github/workflows/ci.yml` запускается **только вручную**: Actions → CI →
+Run workflow, ветка выбирается в том же окне. Автозапусков на push / pull request нет,
+чтобы не тратить минуты GitHub. Кнопка появляется, когда workflow есть в `master`.
+
+При запуске галочками выбирается, что гонять:
+
+| Галочка | По умолчанию | Что проверяет |
+|---|---|---|
+| `backend` | вкл. | Зависимости строго по `poetry.lock` (`poetry export --extras dev` → `pip install --require-hashes`, `pip check`), `ruff check`, `ruff format --check`, `pytest -n auto` на Postgres 16 через testcontainers |
+| `coverage` | выкл. | В джобе `backend` pytest идёт с `--cov`; HTML-отчёт — артефакт `htmlcov` (7 дней) |
+| `frontend` | вкл. | `npm ci`, `npm run lint` (oxlint), `npm run build` (tsc + vite) |
+| `alerts` | вкл. | `scripts/check_alerts.sh`: promtool / amtool |
+| `docker` | выкл. | `docker compose config` (с профилем observability и без), сборка образов backend и frontend без push |
+
+Повторный запуск на той же ветке отменяет предыдущий. У каждой джобы есть таймаут
+(10–20 мин). Live-тесты LLM (`-m llm`) в CI не запускаются. Секреты CI не нужны.
 
 ---
 

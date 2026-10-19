@@ -20,6 +20,9 @@ bash scripts/check_alerts.sh                   # при правке observabili
   тестом — `TRUNCATE`. Фикстуры: `pg_db` (пустая схема + `DATABASE_URL`), `db_session`,
   `api_client`, `pg_empty_db` (база без миграций — для тестов самих миграций). FK
   проверяются: строки прогона/пользователя — через `new_parse_run` / `new_user` из conftest.
+- CI — `.github/workflows/ci.yml`, только `workflow_dispatch` (ручной запуск, без
+  триггеров на push/PR — намеренно, ради минут GitHub). Новая проверка в списке выше →
+  добавить её и в workflow; тесты не должны требовать файлов вне git (`.env`, `sessions/`).
 - Виртуальное окружение — `.venv`; вызывать `.venv/Scripts/python.exe -m pip`,
   а не `.venv/Scripts/pip.exe` (последний указывает на устаревший путь).
 - Тесты офлайновые: `tests/conftest.py` подставляет `CONFIG_PATH` на конфиг с
