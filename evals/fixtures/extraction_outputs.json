@@ -81,7 +81,7 @@
   "salary-hourly-rub": {
     "is_job_post": true,
     "detected_specializations": [
-      "AQA"
+      "Automation QA"
     ],
     "salary_min": 2000,
     "salary_max": 3000,
@@ -103,7 +103,7 @@
   "qa-manual-explicit": {
     "is_job_post": true,
     "detected_specializations": [
-      "Manual QA"
+      "QA"
     ],
     "detected_grade": "junior+",
     "salary_min": 80000,
@@ -240,7 +240,7 @@
   "no-salary-stated": {
     "is_job_post": true,
     "detected_specializations": [
-      "AQA"
+      "Automation QA"
     ],
     "detected_grade": "middle",
     "salary_min": null,
@@ -362,7 +362,7 @@
   "intern-qa": {
     "is_job_post": true,
     "detected_specializations": [
-      "Manual QA"
+      "QA"
     ],
     "detected_grade": "intern",
     "salary_min": 40000,

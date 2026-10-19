@@ -13,16 +13,24 @@ REASONING_EFFORTS = ("max", "xhigh", "high", "medium", "low", "minimal", "none")
 
 
 DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
-    "QA": ["qa", "quality assurance", "тестировщик", "тестирование"],
-    "Тестировщик": ["тестировщик", "tester"],
-    "Manual QA": ["manual qa", "ручной тестировщик"],
-    "AQA": [
-        "aqa",
+    # Ручное тестирование и «тестировщик» — тот же QA; отдельных Manual QA / Тестировщик нет
+    # (миграция 036). Старые имена приводит SPECIALIZATION_ALIASES.
+    "QA": [
+        "qa",
+        "quality assurance",
+        "тестировщик",
+        "тестирование",
+        "tester",
+        "manual qa",
+        "ручной тестировщик",
+    ],
+    "Automation QA": [
         "automation qa",
+        "qa automation",
+        "aqa",
         "автотестировщик",
         "автоматизатор тестирования",
     ],
-    "Automation QA": ["automation qa engineer"],
     "SDET": ["sdet", "software development engineer in test"],
     "Python": ["python", "питон", "python developer"],
     "Java": ["java", "java developer"],
@@ -56,8 +64,8 @@ DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
         "software engineer",
         "software developer",
         "инженер-программист",
+        "программист",
     ],
-    "Программист, разработчик": ["программист, разработчик", "программист"],
     "Go": ["go", "golang", "go developer", "golang developer"],
     "Golang": ["golang", "go lang"],
     "Frontend": ["frontend", "front-end", "front end", "фронтенд", "react developer"],
@@ -68,6 +76,26 @@ DEFAULT_SPECIALIZATIONS: dict[str, list[str]] = {
     "Product Manager": ["product manager", "продакт", "продакт-менеджер", "pm"],
     "Project Manager": ["project manager", "проектный менеджер", "пм"],
 }
+
+
+# Прежние имена специализаций → каноническое (LLM, кэш extraction, config.yaml, URL фильтров).
+SPECIALIZATION_ALIASES: dict[str, str] = {
+    "Manual QA": "QA",
+    "Тестировщик": "QA",
+    "AQA": "Automation QA",
+    "Программист, разработчик": "Software Engineer",
+}
+
+
+def canonical_specializations(names: list[str]) -> list[str]:
+    """Имена через ``SPECIALIZATION_ALIASES``, без повторов, порядок сохраняется."""
+    out: list[str] = []
+    for raw in names:
+        name = raw.strip()
+        name = SPECIALIZATION_ALIASES.get(name, name)
+        if name and name not in out:
+            out.append(name)
+    return out
 
 
 DEFAULT_EXCLUDE_KEYWORDS = [
@@ -275,7 +303,7 @@ class AiConfig(BaseModel):
     )
     use_few_shot: bool = False
     prompt_version: str = Field(
-        default="extract-v8",
+        default="extract-v9",
         description=(
             "Должен совпадать с EXTRACT_PROMPT_VERSION в ai/prompts.py. "
             "Кэш всегда ключуется константой; расхождение → warning."
@@ -412,6 +440,12 @@ class FiltersConfig(BaseModel):
         default_factory=list,
         description="Значения: remote, hybrid, office, relocation, any, exclude_office",
     )
+
+    @field_validator("specializations")
+    @classmethod
+    def canonical_specs(cls, v: list[str]) -> list[str]:
+        # Старые имена (AQA, Manual QA…) из config.yaml и снимков прогонов.
+        return canonical_specializations(v)
 
 
 class ParserConfig(BaseModel):
@@ -650,7 +684,8 @@ class AppConfig(BaseModel):
 
     def merged_specializations(self) -> dict[str, list[str]]:
         merged = dict(DEFAULT_SPECIALIZATIONS)
-        for name, synonyms in self.dictionaries.specializations.items():
+        for raw_name, synonyms in self.dictionaries.specializations.items():
+            name = SPECIALIZATION_ALIASES.get(raw_name.strip(), raw_name.strip())
             merged.setdefault(name, [])
             merged[name] = list(dict.fromkeys(merged.get(name, []) + list(synonyms)))
         return merged

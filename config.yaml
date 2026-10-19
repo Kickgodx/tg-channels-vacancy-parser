@@ -129,7 +129,7 @@ filters:
     - Python
     - Java
     - QA
-    - AQA
+    - Automation QA
     - SDET
     - Go
     - Golang

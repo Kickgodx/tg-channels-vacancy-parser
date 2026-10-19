@@ -107,7 +107,7 @@ def test_primary_does_not_apply_regex_hourly_from_v_chasti():
     )
     ai = VacancyAIExtraction(
         is_job_post=True,
-        detected_specializations=["Manual QA"],
+        detected_specializations=["QA"],
         salary_min=200_000,
         salary_max=300_000,
         salary_currency="RUB",
@@ -186,7 +186,7 @@ def test_primary_small_rub_with_hourly_text_becomes_hourly():
     v = _vacancy(raw_text=text, cleaned_text=text)
     ai = VacancyAIExtraction(
         is_job_post=True,
-        detected_specializations=["Manual QA"],
+        detected_specializations=["QA"],
         salary_min=400,
         salary_max=550,
         salary_currency="RUB",

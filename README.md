@@ -556,9 +556,8 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 Грейд HH мапится из `experience.id`: `noExperience`→`intern`,
 `between1And3`→`junior`, `between3And6`→`middle`, `moreThan6`→`senior`
 (при старте/hourly cleanup — идемпотентный бэкфилл по `required_experience`).
-Роли HH (`Тестировщик`, `Программист, разработчик`) пишутся в
-`detected_specializations` как есть и дополнительно как `QA` /
-`Software Engineer` — оба варианта доступны в фильтрах UI.
+Роли HH «Тестировщик» и «Программист, разработчик» пишутся в
+`detected_specializations` сразу как `QA` / `Software Engineer`.
 На вкладке `/hh` окно sync задаётся в интерфейсе: All, 7 / 14 / 30 дней или диапазон дат.
 Кэш короткой выдачи (`hh_listings`) живёт `hh.listing_ttl_days` и не даёт
 повторно дергать detail для уже загруженных id.

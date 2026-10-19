@@ -17,11 +17,15 @@ from sqlalchemy.sql import Select
 
 from backend.db.models import VacancyRow, VacancySightingRow
 from backend.schemas import VacancyQuery
+from tg_jobs_parser.config.schema import canonical_specializations
 
 
 def _specializations_match(c, specs: list[str]) -> ColumnElement[bool]:
-    """Хотя бы одна из выбранных специализаций в JSONB-массиве вакансии (``@>`` идёт по GIN)."""
-    return or_(*[c.detected_specializations.contains([spec]) for spec in specs])
+    """Хотя бы одна из выбранных специализаций в JSONB-массиве вакансии (``@>`` идёт по GIN).
+
+    Старые имена (``AQA``, ``Manual QA`` в закладках и ссылках) приводятся к каноническим.
+    """
+    return or_(*[c.detected_specializations.contains([spec]) for spec in canonical_specializations(specs)])
 
 
 def fts_query(document, q: str):
