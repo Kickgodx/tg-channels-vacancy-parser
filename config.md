@@ -37,7 +37,7 @@
 
 | Поле | Назначение |
 |------|------------|
-| **`specializations`** | Список **имён** профилей из словаря (в т.ч. из `DEFAULT_SPECIALIZATIONS` в коде + `dictionaries.specializations`). Пост остаётся, если хотя бы одна из указанных специализаций **распознана** в тексте. Если список **пустой** — ограничения по этому фильтру нет. |
+| **`specializations`** | Список **имён** профилей из словаря (в т.ч. из `DEFAULT_SPECIALIZATIONS` в коде + `dictionaries.specializations`). Прежние имена приводятся к каноническим: `AQA` → `Automation QA`, `Manual QA` / `Тестировщик` → `QA`, `Программист, разработчик` → `Software Engineer`. Пост остаётся, если хотя бы одна из указанных специализаций **распознана** в тексте. Если список **пустой** — ограничения по этому фильтру нет. |
 | **`any_specialization`** | Любая IT-роль: список `specializations` не ограничивает пост, а LLM не отклоняет вакансию только из-за стека вне списка. |
 | **`exclude_keywords`** | Подстроки/слова в тексте: если совпало — пост **выбрасывается**. Объединяется с исключениями из словаря (см. `dictionaries.exclude_keywords`). |
 | **`countries`** / **`cities`** | Непустые списки включают фильтр по стране/городу (поля из текста или из экстракторов). **Пустой список** = «не фильтровать». Если страна/город не определены (пусто), вакансия проходит фильтр. |
@@ -183,5 +183,5 @@ Liveness RQ-воркеров (не yaml): `WORKER_HEARTBEAT_MAX_AGE_SECONDS` (п
 | **`api_base` / `host`** | Базовый URL API и query `host`. |
 | **`app_name` / `app_version`** | Часть `User-Agent` / `HH-User-Agent`. |
 | **`search.text`** | Текст поиска (дефолт — AQA/Python как в MVP hhparser). |
-| **`search.professional_role`** | Роли HH (124 = тестировщик, 96 = разработчик). Имена ролей попадают в `detected_specializations` и дублируются в `QA` / `Software Engineer`; оба набора есть в `DEFAULT_SPECIALIZATIONS` для фильтров UI. |
+| **`search.professional_role`** | Роли HH (124 = тестировщик, 96 = разработчик). Роли пишутся в `detected_specializations` сразу как `QA` / `Software Engineer`. |
 | **`search.per_page`** | Размер страницы (макс. 100). |

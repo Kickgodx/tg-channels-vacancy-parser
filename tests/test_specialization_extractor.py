@@ -22,8 +22,13 @@ def test_extract_ai_russian():
     assert "AI" in specs
 
 
-def test_extract_hh_role_names():
-    assert "Тестировщик" in extract_specializations("Ищем тестировщика", DEFAULT_SPECIALIZATIONS)
-    assert "Программист, разработчик" in extract_specializations(
-        "Вакансия: программист, удалёнка", DEFAULT_SPECIALIZATIONS
-    )
+def test_qa_synonyms_collapse_into_canonical_roles():
+    # Тестировщик / Manual QA — это QA, AQA — Automation QA, роль HH «Программист, разработчик» —
+    # Software Engineer; отдельных тегов нет.
+    for old in ("Тестировщик", "Manual QA", "AQA", "Программист, разработчик"):
+        assert old not in DEFAULT_SPECIALIZATIONS
+    assert extract_specializations("Ищем тестировщика", DEFAULT_SPECIALIZATIONS) == ["QA"]
+    assert extract_specializations("Нужен Manual QA в команду", DEFAULT_SPECIALIZATIONS) == ["QA"]
+    assert extract_specializations("Ищем AQA на проект", DEFAULT_SPECIALIZATIONS) == ["Automation QA"]
+    assert "Software Engineer" in extract_specializations("Программист, разработчик; удалёнка", DEFAULT_SPECIALIZATIONS)
+    assert extract_specializations("Вакансия: программист, удалёнка", DEFAULT_SPECIALIZATIONS) == ["Software Engineer"]

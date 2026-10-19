@@ -8,6 +8,7 @@ import re
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from tg_jobs_parser.config.schema import canonical_specializations
 from tg_jobs_parser.hh.grades import grade_from_experience
 from tg_jobs_parser.hh.models import (
     Contacts,
@@ -131,23 +132,11 @@ def _contact_from(contacts: Contacts | None) -> str | None:
     return "; ".join(parts) if parts else None
 
 
-# HH professional_role name → доп. каноническая специализация для фильтров UI.
-_HH_ROLE_ALIASES: dict[str, str] = {
-    "Тестировщик": "QA",
-    "Программист, разработчик": "Software Engineer",
-}
-
-
 def _specializations(detail: VacancyDetail | VacancyShort) -> list[str]:
-    names: list[str] = []
-    for role in detail.professional_roles or []:
-        if role.name and role.name not in names:
-            names.append(role.name)
-        alias = _HH_ROLE_ALIASES.get(role.name or "")
-        if alias and alias not in names:
-            names.append(alias)
+    # Роль HH сразу каноническая: «Тестировщик» → QA, «Программист, разработчик» →
+    # Software Engineer (SPECIALIZATION_ALIASES); прочие роли — как есть.
     # Без ролей — пусто: выдуманные специализации пускали бы вакансию под чужие фильтры.
-    return names
+    return canonical_specializations([role.name for role in detail.professional_roles or [] if role.name])
 
 
 def detail_to_vacancy(

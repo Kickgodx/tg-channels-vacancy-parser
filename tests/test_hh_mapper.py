@@ -79,8 +79,7 @@ def test_detail_to_vacancy_fields():
     assert v.extraction_source == "hh_api"
     assert v.post_url == "https://hh.ru/vacancy/42"
     assert "pytest" in v.cleaned_text.lower() or "AQA" in v.cleaned_text
-    assert "Тестировщик" in v.detected_specializations
-    assert "QA" in v.detected_specializations
+    assert v.detected_specializations == ["QA"]
     assert v.detected_grade == "junior"
     assert v.required_experience == "1–3 года"
 
@@ -132,8 +131,7 @@ def test_detail_to_vacancy_developer_role_dual_tag():
         }
     )
     v = detail_to_vacancy(detail)
-    assert "Программист, разработчик" in v.detected_specializations
-    assert "Software Engineer" in v.detected_specializations
+    assert v.detected_specializations == ["Software Engineer"]
 
 
 def test_short_to_vacancy_duplicate_flags():

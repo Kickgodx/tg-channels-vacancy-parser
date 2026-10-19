@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from tg_jobs_parser.config.schema import canonical_specializations
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS, normalize_grade
 
 _VALID_GRADES = frozenset(GRADE_OPTIONS)
@@ -108,6 +109,12 @@ class VacancyAIExtraction(BaseModel):
     @classmethod
     def norm_str_list_fields(cls, v: object) -> list[str]:
         return _coerce_str_list(v)
+
+    @field_validator("detected_specializations")
+    @classmethod
+    def norm_specializations(cls, v: list[str]) -> list[str]:
+        # AQA / Manual QA от модели и в кэше extraction до extract-v9.
+        return canonical_specializations(v)
 
     @field_validator("detected_grade", mode="before")
     @classmethod

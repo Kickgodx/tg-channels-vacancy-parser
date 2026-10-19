@@ -17,16 +17,17 @@ from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 
 # Источник истины для ключа кэша extraction. Меняете промпт → bump.
-EXTRACT_PROMPT_VERSION = "extract-v8"
+EXTRACT_PROMPT_VERSION = "extract-v9"
 
 _SPECIALIZATION_RULES = """
 - detected_specializations — ONLY the job role(s) this post is hiring for (usually ONE primary role).
 - Read the TITLE / first lines first: "Go разработчик", "Senior Backend", "QA Engineer" define the role.
 - Do NOT tag extra roles from skills, tools, or infra mentioned in requirements:
-  • "тестирование", "unit tests", "качество кода" in a developer post → NOT QA / Manual QA / AQA / SDET.
+  • "тестирование", "unit tests", "качество кода" in a developer post → NOT QA / Automation QA / SDET.
   • Kubernetes, Docker, CI/CD, client-go, SRE practices in a developer post → NOT DevOps unless the title is DevOps/SRE.
   • "аналитик", "архитектура", "бизнес" in prose without hiring an analyst → NOT System Analyst / Business Analyst / Analyst.
 - Channel footers ("база знаний", "другие вакансии в канале", @mentions) are NOT part of the vacancy — ignore for role.
+- QA roles: manual testing, «тестировщик», Manual QA → "QA"; test automation, AQA, «автотестировщик» → "Automation QA".
 - One clear developer vacancy → list that developer role only (e.g. ["Go"]), not QA + analyst + DevOps.
 - Prefer one canonical name from ALLOWED_SPECIALIZATIONS (e.g. "Go" OR "Golang", not both unless two roles are hired).
 - You MAY add a new role name only if clearly stated in the vacancy (e.g. Rust) even if not in ALLOWED list."""
