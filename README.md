@@ -228,7 +228,8 @@ PostgreSQL, Kafka…) — **технологии** вакансии (`technologi
 переносятся в технологии детерминированно (`split_specializations` в
 `tg_jobs_parser/config/schema.py`); «Python Developer» без другой роли получает роль
 `Software Engineer`. Имена технологий канонические: `Golang` → `Go`,
-`Apache Kafka` → `Kafka`, регистр — по словарю.
+`Apache Kafka` → `Kafka`, регистр — по словарю; все варианты 1С (`1С:Предприятие 8.3`,
+`1C:ERP`, `1С КА`) — одна технология `1С` (миграция 038 привела и сохранённые вакансии).
 
 Фильтр «Технологии» (`?technology=Python&technology=Go`) — любая из выбранных;
 вместе со специализациями — через **И**: «Automation QA» + «Python» — только AQA
