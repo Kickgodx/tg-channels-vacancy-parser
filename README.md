@@ -554,7 +554,7 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 как в MVP hhparser, TTL вакансий — общий `retention.vacancy_ttl_days`
 (soft-archive: строки остаются в БД для исторических метрик).
 Грейд HH мапится из `experience.id`: `noExperience`→`intern`,
-`between1And3`→`junior`, `between3And6`→`middle`, `moreThan6`→`senior+`
+`between1And3`→`junior`, `between3And6`→`middle`, `moreThan6`→`senior`
 (при старте/hourly cleanup — идемпотентный бэкфилл по `required_experience`).
 Роли HH (`Тестировщик`, `Программист, разработчик`) пишутся в
 `detected_specializations` как есть и дополнительно как `QA` /

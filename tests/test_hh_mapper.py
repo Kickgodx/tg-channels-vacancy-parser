@@ -18,7 +18,7 @@ def test_grade_from_experience_ids():
     assert grade_from_experience(IdName(id="noExperience", name="Нет опыта")) == "intern"
     assert grade_from_experience(IdName(id="between1And3", name="От 1 года до 3 лет")) == "junior"
     assert grade_from_experience(IdName(id="between3And6", name="От 3 до 6 лет")) == "middle"
-    assert grade_from_experience(IdName(id="moreThan6", name="Более 6 лет")) == "senior+"
+    assert grade_from_experience(IdName(id="moreThan6", name="Более 6 лет")) == "senior"
     assert grade_from_experience(None) == "unknown"
     assert grade_from_experience(IdName(id="weird")) == "unknown"
 
@@ -27,7 +27,7 @@ def test_grade_from_experience_name_backfill():
     assert grade_from_experience_name("Нет опыта") == "intern"
     assert grade_from_experience_name("От 1 года до 3 лет") == "junior"
     assert grade_from_experience_name("От 3 до 6 лет") == "middle"
-    assert grade_from_experience_name("Более 6 лет") == "senior+"
+    assert grade_from_experience_name("Более 6 лет") == "senior"
     assert grade_from_experience_name("1–3 года") == "junior"
     assert grade_from_experience_name(None) == "unknown"
     assert grade_from_experience_name("что-то ещё") == "unknown"
@@ -90,7 +90,7 @@ def test_detail_to_vacancy_all_experience_grades():
         ("noExperience", "Нет опыта", "intern"),
         ("between1And3", "От 1 года до 3 лет", "junior"),
         ("between3And6", "От 3 до 6 лет", "middle"),
-        ("moreThan6", "Более 6 лет", "senior+"),
+        ("moreThan6", "Более 6 лет", "senior"),
     )
     for exp_id, exp_name, grade in cases:
         detail = VacancyDetail.model_validate(
@@ -117,7 +117,7 @@ def test_short_to_vacancy_experience_grade():
             "experience": {"id": "moreThan6", "name": "Более 6 лет"},
         }
     )
-    assert short_to_vacancy(short).detected_grade == "senior+"
+    assert short_to_vacancy(short).detected_grade == "senior"
 
 
 def test_detail_to_vacancy_developer_role_dual_tag():

@@ -17,7 +17,7 @@ from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 
 # Источник истины для ключа кэша extraction. Меняете промпт → bump.
-EXTRACT_PROMPT_VERSION = "extract-v7"
+EXTRACT_PROMPT_VERSION = "extract-v8"
 
 _SPECIALIZATION_RULES = """
 - detected_specializations — ONLY the job role(s) this post is hiring for (usually ONE primary role).
@@ -63,7 +63,7 @@ Rules:
   • no experience required («без опыта», «опыт не требуется», "no experience") or less than 1 year → intern;
   • 1 to <3 years («от 1 года», «1–3 года», «2+ years») → junior;
   • 3 to <6 years («от 3 лет», «3–5 лет», "4+ years") → middle;
-  • 6+ years («от 6 лет», «более 6 лет», "7+ years") → senior+.
+  • 6+ years («от 6 лет», «более 6 лет», "7+ years") → senior.
   Count only years required from the candidate — not company age, project length, or team history.
   Neither a grade word nor required experience in the text → unknown.
 - salary_min/max MUST be MONTHLY amounts (except hourly — see below). Never store annual

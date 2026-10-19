@@ -40,8 +40,8 @@
 {"id": "grade-exp-2y-en-junior", "tags": ["grade", "experience"], "text": "QA Engineer, remote. Requirements: 2+ years of experience in manual testing.", "expected": {"is_job_post": true, "detected_grade": "junior"}}
 {"id": "grade-exp-3y-middle", "tags": ["grade", "experience"], "text": "Go-разработчик в финтех. Опыт от 3 лет, gRPC, Kafka. 250–300к ₽, гибрид.", "expected": {"is_job_post": true, "detected_grade": "middle"}}
 {"id": "grade-exp-3-5y-middle", "tags": ["grade", "experience"], "text": "Frontend (React). Требуемый опыт: 3–5 лет. Удалёнка.", "expected": {"is_job_post": true, "detected_grade": "middle"}}
-{"id": "grade-exp-6y-senior-plus", "tags": ["grade", "experience"], "text": "Java backend. Опыт разработки от 6 лет, Spring, микросервисы. 400к+.", "expected": {"is_job_post": true, "detected_grade": "senior+"}}
-{"id": "grade-exp-7y-en-senior-plus", "tags": ["grade", "experience"], "text": "DevOps engineer. 7+ years of hands-on experience with Kubernetes and AWS. Remote EU.", "expected": {"is_job_post": true, "detected_grade": "senior+"}}
+{"id": "grade-exp-6y-senior", "tags": ["grade", "experience"], "text": "Java backend. Опыт разработки от 6 лет, Spring, микросервисы. 400к+.", "expected": {"is_job_post": true, "detected_grade": "senior"}}
+{"id": "grade-exp-7y-en-senior", "tags": ["grade", "experience"], "text": "DevOps engineer. 7+ years of hands-on experience with Kubernetes and AWS. Remote EU.", "expected": {"is_job_post": true, "detected_grade": "senior"}}
 {"id": "grade-exp-company-age-unknown", "tags": ["grade", "experience"], "text": "Ищем Python разработчика. Компания 10 лет на рынке, проект длится 2 года. Django, удалёнка.", "expected": {"is_job_post": true, "detected_grade": "unknown"}}
 {"id": "grade-title-beats-exp", "tags": ["grade", "experience"], "text": "Senior Python Developer. Опыт от 2 лет. Удалённо.", "expected": {"is_job_post": true, "detected_grade": "senior"}}
 {"id": "grade-title-beats-exp-higher", "tags": ["grade", "experience"], "text": "Middle QA. Опыт от 6 лет приветствуется. Удалённо.", "expected": {"is_job_post": true, "detected_grade": "middle"}}

@@ -18,7 +18,7 @@ def test_backfill_hh_grades_from_experience_name(db_session):
             ("1", "Нет опыта", "intern"),
             ("2", "От 1 года до 3 лет", "junior"),
             ("3", "От 3 до 6 лет", "middle"),
-            ("4", "Более 6 лет", "senior+"),
+            ("4", "Более 6 лет", "senior"),
             ("5", "непонятно", "unknown"),
             ("6", None, "unknown"),
         )
@@ -64,7 +64,7 @@ def test_backfill_hh_grades_from_experience_name(db_session):
         assert rows[hh_source_post_key("1")] == "intern"
         assert rows[hh_source_post_key("2")] == "junior"
         assert rows[hh_source_post_key("3")] == "middle"
-        assert rows[hh_source_post_key("4")] == "senior+"
+        assert rows[hh_source_post_key("4")] == "senior"
         assert rows[hh_source_post_key("5")] == "unknown"
         assert rows[hh_source_post_key("6")] == "unknown"
         assert rows["ch-1"] == "unknown"
