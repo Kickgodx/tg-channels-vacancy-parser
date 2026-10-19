@@ -277,6 +277,35 @@ button:disabled {
   }
 }
 
+.bar-tooltip {
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.bar-tooltip-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.bar-tooltip-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.bar-tooltip .muted {
+  font-size: 0.78rem;
+}
+
 .chart-card h4 {
   margin: 0 0 0.5rem;
   font-size: 0.95rem;
