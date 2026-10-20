@@ -384,7 +384,7 @@ services:
     user: root
     command: -config.file=/etc/tempo/tempo.yaml
     ports:
-      - "${INFRA_BIND_ADDR:-127.0.0.1}:3200:3200"
+      - "${INFRA_BIND_ADDR:-127.0.0.1}:13200:3200"
     volumes:
       - ./observability/tempo-config.yml:/etc/tempo/tempo.yaml:ro
       - tempo_data:/var/tempo

@@ -34,7 +34,7 @@ docker compose up --build
 | **Grafana** | http://localhost:3000 (login: `admin` / `GRAFANA_ADMIN_PASSWORD` из `.env`) |
 | **Loki** | http://localhost:3100 (API; логи смотрятся в Grafana → Explore) |
 | **Alloy** | http://localhost:12345 (UI пайплайна сбора логов и трасс) |
-| **Tempo** | http://localhost:3200 (API; трассы смотрятся в Grafana → Explore → Tempo) |
+| **Tempo** | http://localhost:13200 → контейнер `:3200` (API; трассы смотрятся в Grafana → Explore → Tempo) |
 | **PostgreSQL** | `127.0.0.1:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
 | **Redis** | `127.0.0.1:16379` → контейнер `:6379` (очереди RQ: parse + LLM) |
 
