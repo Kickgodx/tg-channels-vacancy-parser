@@ -235,7 +235,7 @@ function MomentumTable({ title, rows }: { title: string; rows: TechnologyMomentu
               <td>
                 {(m.previous_share * 100).toFixed(1)}% <span className="muted">({m.previous})</span>
               </td>
-              <td>
+              <td className={m.delta_pp > 0 ? "delta-up" : "delta-down"}>
                 <strong>
                   {m.delta_pp > 0 ? "▲" : "▼"} {fmtSigned(m.delta_pp, 1)} п.п.
                 </strong>

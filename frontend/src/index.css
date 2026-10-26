@@ -950,3 +950,12 @@ tr.clickable:hover {
   font-variant-numeric: tabular-nums;
   color: #52514e;
 }
+
+/* «Растут и падают»: изменение доли — зелёным рост, красным падение (стрелка дублирует цвет). */
+.delta-up {
+  color: #2b8a3e;
+}
+
+.delta-down {
+  color: #c92a2a;
+}
