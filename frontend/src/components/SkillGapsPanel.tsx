@@ -124,11 +124,7 @@ export default function SkillGapsPanel({ resumeId }: Props) {
       )}
       {openError && <p className="error">{openError}</p>}
       {opened && (
-        <VacancyModal
-          vacancy={opened}
-          resumeId={resumeId}
-          onClose={() => setOpened(null)}
-        />
+        <VacancyModal vacancy={opened} resumeId={resumeId} onClose={() => setOpened(null)} />
       )}
     </div>
   );
