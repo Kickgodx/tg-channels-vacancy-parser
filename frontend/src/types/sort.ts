@@ -6,7 +6,8 @@ export type VacancySortField =
   | "detected_grade"
   | "salary_currency"
   | "vacancy_score"
-  | "match_score";
+  | "match_score"
+  | "resume_fit";
 
 export type VacancySortOrder = "asc" | "desc";
 
@@ -19,6 +20,8 @@ export const SORTABLE_COLUMNS: VacancySortField[] = [
   "detected_grade",
   "vacancy_score",
   "match_score",
+  // Не колонка таблицы: «Подбор под резюме» — близость эмбеддингов вакансии и резюме.
+  "resume_fit",
 ];
 
 /** Вторая ступень сортировки (`then_by`): только пара «дата ↔ зарплата ₽» — под неё есть индексы. */

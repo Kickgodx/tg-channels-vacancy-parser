@@ -243,6 +243,12 @@ class OpenRouterClient:
         )
 
     def _create_completion(self, kwargs: dict[str, Any]) -> Any:
+        return self._request(
+            lambda: self._get_sdk().chat.completions.create(**kwargs), model=str(kwargs.get("model") or "")
+        )
+
+    def _request(self, send: Any, *, model: str) -> Any:
+        """Один запрос к API через RPM-лимит, с повторами при 429 и транзиентных сбоях."""
         if self._rate_limiter.llm_disabled:
             raise LlmQuotaExhausted(self._rate_limiter.llm_disabled_reason or "LLM отключён")
 
@@ -251,12 +257,11 @@ class OpenRouterClient:
         rate_limit_retries = 0
         transient_retries = 0
         gate_wait = 0.0
-        model = str(kwargs.get("model") or "")
         try:
             while True:
                 try:
                     gate_wait += self._acquire_slot()
-                    return self._get_sdk().chat.completions.create(**kwargs)
+                    return send()
                 except LlmQuotaExhausted:
                     raise
                 except Exception as e:
@@ -437,6 +442,48 @@ class OpenRouterClient:
             output_per_million=rates[1],
         )
         return total
+
+    def embed(self, texts: list[str], *, model: str, dimensions: int) -> tuple[list[list[float]], LLMUsage]:
+        """Эмбеддинги текстов одним запросом (OpenRouter /embeddings, формат OpenAI).
+
+        Порядок векторов — как у ``texts``. Вектор другой длины, чем ``dimensions`` — ошибка:
+        колонка ``vector(N)`` фиксированной размерности.
+        """
+        if not texts:
+            return [], LLMUsage(model=model)
+        with _TRACER.start_as_current_span(
+            f"embeddings {model}",
+            kind=SpanKind.CLIENT,
+            attributes={
+                "gen_ai.operation.name": "embeddings",
+                "gen_ai.system": "openrouter",
+                "gen_ai.request.model": model,
+                "llm.task": "embed",
+                "llm.batch_size": len(texts),
+            },
+        ) as span:
+            start = time.perf_counter()
+            outcome = "error"
+            try:
+                response = self._request(
+                    lambda: self._get_sdk().embeddings.create(model=model, input=texts, dimensions=dimensions),
+                    model=model,
+                )
+                data = sorted(response.data or [], key=lambda d: d.index)
+                if len(data) != len(texts):
+                    raise RuntimeError(f"OpenRouter embeddings: {len(data)} векторов на {len(texts)} текстов")
+                vectors = [list(d.embedding) for d in data]
+                bad = next((len(v) for v in vectors if len(v) != dimensions), None)
+                if bad is not None:
+                    raise RuntimeError(f"OpenRouter embeddings: размерность {bad}, ожидалась {dimensions}")
+                prompt_tokens = int(getattr(response.usage, "prompt_tokens", None) or 0)
+                usage = LLMUsage(prompt_tokens=prompt_tokens, model=model)
+                span.set_attribute("gen_ai.usage.input_tokens", prompt_tokens)
+                record_tokens(model=model, prompt_tokens=prompt_tokens, completion_tokens=0)
+                outcome = "success"
+                return vectors, usage
+            finally:
+                record_request(model=model, outcome=outcome, duration_seconds=time.perf_counter() - start)
 
     def extract(
         self,

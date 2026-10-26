@@ -896,3 +896,57 @@ tr.clickable:hover {
   text-decoration: line-through;
   text-decoration-color: #ced4da;
 }
+
+.resume-fit-bar {
+  align-items: center;
+}
+
+.similar-vacancies {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: #f8f9fa;
+  border-left: 3px solid #1baf7a;
+  font-size: 0.9rem;
+}
+
+.similar-vacancies ul {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+}
+
+.similar-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 0.75rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.similar-item:hover {
+  background: #eef1f4;
+}
+
+.similar-title {
+  font-weight: 500;
+}
+
+.similar-item .muted {
+  grid-column: 1;
+  font-size: 0.8rem;
+}
+
+.similar-score {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-variant-numeric: tabular-nums;
+  color: #52514e;
+}

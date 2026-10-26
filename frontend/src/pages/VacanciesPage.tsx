@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { api, retryIfRetryable, type VacancyQueryParams } from "../api/client";
 import AnalyticsPanel from "../components/AnalyticsPanel";
 import MetricsCharts from "../components/MetricsCharts";
+import ResumeFitBar from "../components/ResumeFitBar";
 import ResumePanel from "../components/ResumePanel";
 import VacancyTable from "../components/VacancyTable";
 import type { SavedFilter, SavedFilterParams } from "../types/api";
@@ -20,6 +21,7 @@ const MAX_LIST_DEPTH = 10_000;
 const TOP_TECHNOLOGY_CHIPS = 30;
 
 type VacanciesTab = "list" | "analytics";
+type SearchMode = "text" | "semantic";
 
 function vacancyFilterParams(
   q: string,
@@ -31,9 +33,11 @@ function vacancyFilterParams(
   dateFrom: string,
   dateTo: string,
   hasSalaryOnly: boolean,
+  searchMode: SearchMode,
 ): VacancyQueryParams {
   const params: VacancyQueryParams = {};
   if (q) params.q = q;
+  if (q && searchMode === "semantic") params.search_mode = "semantic";
   if (sourceChannel) params.source_channel = sourceChannel.replace(/^@/, "");
   if (grade) params.grade = grade;
   if (specializations.length > 0) params.specialization = specializations;
@@ -81,6 +85,7 @@ export default function VacanciesPage() {
   const rawPage = Number(searchParams.get("page"));
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
   const q = searchParams.get("q") ?? "";
+  const searchMode: SearchMode = searchParams.get("search_mode") === "semantic" ? "semantic" : "text";
   const sourceChannel = searchParams.get("source_channel") ?? "";
   const grade = searchParams.get("grade") ?? "";
   const specializations = useMemo(() => searchParams.getAll("specialization"), [searchParams]);
@@ -149,9 +154,17 @@ export default function VacanciesPage() {
         dateFrom,
         dateTo,
         hasSalaryOnly,
+        searchMode,
       ),
-    [q, sourceChannel, grade, specializations, technologies, workFormat, dateFrom, dateTo, hasSalaryOnly],
+    [q, sourceChannel, grade, specializations, technologies, workFormat, dateFrom, dateTo, hasSalaryOnly, searchMode],
   );
+
+  const semanticStatusQ = useQuery({
+    queryKey: ["semantic-status"],
+    queryFn: () => api.getSemanticStatus(),
+    enabled: searchMode === "semantic" || sortBy === "resume_fit",
+    staleTime: 60_000,
+  });
 
   // Варианты технологий — под остальными фильтрами, без собственного выбора (его backend игнорирует).
   const facetParams = useMemo(() => {
@@ -228,6 +241,7 @@ export default function VacanciesPage() {
     date_from: dateFrom || null,
     date_to: dateTo || null,
     has_salary: hasSalaryOnly || null,
+    search_mode: searchMode,
     sort_by: sortBy,
     sort_order: sortOrder,
     then_by: thenBy,
@@ -250,6 +264,7 @@ export default function VacanciesPage() {
       date_from: p.date_from ?? null,
       date_to: p.date_to ?? null,
       has_salary: p.has_salary ? "true" : null,
+      search_mode: p.search_mode === "semantic" ? "semantic" : null,
       sort_by: presetSortBy,
       sort_order: p.sort_order === "asc" || p.sort_order === "desc" ? p.sort_order : null,
       then_by: presetThenBy,
@@ -359,14 +374,40 @@ export default function VacanciesPage() {
           })
         }
       />
+      {resumeId != null && (
+        <ResumeFitBar
+          resumeId={resumeId}
+          active={sortBy === "resume_fit"}
+          items={data?.items ?? []}
+          onToggle={(on) =>
+            updateParams({ sort_by: on ? "resume_fit" : "match_score", sort_order: null, then_by: null, then_order: null })
+          }
+        />
+      )}
+      {(searchMode === "semantic" || sortBy === "resume_fit") &&
+        semanticStatusQ.data &&
+        semanticStatusQ.data.embedded < semanticStatusQ.data.vacancies && (
+          <p className="caption">
+            Смысловой индекс: {semanticStatusQ.data.embedded} из {semanticStatusQ.data.vacancies} вакансий —
+            остальные проиндексируются в фоне в течение нескольких минут.
+          </p>
+        )}
 
       <div className="filters-panel">
         <input
           type="search"
-          placeholder="Поиск по тексту…"
+          placeholder={searchMode === "semantic" ? "Опишите, что ищете…" : "Поиск по тексту…"}
           value={qInput}
           onChange={(e) => setQInput(e.target.value)}
         />
+        <select
+          value={searchMode}
+          onChange={(e) => updateParams({ search_mode: e.target.value === "semantic" ? "semantic" : null })}
+          title="По словам — полнотекстовый поиск; по смыслу — ближайшие по эмбеддингу вакансии (до 300), даже без общих слов"
+        >
+          <option value="text">По словам</option>
+          <option value="semantic">По смыслу</option>
+        </select>
         <input
           placeholder="Канал (@name)"
           value={sourceChannel}
@@ -471,7 +512,7 @@ export default function VacanciesPage() {
               .downloadExport(
                 api.exportVacanciesPath({
                   ...filterParams,
-                  ...(sortBy !== "match_score" ? sortParams : {}),
+                  ...(sortBy !== "match_score" && sortBy !== "resume_fit" ? sortParams : {}),
                 }),
                 "vacancies.xlsx",
               )
@@ -569,6 +610,13 @@ export default function VacanciesPage() {
             <>
               <p>
                 Всего: <strong>{data.total}</strong> (стр. {data.page} / {totalPages})
+                {q && searchMode === "semantic" && (
+                  <span className="caption">
+                    {" "}
+                    — до 300 самых близких по смыслу
+                    {sortBy === "post_date" && !thenBy ? ", ближайшие первыми" : ""}
+                  </span>
+                )}
               </p>
               {pagesByTotal > maxPages && (
                 <p className="caption">

@@ -30,8 +30,11 @@ from backend.errors import (
     http_error,
 )
 from backend.schemas import (
+    EmbeddingStatus,
     LlmJobAccepted,
     MarketSalaryOut,
+    SimilarVacanciesResponse,
+    SimilarVacancy,
     TechnologyCount,
     TechnologyFacetResponse,
     VacancyFlags,
@@ -251,10 +254,13 @@ def list_vacancies(
     check_list_depth(page, page_size)
     check_sort_needs_resume(sort_by, resume_id)
     check_sort_pair(sort_by, then_by)
+    resume_vector = None
     if resume_id is not None:
         resume = repo.get_resume(db, resume_id)
         if resume is None or resume.user_id != user.id:
             raise HTTPException(status_code=404, detail="Resume not found")
+        if sort_by == "resume_fit":
+            resume_vector = _resume_vector(db, resume)
     query = filters.model_copy(
         update={
             "page": page,
@@ -264,11 +270,21 @@ def list_vacancies(
             "then_by": then_by,
             "then_order": then_order,
             "resume_id": resume_id,
+            "resume_vector": resume_vector,
         }
     )
     match_ai = current_ai_config() if resume_id is not None else None
     items, total = repo.list_vacancies(db, query, match_ai=match_ai)
     return VacancyListResponse(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/semantic-status", response_model=EmbeddingStatus)
+def semantic_status(db: Session = Depends(get_db)) -> EmbeddingStatus:
+    """Покрытие эмбеддингами: сколько уникальных вакансий уже проиндексировано текущей моделью."""
+    from backend.services.embedding_service import coverage
+
+    c = coverage(db)
+    return EmbeddingStatus(enabled=c.enabled, model=c.model, vacancies=c.vacancies, embedded=c.embedded)
 
 
 @router.get("/{vacancy_id}", response_model=Vacancy)
@@ -296,3 +312,47 @@ def get_vacancy_flags(vacancy_id: str, db: Session = Depends(get_db)) -> Vacancy
     if row is None:
         raise HTTPException(status_code=404, detail="Vacancy not found")
     return vacancy_flags(db, row)
+
+
+def _resume_vector(db: Session, resume) -> list[float]:
+    from backend.errors import CODE_UPSTREAM_UNAVAILABLE, http_error
+    from backend.services.embedding_service import EmbeddingsUnavailable, resume_embedding
+
+    try:
+        return resume_embedding(db, resume)
+    except EmbeddingsUnavailable as e:
+        raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, f"Подбор под резюме недоступен: {e}", retryable=True) from e
+
+
+@router.get("/{vacancy_id}/similar", response_model=SimilarVacanciesResponse)
+def similar(
+    vacancy_id: str,
+    limit: int = Query(default=8, ge=1, le=30),
+    db: Session = Depends(get_db),
+) -> SimilarVacanciesResponse:
+    """Похожие активные вакансии по эмбеддингу (без самой вакансии и почти того же текста)."""
+    from backend.db.models import VacancyRow
+    from backend.db.vacancy_mapper import row_to_list_item, vacancy_preview_expr
+    from backend.db.vacancy_repository import _list_columns
+    from backend.services.embedding_service import similar_vacancies
+
+    row = repo.get_vacancy_row(db, vacancy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+    found = similar_vacancies(db, row, limit=limit)
+    if found is None:
+        return SimilarVacanciesResponse(pending=True)
+    if not found:
+        return SimilarVacanciesResponse()
+    ids = [vid for vid, _ in found]
+    rows = {
+        r.id: r
+        for r in db.execute(select(*_list_columns(), vacancy_preview_expr()).where(VacancyRow.id.in_(ids))).all()
+    }
+    return SimilarVacanciesResponse(
+        items=[
+            SimilarVacancy(vacancy=row_to_list_item(rows[vid], rows[vid].preview or ""), similarity=1.0 - dist)
+            for vid, dist in found
+            if vid in rows
+        ]
+    )

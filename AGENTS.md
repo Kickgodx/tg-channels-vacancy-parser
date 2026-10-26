@@ -13,9 +13,9 @@ bash scripts/check_alerts.sh                   # при правке observabili
 ```
 
 - Тесты идут на Postgres 16, как прод. По умолчанию `tests/conftest.py` сам поднимает
-  `postgres:16-alpine` через testcontainers (нужен запущенный Docker Desktop, `docker
-  compose up` не нужен). Альтернатива — `TEST_DATABASE_URL` на готовый сервер с правом
-  CREATEDB (например, compose-Postgres): тесты создают там свои базы `tgjobs_test_*` и
+  образ `docker/postgres` (`postgres:16-alpine` + pgvector) через testcontainers — нет
+  образа, собирает его (нужен запущенный Docker Desktop, `docker compose up` не нужен). Альтернатива — `TEST_DATABASE_URL` на готовый сервер с правом
+  CREATEDB и расширением vector (например, compose-Postgres; миграция 042 делает `CREATE EXTENSION`): тесты создают там свои базы `tgjobs_test_*` и
   удаляют их после прогона. Каждый xdist-воркер получает свою базу с миграциями, перед
   тестом — `TRUNCATE`. Фикстуры: `pg_db` (пустая схема + `DATABASE_URL`), `db_session`,
   `api_client`, `pg_empty_db` (база без миграций — для тестов самих миграций). FK

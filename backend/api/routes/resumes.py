@@ -16,6 +16,7 @@ from backend.schemas import (
     CoverLetterOut,
     CoverLetterRequest,
     LlmJobAccepted,
+    MatchBatchRequest,
     ResumeCreate,
     ResumeFileTextOut,
     ResumeListResponse,
@@ -28,6 +29,7 @@ from backend.schemas import (
 from backend.services.llm_job_service import (
     KIND_COVER_LETTER,
     KIND_MATCH,
+    KIND_MATCH_BATCH,
     KIND_RESUME_TAILOR,
     LlmDailyQuotaError,
     LlmJobUserLimitError,
@@ -415,3 +417,32 @@ def delete_resume_tailoring(
     _get_own_resume(db, resume_id, user)
     if not repo.delete_resume_tailoring(db, resume_id=resume_id, vacancy_id=vacancy_id):
         raise HTTPException(status_code=404, detail="Resume tailoring not found")
+
+
+@resumes_router.post("/{resume_id}/match-batch", status_code=202, response_model=LlmJobAccepted)
+def match_batch(
+    resume_id: int,
+    body: MatchBatchRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """LLM-оценка резюме по нескольким вакансиям (до 20) одной фоновой задачей.
+
+    Свежие оценки не пересчитываются; квота — за каждую оценённую вакансию (в воркере).
+    """
+    from backend.services.match_batch_service import job_params
+
+    _get_own_resume(db, resume_id, user)
+    vacancy_ids = list(dict.fromkeys(body.vacancy_ids))
+    try:
+        result = llm_job_runner.enqueue(
+            user_id=user.id,
+            kind=KIND_MATCH_BATCH,
+            resume_id=resume_id,
+            params=job_params(resume_id, vacancy_ids),
+        )
+    except LlmJobUserLimitError as e:
+        from backend.errors import CODE_RATE_LIMITED, http_error
+
+        raise http_error(429, CODE_RATE_LIMITED, str(e), retryable=True) from e
+    return LlmJobAccepted(job_id=result.job_id, status="queued")
