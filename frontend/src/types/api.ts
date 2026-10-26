@@ -638,3 +638,55 @@ export interface MarketSalary {
   percentile: number | null;
   window_days: number;
 }
+
+export interface NamedCount {
+  name: string;
+  count: number;
+}
+
+export interface CompanyProfileVacancy {
+  id: string;
+  post_date: string | null;
+  specializations: string[];
+  grade: string;
+  salary_rub: number | null;
+  archived: boolean;
+  source_channel: string;
+}
+
+/** Профиль компании (GET /companies/profile?name=). */
+export interface CompanyProfile {
+  key: string;
+  name: string;
+  variants: string[];
+  vacancies: number;
+  active: number;
+  first_post: string | null;
+  last_post: string | null;
+  with_salary: number;
+  salary_p25: number | null;
+  salary_median: number | null;
+  salary_p75: number | null;
+  roles: NamedCount[];
+  technologies: NamedCount[];
+  grades: NamedCount[];
+  channels: NamedCount[];
+  telegram_posts: number;
+  telegram_post_days: number;
+  recent: CompanyProfileVacancy[];
+}
+
+export type VacancyFlagCode = "reposted" | "long_open" | "frequent_role" | "no_salary";
+
+export interface VacancyFlag {
+  code: VacancyFlagCode;
+  severity: "warning" | "info";
+  message: string;
+  value: number | null;
+}
+
+export interface VacancyFlags {
+  vacancy_id: string;
+  company_key: string | null;
+  flags: VacancyFlag[];
+}

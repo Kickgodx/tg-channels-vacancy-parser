@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { api, getToken, retryIfRetryable } from "./api/client";
+import CompanyPage from "./pages/CompanyPage";
 import DashboardPage from "./pages/DashboardPage";
 import HhPage from "./pages/HhPage";
 import ImportPage from "./pages/ImportPage";
@@ -112,6 +113,14 @@ export default function App() {
           element={
             <RequireAuth>
               <VacanciesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/company"
+          element={
+            <RequireAuth>
+              <CompanyPage />
             </RequireAuth>
           }
         />

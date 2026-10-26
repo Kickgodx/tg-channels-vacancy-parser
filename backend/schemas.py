@@ -320,6 +320,58 @@ class CompanyAnalytics(BaseModel):
     items: list[CompanyStats] = Field(default_factory=list)
 
 
+class NamedCount(BaseModel):
+    name: str
+    count: int
+
+
+class CompanyProfileVacancy(BaseModel):
+    id: str
+    post_date: datetime | None = None
+    specializations: list[str] = Field(default_factory=list)
+    grade: str = "unknown"
+    salary_rub: float | None = None
+    archived: bool = False
+    source_channel: str
+
+
+class CompanyProfile(BaseModel):
+    """Профиль компании по нормализованному названию (``company_key``)."""
+
+    key: str
+    name: str = Field(description="Самое частое написание названия.")
+    variants: list[str] = Field(default_factory=list, description="Все написания, сведённые к ключу.")
+    vacancies: int = Field(description="Уникальных вакансий, включая архивные.")
+    active: int
+    first_post: datetime | None = None
+    last_post: datetime | None = None
+    with_salary: int
+    salary_p25: float | None = None
+    salary_median: float | None = None
+    salary_p75: float | None = None
+    roles: list[NamedCount] = Field(default_factory=list)
+    technologies: list[NamedCount] = Field(default_factory=list)
+    grades: list[NamedCount] = Field(default_factory=list)
+    channels: list[NamedCount] = Field(default_factory=list)
+    telegram_posts: int = Field(description="Постов Telegram с вакансиями компании (включая перепосты).")
+    telegram_post_days: int = Field(description="Пар «вакансия × день публикации» в Telegram.")
+    recent: list[CompanyProfileVacancy] = Field(default_factory=list)
+    salary_display: SalaryDisplayMeta | None = None
+
+
+class VacancyFlag(BaseModel):
+    code: Literal["reposted", "long_open", "frequent_role", "no_salary"]
+    severity: Literal["warning", "info"]
+    message: str
+    value: int | None = None
+
+
+class VacancyFlags(BaseModel):
+    vacancy_id: str
+    company_key: str | None = None
+    flags: list[VacancyFlag] = Field(default_factory=list)
+
+
 class MarketSalaryOut(BaseModel):
     """Рыночная вилка для вакансии: квантили рублёвой зарплаты похожих вакансий."""
 

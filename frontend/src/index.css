@@ -765,3 +765,95 @@ tr.clickable:hover {
   border: 2px solid #fff;
   box-shadow: 0 0 0 1px #eb6834;
 }
+
+.vacancy-flags {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.88rem;
+}
+
+.vacancy-flag {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  background: #f1f3f5;
+  color: #343a40;
+}
+
+.vacancy-flag.warning {
+  background: #fff4e6;
+}
+
+.vacancy-flag-icon {
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  line-height: 1.1rem;
+  border-radius: 50%;
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: #fff;
+  background: #868e96;
+}
+
+.vacancy-flag.warning .vacancy-flag-icon {
+  background: #e8590c;
+}
+
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.stat-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: #868e96;
+}
+
+.company-counts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.company-counts h4 {
+  margin: 0 0 0.35rem;
+}
+
+.company-counts ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.88rem;
+}
+
+.company-counts li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+  border-bottom: 1px solid #f1f3f5;
+}

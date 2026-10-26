@@ -16,6 +16,7 @@ from backend.api.params import (
 )
 from backend.db import repository as repo
 from backend.db.aggregate_cache import cached_aggregate
+from backend.db.company_profile import vacancy_flags
 from backend.db.market_salary import market_salary
 from backend.db.models import LlmJobRow
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics, technology_counts
@@ -33,6 +34,7 @@ from backend.schemas import (
     MarketSalaryOut,
     TechnologyCount,
     TechnologyFacetResponse,
+    VacancyFlags,
     VacancyImportRequest,
     VacancyImportResponse,
     VacancyListResponse,
@@ -285,3 +287,12 @@ def vacancy_market_salary(vacancy_id: str, db: Session = Depends(get_db)) -> Mar
     if row is None:
         raise HTTPException(status_code=404, detail="Vacancy not found")
     return market_salary(db, row)
+
+
+@router.get("/{vacancy_id}/flags", response_model=VacancyFlags)
+def get_vacancy_flags(vacancy_id: str, db: Session = Depends(get_db)) -> VacancyFlags:
+    """Флаги вакансии по правилам: перепосты, давно висит, частый найм на роль, нет зарплаты."""
+    row = repo.get_vacancy_row(db, vacancy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+    return vacancy_flags(db, row)

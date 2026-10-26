@@ -290,6 +290,16 @@ PostgreSQL, Kafka…) — **технологии** вакансии (`technologi
 ступень, где похожих не меньше 8, и она подписана в карточке. Если у вакансии есть
 зарплата — точка на полосе и доля похожих, у которых зарплата не выше.
 
+**Профиль компании и флаги.** Название компании в карточке вакансии и в «Топе компаний» —
+ссылка на страницу `/company` (`GET /companies/profile?name=`): все вакансии компании в
+базе (с архивом), активные, даты, зарплата p25–p75 и медиана, роли, технологии, грейды,
+каналы и 20 последних вакансий. Написания одной компании («Bell Integrator» и
+«BELL INTEGRATOR», «ООО Ромашка» и «Ромашка») сводятся по `vacancies.company_key` — так же
+считается и топ работодателей. В карточке вакансии — флаги по правилам
+(`GET /vacancies/{id}/flags`, без LLM): текст публиковали в 3+ разных дня; между первой и
+последней публикацией 21+ день; у компании 5+ вакансий той же роли за 90 дней (массовый
+найм или аутстафф); зарплата не указана.
+
 Зарплаты приводятся к рублям по курсам ЦБ (`exchange_rates`), метка
 `salary_display` показывает дату курса (`null`, если курсов в базе нет). Зарплата без валюты считается в
 `fx.default_currency_if_missing` (`RUB`). Фильтр `has_salary` смотрит на ту же
@@ -529,6 +539,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `GET` | `/vacancies/{id}` | Полная вакансия (`raw_text` / `cleaned_text`) для карточки |
 | `POST` | `/vacancies/import` | Импорт вакансий из текста (admin): `{texts, source_url?}` → rules + LLM → запись в БД |
 | `GET` | `/vacancies/{id}/market-salary` | Рыночная вилка: квантили зарплаты похожих вакансий за год (грейд → роль → технологии) и позиция зарплаты вакансии |
+| `GET` | `/vacancies/{id}/flags` | Флаги вакансии по правилам: перепосты в разные дни, давно висит, частый найм на роль, нет зарплаты |
+| `GET` | `/companies/profile?name=` | Профиль компании по любому написанию названия: вакансии, зарплаты, роли, каналы, последние вакансии |
 | `GET` | `/vacancies/technologies` | Технологии по числу вакансий под фильтрами (без учёта собственного `technology`) — варианты фильтра |
 | `GET` `POST` | `/vacancies/reextract` | Переразбор LLM активных вакансий не из HH без специализации (admin): `GET` — сколько их, `POST` — 202 `{job_id}` (идёт — id текущей) |
 | `GET` | `/hh/status` | Статус HH sync (admin): токен задан?, TTL listings, счётчики кэша |
@@ -633,13 +645,13 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…031`, номера 005 нет; head —
-`031_jobs_cancel_requested`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…040`, номера 005 нет; head —
+`040_vacancies_company_key`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
 | `parse_runs` | Журнал прогонов: статус, метрики, снимок конфигурации |
-| `vacancies` | Уникальные вакансии (`id` = content-hash или `sha256(hh:{id})` для HH), `archived_at` — TTL |
+| `vacancies` | Уникальные вакансии (`id` = content-hash или `sha256(hh:{id})` для HH), `archived_at` — TTL, `company_key` — нормализованное название компании |
 | `hh_listings` | Кэш короткой выдачи HH + `detail_fetched_at` (anti-DDOS detail) |
 | `hh_sync_jobs` | Фоновые HH sync: статус, lease, прогресс, итог, `cancel_requested` |
 | `exchange_rates` | Курсы ЦБ по датам |
@@ -689,7 +701,7 @@ tg_jobs_parser/
     workers/               — parse/llm/hh_worker (RQ, общий runner), *_tasks, recover*,
                              liveness (heartbeat + watchdog), healthcheck
     queue/                 — RQ Redis connection (очереди parse, llm, hh)
-  alembic/                 — миграции SQL (001…031)
+  alembic/                 — миграции SQL (001…040)
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes

@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -679,7 +680,9 @@ export default function AnalyticsPanel({ params }: Props) {
                 <tbody>
                   {companies.map((c) => (
                     <tr key={c.company}>
-                      <td>{c.company}</td>
+                      <td>
+                        <Link to={`/company?name=${encodeURIComponent(c.company)}`}>{c.company}</Link>
+                      </td>
                       <td>{c.vacancies}</td>
                       <td>{c.avg_score != null ? c.avg_score.toFixed(1) : "—"}</td>
                       <td>{c.with_salary}</td>

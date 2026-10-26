@@ -15,6 +15,8 @@ import type {
   ProgressEvent,
   Resume,
   SkillGaps,
+  CompanyProfile,
+  VacancyFlags,
   MarketSalary,
   TechnologyAnalytics,
   RunCreateBody,
@@ -576,6 +578,10 @@ export const api = {
   },
 
   getVacancy: (id: string) => request<Vacancy>(`/vacancies/${encodeURIComponent(id)}`),
+  getVacancyFlags: (id: string) =>
+    request<VacancyFlags>(`/vacancies/${encodeURIComponent(id)}/flags`),
+  getCompanyProfile: (name: string) =>
+    request<CompanyProfile>(`/companies/profile?${new URLSearchParams({ name }).toString()}`),
   getMarketSalary: (id: string) =>
     request<MarketSalary>(`/vacancies/${encodeURIComponent(id)}/market-salary`),
 

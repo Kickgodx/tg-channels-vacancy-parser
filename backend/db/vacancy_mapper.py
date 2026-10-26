@@ -9,6 +9,7 @@ from sqlalchemy import case, func
 from backend.db.models import VacancyRow
 from backend.schemas import VacancyListItem
 from tg_jobs_parser.models.vacancy import Vacancy
+from tg_jobs_parser.utils.company import company_key
 
 # Длина preview в списке (как в UI-таблице до оптимизации).
 VACANCY_PREVIEW_LEN = 120
@@ -58,6 +59,7 @@ def vacancy_to_row(v: Vacancy, *, parse_run_id: uuid.UUID | None = None) -> Vaca
         country=_clip(v.country, 256),
         city=_clip(v.city, 256),
         company=_clip(v.company, 256),
+        company_key=company_key(v.company),
         contact=_clip(v.contact, 512),
         technologies=list(v.technologies),
         required_experience=v.required_experience,

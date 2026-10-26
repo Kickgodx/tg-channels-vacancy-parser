@@ -16,6 +16,7 @@ from backend.api.routes import (
     ai_cache,
     analytics,
     auth,
+    companies,
     config,
     filters,
     fx,
@@ -29,6 +30,7 @@ from backend.api.routes import (
 from backend.db import fx_repository as fx_repo
 from backend.db import hh_repository as hh_repo
 from backend.db import repository as repo
+from backend.db.company_profile import backfill_company_keys
 from backend.db.session import init_db, session_scope
 from backend.errors import register_exception_handlers
 from backend.http_logging import HttpLoggingMiddleware
@@ -67,12 +69,13 @@ def _sync_fx_on_startup() -> None:
 
 
 def _cleanup_expired_vacancies() -> None:
-    """Применить TTL вакансий (архивацию), кэш HH listings и бэкфилл грейдов HH."""
+    """Применить TTL вакансий (архивацию), кэш HH listings, бэкфилл грейдов HH и ключей компаний."""
     try:
         with session_scope() as session:
             repo.archive_expired_vacancies(session)
             hh_repo.purge_expired_listings(session)
             hh_repo.backfill_hh_grades_from_experience(session)
+            backfill_company_keys(session)
     except Exception as e:
         logging.getLogger(__name__).warning("TTL вакансий/HH listings не применён: %s", e)
 
@@ -304,6 +307,7 @@ app.include_router(hh.sse_router, prefix="/api/v1")
 app.include_router(ai_cache.router, prefix="/api/v1")
 app.include_router(fx.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
+app.include_router(companies.router, prefix="/api/v1")
 app.include_router(filters.router, prefix="/api/v1")
 app.include_router(resumes.resumes_router, prefix="/api/v1")
 app.include_router(llm_jobs.router, prefix="/api/v1")

@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import MarketSalaryBlock from "./MarketSalaryBlock";
+import VacancyFlagsBlock from "./VacancyFlagsBlock";
 import type {
   CoverLetter,
   CoverLetterTone,
@@ -413,7 +415,14 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
           {v.detected_grade && v.detected_grade !== "unknown" && <span>Грейд: {v.detected_grade}</span>}
           {v.country && <span>Страна: {v.country}</span>}
           {v.city && <span>Город: {v.city}</span>}
-          {v.company && <span>Компания: {v.company}</span>}
+          {v.company && (
+            <span>
+              Компания:{" "}
+              <Link to={`/company?name=${encodeURIComponent(v.company)}`} title="Профиль компании">
+                {v.company}
+              </Link>
+            </span>
+          )}
           {v.contact && <span>Контакт: {v.contact}</span>}
         </div>
         {v.detected_specializations?.length > 0 && (
@@ -426,6 +435,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
             <strong>Технологии:</strong> {v.technologies.join(", ")}
           </p>
         )}
+        <VacancyFlagsBlock vacancyId={listItem.id} />
         <MarketSalaryBlock vacancyId={listItem.id} />
         <hr />
         <div className="vacancy-full-text">

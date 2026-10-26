@@ -299,19 +299,25 @@ def source_quality(session: Session, query: VacancyQuery) -> list[SourceStats]:
 
 
 def top_companies(session: Session, query: VacancyQuery, *, limit: int = _TOP_COMPANIES) -> list[CompanyStats]:
-    """Топ работодателей по числу вакансий."""
+    """Топ работодателей по числу вакансий.
+
+    Написания одного названия («Bell Integrator» и «BELL INTEGRATOR») сводятся по
+    ``company_key``; показывается самое частое написание.
+    """
     sal = _salary_rub_expr()
+    key = func.coalesce(VacancyRow.company_key, VacancyRow.company)
+    name = func.mode().within_group(VacancyRow.company)
     stmt = apply_vacancy_filters(
         select(
-            VacancyRow.company,
+            name,
             func.count(),
             func.avg(VacancyRow.vacancy_score),
             func.count(case((sal.isnot(None), 1))),
             func.avg(sal),
         )
         .where(VacancyRow.company.isnot(None))
-        .group_by(VacancyRow.company)
-        .order_by(func.count().desc(), VacancyRow.company.asc())
+        .group_by(key)
+        .order_by(func.count().desc(), name.asc())
         .limit(limit),
         query,
     )

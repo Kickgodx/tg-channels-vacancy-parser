@@ -312,6 +312,19 @@ def new_parse_run(session):
     return row.id
 
 
+def add_legacy_vacancy(session, **values) -> None:
+    """Вставить строку ``vacancies`` только с заданными колонками (Core, а не ORM).
+
+    Для тестов миграций: схема поднята до старой ревизии, а ORM-модель вставляет все свои
+    колонки, включая добавленные позже (``company_key``, миграция 040).
+    """
+    from sqlalchemy import insert
+
+    from backend.db.models import VacancyRow
+
+    session.execute(insert(VacancyRow).values(**values))
+
+
 def new_user(session, email: str = "user@example.com") -> int:
     """Строка ``users`` под FK per-user таблиц; возвращает её id."""
     from backend.db.models import UserRow
