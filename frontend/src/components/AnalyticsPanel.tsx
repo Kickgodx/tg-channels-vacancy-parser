@@ -217,6 +217,152 @@ function PeriodGroupChart({
   );
 }
 
+const BOX_FILL = "#d0bfff";
+const BOX_STROKE = "#7950f2";
+const MEDIAN_STROKE = "#5f3dc4";
+const WHISKER_STROKE = "#868e96";
+const AXIS_STEP = 50_000;
+
+interface SpreadRow {
+  group: string;
+  label: string;
+  range: [number, number];
+  stats: SalaryGroupStats;
+}
+
+/** Строки box-plot: грейды по старшинству, усы — p10–p90 (без них — min–max). */
+function spreadRows(rows: SalaryGroupStats[]): SpreadRow[] {
+  const byGroup = new Map(rows.map((r) => [r.group, r]));
+  const out: SpreadRow[] = [];
+  for (const g of sortGroups([...byGroup.keys()], GRADE_ORDER)) {
+    const s = byGroup.get(g)!;
+    const lo = s.p10 ?? s.min;
+    const hi = s.p90 ?? s.max;
+    if (lo == null || hi == null || s.q1 == null || s.q3 == null || s.median == null) continue;
+    out.push({ group: g, label: `${g} (n=${s.count})`, range: [lo, hi], stats: s });
+  }
+  return out;
+}
+
+interface BoxShapeProps {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  payload?: SpreadRow;
+}
+
+/**
+ * Ящик с усами поверх range-бара [p10, p90]: Recharts отдаёт пиксели концов
+ * диапазона, внутренние квантили переводим линейно в той же шкале.
+ */
+function BoxShape({ x = 0, y = 0, width = 0, height = 0, payload }: BoxShapeProps) {
+  if (!payload) return null;
+  const [lo, hi] = payload.range;
+  const { q1, median, q3 } = payload.stats;
+  const px = (v: number) => (hi > lo ? x + ((v - lo) / (hi - lo)) * width : x);
+  const cy = y + height / 2;
+  const boxH = Math.min(height, 20);
+  const top = cy - boxH / 2;
+  const capH = boxH * 0.6;
+  const x1 = px(q1!);
+  const x3 = px(q3!);
+  const xm = px(median!);
+  // Мало вакансий — квантили шумные: приглушаем ящик, цифры остаются в подсказке.
+  const opacity = payload.stats.count < 5 ? 0.45 : 1;
+  return (
+    <g opacity={opacity}>
+      <line x1={x} x2={x + width} y1={cy} y2={cy} stroke={WHISKER_STROKE} strokeWidth={1.5} />
+      <line x1={x} x2={x} y1={cy - capH / 2} y2={cy + capH / 2} stroke={WHISKER_STROKE} strokeWidth={1.5} />
+      <line
+        x1={x + width}
+        x2={x + width}
+        y1={cy - capH / 2}
+        y2={cy + capH / 2}
+        stroke={WHISKER_STROKE}
+        strokeWidth={1.5}
+      />
+      <rect
+        x={x1}
+        y={top}
+        width={Math.max(x3 - x1, 1)}
+        height={boxH}
+        rx={3}
+        fill={BOX_FILL}
+        stroke={BOX_STROKE}
+        strokeWidth={1}
+      />
+      <line x1={xm} x2={xm} y1={top} y2={top + boxH} stroke={MEDIAN_STROKE} strokeWidth={2.5} />
+    </g>
+  );
+}
+
+interface SpreadTooltipProps {
+  active?: boolean;
+  payload?: { payload?: SpreadRow }[];
+}
+
+function SpreadTooltip({ active, payload }: SpreadTooltipProps) {
+  const row = payload?.[0]?.payload;
+  if (!active || !row) return null;
+  const s = row.stats;
+  return (
+    <div className="bar-tooltip">
+      <div className="bar-tooltip-title">{row.group}</div>
+      <div>
+        Медиана: <strong>{fmtRub(s.median)}</strong>
+      </div>
+      <div>
+        p25–p75: {fmtRub(s.q1)} – {fmtRub(s.q3)}
+      </div>
+      <div>
+        p10–p90: {fmtRub(s.p10)} – {fmtRub(s.p90)}
+      </div>
+      <div>
+        min–max: {fmtRub(s.min)} – {fmtRub(s.max)}
+      </div>
+      <div>Среднее: {fmtRub(s.mean)}</div>
+      <div className="muted">
+        Вакансий: {s.count}
+        {s.count < 5 && " — мало данных"}
+      </div>
+    </div>
+  );
+}
+
+function GradeSpreadChart({ title, rows }: { title: string; rows: SalaryGroupStats[] }) {
+  const data = useMemo(() => spreadRows(rows), [rows]);
+  if (data.length === 0) return null;
+  const lo = Math.min(...data.map((d) => d.range[0]));
+  const hi = Math.max(...data.map((d) => d.range[1]));
+  const domain = [
+    Math.max(0, Math.floor(lo / AXIS_STEP) * AXIS_STEP),
+    Math.ceil(hi / AXIS_STEP) * AXIS_STEP || AXIS_STEP,
+  ];
+  return (
+    <div className="card chart-card">
+      <h4>{title}</h4>
+      <p className="muted" style={{ margin: "0 0 0.5rem" }}>
+        Ящик — p25–p75, черта — медиана, усы — p10–p90
+      </p>
+      <ResponsiveContainer width="100%" height={40 + data.length * 34}>
+        <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16 }}>
+          <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+          <XAxis
+            type="number"
+            domain={domain}
+            tickFormatter={(v: number) => `${Math.round(v / 1000)}k`}
+            tick={{ fontSize: 11 }}
+          />
+          <YAxis type="category" dataKey="label" width={110} tick={{ fontSize: 11 }} />
+          <Tooltip cursor={{ fill: "#f1f3f5" }} content={<SpreadTooltip />} />
+          <Bar dataKey="range" shape={<BoxShape />} isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 export default function AnalyticsPanel({ params }: Props) {
   const [analyticsYear, setAnalyticsYear] = useState<string | null>(null);
   // По умолчанию с архивом: иначе TTL обрезает прошлые годы и YoY пустеет.
@@ -475,6 +621,10 @@ export default function AnalyticsPanel({ params }: Props) {
             </ResponsiveContainer>
           </div>
         )}
+        <GradeSpreadChart
+          title={`Разброс зарплат по грейдам${suffix}`}
+          rows={salaries?.by_grade ?? []}
+        />
 
         {sources.length > 0 && (
           <div className="card chart-card chart-wide">

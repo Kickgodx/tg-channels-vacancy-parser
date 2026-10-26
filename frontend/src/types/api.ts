@@ -147,9 +147,11 @@ export interface SalaryGroupStats {
   count: number;
   mean?: number | null;
   min?: number | null;
+  p10?: number | null;
   q1?: number | null;
   median?: number | null;
   q3?: number | null;
+  p90?: number | null;
   max?: number | null;
 }
 
@@ -167,8 +169,10 @@ export interface SalaryPeriodGroupBucket {
   mean?: number | null;
   median?: number | null;
   min?: number | null;
+  p10?: number | null;
   q1?: number | null;
   q3?: number | null;
+  p90?: number | null;
   max?: number | null;
 }
 

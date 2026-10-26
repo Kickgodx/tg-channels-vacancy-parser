@@ -65,27 +65,31 @@ def _f(value) -> float | None:
 
 
 def _quantile_columns(sal) -> list:
-    """count, mean, min, q1, median, q3, max — в порядке полей ``SalaryGroupStats``."""
+    """count, mean, min, p10, q1, median, q3, p90, max — аргументы ``_group_row`` после ``grp``."""
     return [
         func.count(),
         func.avg(sal),
         func.min(sal),
+        func.percentile_cont(0.1).within_group(sal),
         func.percentile_cont(0.25).within_group(sal),
         func.percentile_cont(0.5).within_group(sal),
         func.percentile_cont(0.75).within_group(sal),
+        func.percentile_cont(0.9).within_group(sal),
         func.max(sal),
     ]
 
 
-def _group_row(grp, n, mean_v, min_v, q1, med, q3, max_v) -> SalaryGroupStats:
+def _group_row(grp, n, mean_v, min_v, p10, q1, med, q3, p90, max_v) -> SalaryGroupStats:
     return SalaryGroupStats(
         group=str(grp),
         count=int(n),
         mean=_f(mean_v),
         min=_f(min_v),
+        p10=_f(p10),
         q1=_f(q1),
         median=_f(med),
         q3=_f(q3),
+        p90=_f(p90),
         max=_f(max_v),
     )
 
