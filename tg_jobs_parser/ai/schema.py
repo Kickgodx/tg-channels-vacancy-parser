@@ -300,3 +300,58 @@ def calculate_overall_score(
         score = min(score, 69)
 
     return max(0, min(100, score))
+
+
+TailoringPriority = Literal["high", "medium", "low"]
+
+
+class ResumeTailoringSuggestion(BaseModel):
+    """Одна правка резюме под вакансию: что было, как переписать, какое требование закрывает."""
+
+    section: str = ""
+    current: str = ""
+    suggested: str = ""
+    reason: str = ""
+    priority: TailoringPriority = "medium"
+
+    @field_validator("section", "current", "suggested", "reason", mode="before")
+    @classmethod
+    def norm_str(cls, v: object) -> str:
+        return _coerce_optional_str(v) or ""
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def norm_priority(cls, v: object) -> str:
+        key = str(v or "").strip().lower()
+        return key if key in ("high", "medium", "low") else "medium"
+
+
+class ResumeTailoringExtraction(BaseModel):
+    """Ответ LLM адаптации резюме: только переформулировки фактов из резюме, без выдумок."""
+
+    summary: str = ""
+    suggestions: list[ResumeTailoringSuggestion] = Field(default_factory=list, max_length=8)
+    keywords: list[str] = Field(default_factory=list, max_length=10)
+    do_not_claim: list[str] = Field(default_factory=list, max_length=6)
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def norm_summary(cls, v: object) -> str:
+        return _coerce_optional_str(v) or ""
+
+    @field_validator("suggestions", mode="before")
+    @classmethod
+    def norm_suggestions(cls, v: object) -> list:
+        if not isinstance(v, list):
+            return []
+        return [x for x in v if isinstance(x, dict)][:8]
+
+    @field_validator("keywords", mode="before")
+    @classmethod
+    def norm_keywords(cls, v: object) -> list[str]:
+        return _coerce_str_list(v)[:10]
+
+    @field_validator("do_not_claim", mode="before")
+    @classmethod
+    def norm_do_not_claim(cls, v: object) -> list[str]:
+        return _coerce_str_list(v)[:6]

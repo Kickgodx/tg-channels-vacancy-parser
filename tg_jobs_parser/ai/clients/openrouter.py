@@ -17,13 +17,14 @@ from tg_jobs_parser.ai.prompts import (
     build_cover_letter_messages,
     build_match_messages,
     build_messages,
+    build_resume_tailor_messages,
 )
 from tg_jobs_parser.ai.rate_limit import (
     LlmQuotaExhausted,
     OpenRouterRateLimiter,
     extract_rate_limit_headers,
 )
-from tg_jobs_parser.ai.schema import VacancyAIExtraction, VacancyMatchExtraction
+from tg_jobs_parser.ai.schema import ResumeTailoringExtraction, VacancyAIExtraction, VacancyMatchExtraction
 from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.ai.token_cost import cost_usd_for_tokens, rates_for_model
 from tg_jobs_parser.config.schema import AiConfig
@@ -112,10 +113,20 @@ def _parse_cover_letter(raw: str) -> str:
     return text
 
 
+def _parse_tailoring(raw: str) -> ResumeTailoringExtraction:
+    text = _extract_json_text(raw)
+    data = json.loads(text)
+    result = ResumeTailoringExtraction.model_validate(data)
+    if not result.suggestions and not result.summary:
+        raise ValueError("OpenRouter: пустая адаптация резюме")
+    return result
+
+
 _LLM_TASKS = {
     _parse_extraction: "extract",
     _parse_match: "match",
     _parse_cover_letter: "cover_letter",
+    _parse_tailoring: "resume_tailor",
 }
 
 
@@ -506,6 +517,76 @@ class OpenRouterClient:
         except (json.JSONDecodeError, ValueError) as e:
             _LOG.warning("Письмо: пустой/битый ответ LLM (%s), повторный запрос", e)
             return call()
+
+    def tailor_resume(
+        self,
+        *,
+        resume_text: str,
+        vacancy_text: str,
+        match_summary: dict | None = None,
+        model: str | None = None,
+    ) -> tuple[ResumeTailoringExtraction, LLMUsage]:
+        """Адаптация резюме под вакансию — JSON; модель и reasoning те же, что у писем.
+
+        При невалидном/пустом JSON — один controlled retry той же модели.
+        """
+        messages = build_resume_tailor_messages(
+            resume_text=resume_text, vacancy_text=vacancy_text, match_summary=match_summary
+        )
+        call = lambda: self._call_llm(  # noqa: E731
+            messages=messages,
+            parse=_parse_tailoring,
+            model=model or self._ai.resolved_cover_letter_model(),
+            reasoning=self._ai.match_reasoning_enabled,
+            reasoning_effort=self._ai.match_reasoning_effort,
+            json_schema=_strict_json_schema(ResumeTailoringExtraction),
+        )
+        try:
+            return call()
+        except LlmQuotaExhausted:
+            raise
+        except (json.JSONDecodeError, ValueError) as e:
+            _LOG.warning("Адаптация резюме: невалидный JSON от LLM (%s), повторный запрос", e)
+            return call()
+
+    def tailor_resume_with_fallback(
+        self,
+        *,
+        resume_text: str,
+        vacancy_text: str,
+        match_summary: dict | None = None,
+    ) -> tuple[ResumeTailoringExtraction, LLMUsage]:
+        if self._rate_limiter.llm_disabled:
+            raise LlmQuotaExhausted(self._rate_limiter.llm_disabled_reason or "LLM отключён")
+        kwargs = {"resume_text": resume_text, "vacancy_text": vacancy_text, "match_summary": match_summary}
+        try:
+            return self.tailor_resume(**kwargs)
+        except LlmQuotaExhausted:
+            raise
+        except Exception as first_err:
+            if _is_rate_limit_error(first_err):
+                raise
+            fallbacks = self._ai.resolved_fallback_models()
+            if not fallbacks:
+                raise
+            last_err: Exception = first_err
+            for fb in fallbacks:
+                try:
+                    _LOG.warning(
+                        "Модель адаптации резюме %s недоступна (%s), пробуем fallback: %s",
+                        self._ai.resolved_cover_letter_model(),
+                        first_err,
+                        fb,
+                    )
+                    return self.tailor_resume(**kwargs, model=fb)
+                except LlmQuotaExhausted:
+                    raise
+                except Exception as e:
+                    last_err = e
+                    _LOG.warning("Fallback %s не удался (resume tailor): %s", fb, e)
+            raise RuntimeError(
+                f"OpenRouter: все модели недоступны (основная + {len(fallbacks)} fallback): {last_err}"
+            ) from last_err
 
     def extract_with_fallback(
         self,

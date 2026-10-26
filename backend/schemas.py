@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, model_validator
 
-from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
+from tg_jobs_parser.ai.schema import MatchBreakdown, ResumeTailoringSuggestion, SkillMatch
 from tg_jobs_parser.config.schema import split_specializations
 from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -526,6 +526,36 @@ class VacancyMatchOut(BaseModel):
     )
 
 
+class ResumeTailoringOut(BaseModel):
+    """Адаптация резюме под вакансию: правки реального опыта под требования, без выдумок."""
+
+    resume_id: int
+    vacancy_id: str
+    summary: str
+    suggestions: list[ResumeTailoringSuggestion] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list, description="Термины вакансии, которые резюме подтверждает.")
+    do_not_claim: list[str] = Field(
+        default_factory=list, description="Требования, которых в резюме нет: не добавлять без реального опыта."
+    )
+    model: str
+    created_at: datetime
+    cached: bool = Field(default=False, description="True — из БД, без нового вызова LLM.")
+    stale: bool = Field(
+        default=False,
+        description="Получено другой моделью (как у писем) или версией промпта; POST без force пересчитает.",
+    )
+
+
+class ResumeFileTextOut(BaseModel):
+    """Текст резюме, извлечённый из загруженного файла (в базу не сохраняется)."""
+
+    text: str
+    format: Literal["pdf", "docx"]
+    chars: int
+    truncated: bool = Field(description=f"Текст длиннее {RESUME_TEXT_MAX_LENGTH} символов обрезан.")
+    pages: int | None = None
+
+
 class SkillGapItem(BaseModel):
     """Недостающий навык в сводке по оценкам резюме."""
 
@@ -610,6 +640,7 @@ class LlmJobOut(BaseModel):
     error_message: str | None = None
     match: VacancyMatchOut | None = None
     cover_letter: CoverLetterOut | None = None
+    resume_tailoring: ResumeTailoringOut | None = None
     import_result: VacancyImportResponse | None = None
     reextract_result: VacancyReextractResponse | None = None
     cancel_requested: bool = Field(

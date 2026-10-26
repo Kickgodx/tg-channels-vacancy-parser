@@ -13,6 +13,7 @@ export default function ResumesPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [text, setText] = useState("");
+  const [fileNote, setFileNote] = useState<string | null>(null);
 
   const resumes = resumesQ.data?.items ?? [];
   const selected = resumes.find((r) => r.id === selectedId) ?? null;
@@ -23,11 +24,13 @@ export default function ResumesPage() {
     // Смена текста резюме удаляет на бэкенде его матчи и письма.
     void queryClient.invalidateQueries({ queryKey: ["cover-letter"] });
     void queryClient.invalidateQueries({ queryKey: ["skill-gaps"] });
+    void queryClient.invalidateQueries({ queryKey: ["resume-tailoring"] });
   };
 
   const closeForm = () => {
     setFormOpen(false);
     setEditingId(null);
+    setFileNote(null);
   };
 
   const openCreate = () => {
@@ -61,6 +64,19 @@ export default function ResumesPage() {
     onSuccess: () => {
       setSelectedId(null);
       invalidate();
+    },
+  });
+
+  const fileM = useMutation({
+    mutationFn: (file: File) => api.parseResumeFile(file),
+    onSuccess: (r, file) => {
+      setText(r.text);
+      if (!name.trim()) setName(file.name.replace(/\.(pdf|docx)$/i, ""));
+      setFileNote(
+        `Текст из ${r.format.toUpperCase()}${r.pages ? `, ${r.pages} стр.` : ""}: ${r.chars} символов` +
+          (r.truncated ? " — обрезан до 50 000" : "") +
+          ". Проверьте форматирование перед сохранением.",
+      );
     },
   });
 
@@ -162,6 +178,23 @@ export default function ResumesPage() {
               placeholder="Например: Python backend, 5 лет"
             />
           </label>
+          <label className="field">
+            Загрузить из файла (PDF или DOCX, до 5 МБ)
+            <input
+              type="file"
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              disabled={fileM.isPending}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                setFileNote(null);
+                if (file) fileM.mutate(file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          {fileM.isPending && <p className="caption">Извлекаем текст…</p>}
+          {fileM.isError && <p className="error">{(fileM.error as Error).message}</p>}
+          {fileNote && <p className="caption">{fileNote}</p>}
           <label className="field">
             Текст резюме
             <textarea

@@ -857,3 +857,42 @@ tr.clickable:hover {
   padding: 0.15rem 0;
   border-bottom: 1px solid #f1f3f5;
 }
+
+.tailor-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.tailor-item {
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid #e9ecef;
+}
+
+.tailor-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.tailor-item-head .btn-link {
+  margin-left: auto;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.tailor-item p {
+  margin: 0.3rem 0 0;
+  line-height: 1.45;
+}
+
+.tailor-current {
+  color: #868e96;
+  text-decoration: line-through;
+  text-decoration-color: #ced4da;
+}

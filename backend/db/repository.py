@@ -56,9 +56,11 @@ from backend.db.user_content_repository import (
     create_user,
     delete_cover_letter,
     delete_resume,
+    delete_resume_tailoring,
     delete_saved_filter,
     get_cover_letter,
     get_resume,
+    get_resume_tailoring,
     get_user,
     get_user_by_email,
     get_vacancy_match,
@@ -66,6 +68,7 @@ from backend.db.user_content_repository import (
     list_saved_filters,
     update_resume,
     upsert_cover_letter,
+    upsert_resume_tailoring,
     upsert_vacancy_match,
 )
 from backend.db.vacancy_repository import (
@@ -104,6 +107,7 @@ __all__ = [
     "create_user",
     "delete_cover_letter",
     "delete_resume",
+    "delete_resume_tailoring",
     "delete_saved_filter",
     "finalize_parse_run",
     "find_active_llm_job",
@@ -111,6 +115,7 @@ __all__ = [
     "get_llm_job",
     "get_parse_run",
     "get_resume",
+    "get_resume_tailoring",
     "get_user",
     "get_user_by_email",
     "get_vacancy",
@@ -151,6 +156,7 @@ __all__ = [
     "touch_parse_run_lease",
     "update_resume",
     "upsert_cover_letter",
+    "upsert_resume_tailoring",
     "upsert_vacancies",
     "upsert_vacancy_match",
 ]

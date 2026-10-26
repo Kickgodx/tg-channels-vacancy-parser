@@ -414,7 +414,40 @@ export interface CoverLetter {
   stale: boolean;
 }
 
-export type LlmJobKind = "match" | "cover_letter" | "import" | "reextract";
+export type LlmJobKind = "match" | "cover_letter" | "resume_tailor" | "import" | "reextract";
+
+export interface ResumeTailoringSuggestion {
+  section: string;
+  /** Цитата из резюме; пусто — новая строка из фактов резюме. */
+  current: string;
+  suggested: string;
+  reason: string;
+  priority: "high" | "medium" | "low";
+}
+
+/** Адаптация резюме под вакансию (POST/GET /resumes/{id}/tailor/{vacancy_id}). */
+export interface ResumeTailoring {
+  resume_id: number;
+  vacancy_id: string;
+  summary: string;
+  suggestions: ResumeTailoringSuggestion[];
+  keywords: string[];
+  /** Требования, которых в резюме нет: не добавлять без реального опыта. */
+  do_not_claim: string[];
+  model: string;
+  created_at: string;
+  cached: boolean;
+  stale: boolean;
+}
+
+/** Текст резюме из PDF/DOCX (POST /resumes/parse-file). */
+export interface ResumeFileText {
+  text: string;
+  format: "pdf" | "docx";
+  chars: number;
+  truncated: boolean;
+  pages: number | null;
+}
 export type LlmJobStatus = "queued" | "running" | "done" | "error" | "cancelled";
 
 export interface LlmJobAccepted {
@@ -432,6 +465,7 @@ export interface LlmJob {
   error_message?: string | null;
   match?: VacancyMatch | null;
   cover_letter?: CoverLetter | null;
+  resume_tailoring?: ResumeTailoring | null;
   /** Импорт: итог по уже обработанным текстам — растёт, пока джоба running. */
   import_result?: VacancyImportResponse | null;
   /** Переразбор (kind=reextract): итог по уже обработанным вакансиям. */
