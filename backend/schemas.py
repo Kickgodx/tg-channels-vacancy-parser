@@ -320,6 +320,30 @@ class CompanyAnalytics(BaseModel):
     items: list[CompanyStats] = Field(default_factory=list)
 
 
+class MarketSalaryOut(BaseModel):
+    """Рыночная вилка для вакансии: квантили рублёвой зарплаты похожих вакансий."""
+
+    vacancy_id: str
+    level: Literal["grade_role_tech", "grade_role", "grade_tech", "role"] | None = Field(
+        default=None, description="Ступень критериев, на которой набралось достаточно похожих; null — не набралось."
+    )
+    grade: str | None = None
+    specializations: list[str] = Field(default_factory=list)
+    technologies: list[str] = Field(default_factory=list, description="Похожая — с хотя бы одной из них.")
+    count: int = 0
+    p10: float | None = None
+    p25: float | None = None
+    median: float | None = None
+    p75: float | None = None
+    p90: float | None = None
+    vacancy_salary: float | None = Field(default=None, description="Рублёвая зарплата самой вакансии.")
+    percentile: float | None = Field(
+        default=None, description="Доля похожих с зарплатой не выше, чем у вакансии (0–1)."
+    )
+    window_days: int
+    salary_display: SalaryDisplayMeta | None = None
+
+
 class TechnologyGradeStats(BaseModel):
     """Медианы зарплаты в ₽ внутри грейда: с технологией и без неё."""
 

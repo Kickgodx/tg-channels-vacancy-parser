@@ -15,6 +15,7 @@ import type {
   ProgressEvent,
   Resume,
   SkillGaps,
+  MarketSalary,
   TechnologyAnalytics,
   RunCreateBody,
   RunDetail,
@@ -575,6 +576,8 @@ export const api = {
   },
 
   getVacancy: (id: string) => request<Vacancy>(`/vacancies/${encodeURIComponent(id)}`),
+  getMarketSalary: (id: string) =>
+    request<MarketSalary>(`/vacancies/${encodeURIComponent(id)}/market-salary`),
 
   /** Технологии по числу вакансий под фильтрами (собственный выбор технологий не учитывается). */
   getTechnologyFacets: (params?: VacancyQueryParams) => {

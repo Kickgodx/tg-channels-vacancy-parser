@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
+import MarketSalaryBlock from "./MarketSalaryBlock";
 import type {
   CoverLetter,
   CoverLetterTone,
@@ -425,6 +426,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
             <strong>Технологии:</strong> {v.technologies.join(", ")}
           </p>
         )}
+        <MarketSalaryBlock vacancyId={listItem.id} />
         <hr />
         <div className="vacancy-full-text">
           {!hasFullText && detailQ.isLoading

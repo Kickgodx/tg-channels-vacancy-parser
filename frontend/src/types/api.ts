@@ -617,3 +617,24 @@ export interface TechnologyAnalytics {
   momentum_anchor: string | null;
   salary_display?: { display_currency: string; rates_as_of?: string | null; rates_source: string } | null;
 }
+
+export type MarketSalaryLevel = "grade_role_tech" | "grade_role" | "grade_tech" | "role";
+
+/** Рыночная вилка вакансии (GET /vacancies/{id}/market-salary). */
+export interface MarketSalary {
+  vacancy_id: string;
+  level: MarketSalaryLevel | null;
+  grade: string | null;
+  specializations: string[];
+  technologies: string[];
+  count: number;
+  p10: number | null;
+  p25: number | null;
+  median: number | null;
+  p75: number | null;
+  p90: number | null;
+  vacancy_salary: number | null;
+  /** Доля похожих с зарплатой не выше, чем у вакансии (0–1). */
+  percentile: number | null;
+  window_days: number;
+}

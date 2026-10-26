@@ -16,6 +16,7 @@ from backend.api.params import (
 )
 from backend.db import repository as repo
 from backend.db.aggregate_cache import cached_aggregate
+from backend.db.market_salary import market_salary
 from backend.db.models import LlmJobRow
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics, technology_counts
 from backend.db.vacancy_repository import counted_vacancies
@@ -29,6 +30,7 @@ from backend.errors import (
 )
 from backend.schemas import (
     LlmJobAccepted,
+    MarketSalaryOut,
     TechnologyCount,
     TechnologyFacetResponse,
     VacancyImportRequest,
@@ -274,3 +276,12 @@ def get_vacancy(vacancy_id: str, db: Session = Depends(get_db)) -> Vacancy:
     if vacancy is None:
         raise HTTPException(status_code=404, detail="Vacancy not found")
     return vacancy
+
+
+@router.get("/{vacancy_id}/market-salary", response_model=MarketSalaryOut)
+def vacancy_market_salary(vacancy_id: str, db: Session = Depends(get_db)) -> MarketSalaryOut:
+    """Рыночная вилка: квантили зарплаты похожих вакансий (грейд, роль, технологии) за год."""
+    row = repo.get_vacancy_row(db, vacancy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+    return market_salary(db, row)

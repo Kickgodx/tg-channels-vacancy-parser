@@ -709,3 +709,59 @@ tr.clickable:hover {
 .momentum-title {
   margin: 0.5rem 0 0.25rem;
 }
+
+.market-salary {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: #f8f9fa;
+  border-left: 3px solid #2a78d6;
+  font-size: 0.9rem;
+}
+
+.market-salary p {
+  margin: 0.35rem 0;
+}
+
+.market-strip {
+  position: relative;
+  height: 22px;
+  margin: 0.5rem 0.5rem;
+}
+
+.market-whisker {
+  position: absolute;
+  top: 10px;
+  height: 2px;
+  background: #868e96;
+}
+
+.market-box {
+  position: absolute;
+  top: 3px;
+  height: 16px;
+  border-radius: 4px;
+  background: #cde2fb;
+  border: 1px solid #2a78d6;
+}
+
+.market-median {
+  position: absolute;
+  top: 3px;
+  width: 3px;
+  height: 16px;
+  margin-left: -1px;
+  background: #184f95;
+}
+
+.market-own {
+  position: absolute;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: #eb6834;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #eb6834;
+}
