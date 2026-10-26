@@ -233,6 +233,7 @@ _EXTRACTION_COLUMNS = (
     "country",
     "city",
     "company",
+    "company_key",
     "contact",
     "technologies",
     "required_experience",

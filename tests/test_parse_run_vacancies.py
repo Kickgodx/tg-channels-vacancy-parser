@@ -11,6 +11,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from tests.conftest import add_legacy_vacancy
 
 from backend.db import parse_run_repository as prr
 from backend.db import vacancy_repository as vr
@@ -120,16 +121,16 @@ def test_migration_backfills_links_from_last_parse_run_id(pg_empty_db):
     with sessionmaker(bind=engine)() as s:
         s.add(ParseRunRow(id=run_id, status="completed", config_snapshot={}))
         for vid, last_run in (("bound", run_id), ("purged-run", uuid.uuid4()), ("manual", None)):
-            s.add(
-                VacancyRow(
-                    id=vid,
-                    source_post_key=vid,
-                    source_channel="chan",
-                    source_url="https://t.me/s/chan",
-                    raw_text=vid,
-                    cleaned_text=vid,
-                    last_parse_run_id=last_run,
-                )
+            s.flush()
+            add_legacy_vacancy(
+                s,
+                id=vid,
+                source_post_key=vid,
+                source_channel="chan",
+                source_url="https://t.me/s/chan",
+                raw_text=vid,
+                cleaned_text=vid,
+                last_parse_run_id=last_run,
             )
         s.commit()
 

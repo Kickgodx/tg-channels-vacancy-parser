@@ -11,6 +11,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from tests.conftest import add_legacy_vacancy
 
 from backend.db import analytics
 from backend.db import parse_run_repository as prr
@@ -191,18 +192,18 @@ def test_migration_backfills_telegram_originals(pg_empty_db):
             ("hh-2", "hh", "hh-2", None, True),
             ("man", "manual", "manual-x", None, False),
         )
+        s.flush()
         for vid, channel, key, last_run, is_dup in rows:
-            s.add(
-                VacancyRow(
-                    id=vid,
-                    source_post_key=key,
-                    source_channel=channel,
-                    source_url="u",
-                    raw_text=vid,
-                    cleaned_text=vid,
-                    last_parse_run_id=last_run,
-                    is_duplicate=is_dup,
-                )
+            add_legacy_vacancy(
+                s,
+                id=vid,
+                source_post_key=key,
+                source_channel=channel,
+                source_url="u",
+                raw_text=vid,
+                cleaned_text=vid,
+                last_parse_run_id=last_run,
+                is_duplicate=is_dup,
             )
         s.commit()
 

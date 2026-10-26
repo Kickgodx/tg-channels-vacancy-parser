@@ -9,10 +9,10 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from tests.conftest import new_user
+from tests.conftest import add_legacy_vacancy, new_user
 
 from backend.db.migrate import alembic_ini_path
-from backend.db.models import ResumeRow, VacancyRow
+from backend.db.models import ResumeRow
 from backend.services.llm_result_freshness import cover_letter_is_stale, match_is_stale
 from tg_jobs_parser.ai.prompts import COVER_LETTER_PROMPT_VERSION, MATCH_PROMPT_VERSION
 from tg_jobs_parser.config.schema import AiConfig
@@ -28,12 +28,10 @@ def test_migration_backfills_requested_model(pg_empty_db):
         user_id = new_user(s)
         resume = ResumeRow(user_id=user_id, name="CV", text="python")
         s.add(resume)
-        s.add(
-            VacancyRow(
-                id="v1", source_post_key="ch-v1", source_channel="ch", source_url="u", raw_text="x", cleaned_text="x"
-            )
-        )
         s.flush()
+        add_legacy_vacancy(
+            s, id="v1", source_post_key="ch-v1", source_channel="ch", source_url="u", raw_text="x", cleaned_text="x"
+        )
         params = {"r": resume.id, "v": "v1"}
         s.execute(
             text(
