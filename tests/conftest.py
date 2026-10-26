@@ -26,7 +26,17 @@ _NO_DB_URL = "postgresql+psycopg://no-test-db@127.0.0.1:1/none?connect_timeout=1
 _container = None
 
 
+def _live_llm_selected(config) -> bool:
+    """Запущены live-тесты LLM (``-m llm``), а не обычный прогон с ``-m "not llm"``."""
+    markexpr = (config.option.markexpr or "").replace(" ", "")
+    return "llm" in markexpr and "notllm" not in markexpr
+
+
 def pytest_configure(config) -> None:
+    # backend.main подтягивает .env в окружение: без этого любая LLM-задача, доработавшая после
+    # отката подмен теста, ушла бы в настоящий OpenRouter. Пустое значение dotenv не перезапишет.
+    if not _live_llm_selected(config):
+        os.environ["OPENROUTER_API_KEY"] = ""
     if hasattr(config, "workerinput"):
         return  # xdist-воркер: URL уже в env от контроллера
     os.environ.setdefault(_RUN_ID_ENV, str(os.getpid()))

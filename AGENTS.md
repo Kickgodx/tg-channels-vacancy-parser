@@ -32,6 +32,10 @@ bash scripts/check_alerts.sh                   # при правке observabili
   Startup-sync и `refresh_rates_from_api` по-прежнему ходят в сеть. Тест,
   которому нужен курс, должен подменять `fx_repository.ensure_latest_rates`
   или класть строки в БД, а не полагаться на сеть.
+- Ключ OpenRouter в обычном прогоне обнулён (`pytest_configure` в `tests/conftest.py`):
+  LLM-задача, доработавшая после отката подмен, падает, а не уходит в платный API. Тест с
+  фоновой LLM-задачей всё равно дожидается её (`await_llm_job`), иначе она пишет в БД
+  уже после теста.
 - LLM live evals помечены `@pytest.mark.llm` — **не** входят в обычный
   `pytest -q`. Опционально:
   `pytest -m llm` или
