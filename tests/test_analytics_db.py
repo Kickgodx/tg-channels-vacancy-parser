@@ -60,6 +60,13 @@ def test_salary_analytics_quantiles(db_session):
     assert mid.q3 == 325_000
     assert mid.min == 100_000
     assert mid.max == 400_000
+    # percentile_cont интерполирует: p10 = 100k + 0.3·100k, p90 = 300k + 0.7·100k
+    assert mid.p10 == pytest.approx(130_000)
+    assert mid.p90 == pytest.approx(370_000)
+    # Годовой разрез грейда несёт те же квантили
+    (mid_year,) = [b for b in res.by_grade_yearly if b.group == "middle"]
+    assert mid_year.p10 == pytest.approx(130_000)
+    assert mid_year.p90 == pytest.approx(370_000)
 
     assert {b.range for b in res.distribution} == {
         "до 100k",

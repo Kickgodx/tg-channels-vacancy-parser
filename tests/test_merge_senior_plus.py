@@ -51,7 +51,8 @@ def test_migration_merges_senior_plus(pg_empty_db):
     command.upgrade(cfg, "head")
     with engine.connect() as conn:
         grades = dict(conn.execute(text("SELECT id, detected_grade FROM vacancies")).all())
-        assert grades == {"v1": "senior", "v2": "middle+", "v3": "senior"}
+        # middle+ сливает уже миграция 039 (см. test_merge_middle_plus.py).
+        assert grades == {"v1": "senior", "v2": "middle", "v3": "senior"}
         params = dict(conn.execute(text("SELECT name, params FROM saved_filters")).all())
         assert params == {"a": {"grade": "senior", "page": 1}, "b": {"grade": None}}
     engine.dispose()

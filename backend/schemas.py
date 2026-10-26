@@ -241,9 +241,11 @@ class SalaryGroupStats(BaseModel):
     count: int
     mean: float | None = None
     min: float | None = None
+    p10: float | None = None
     q1: float | None = None
     median: float | None = None
     q3: float | None = None
+    p90: float | None = None
     max: float | None = None
 
 
@@ -263,8 +265,10 @@ class SalaryPeriodGroupBucket(BaseModel):
     mean: float | None = None
     median: float | None = None
     min: float | None = None
+    p10: float | None = None
     q1: float | None = None
     q3: float | None = None
+    p90: float | None = None
     max: float | None = None
 
 

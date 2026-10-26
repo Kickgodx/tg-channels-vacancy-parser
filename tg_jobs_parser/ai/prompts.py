@@ -17,7 +17,7 @@ from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
 
 # Источник истины для ключа кэша extraction. Меняете промпт → bump.
-EXTRACT_PROMPT_VERSION = "extract-v10"
+EXTRACT_PROMPT_VERSION = "extract-v11"
 
 _SPECIALIZATION_RULES = """
 - detected_specializations — ONLY the job role(s) this post is hiring for (usually ONE primary role).
@@ -71,7 +71,7 @@ Rules:
 - detected_grade: one of """
     + ", ".join(GRADE_OPTIONS)
     + """.
-  Title/role grade wins (e.g. "Senior QA" → senior). Do NOT treat verb "to staff" / "staffing" as grade staff.
+  Title/role grade wins (e.g. "Senior QA" → senior; "Middle+" → middle). Do NOT treat verb "to staff" / "staffing" as grade staff.
   If no grade word is stated, derive it from REQUIRED work experience (use the lower bound of a range):
   • no experience required («без опыта», «опыт не требуется», "no experience") or less than 1 year → intern;
   • 1 to <3 years («от 1 года», «1–3 года», «2+ years») → junior;
