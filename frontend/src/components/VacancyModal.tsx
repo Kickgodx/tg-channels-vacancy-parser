@@ -16,7 +16,8 @@ import { toVacancyListItem } from "../utils/vacancyListItem";
 
 interface Props {
   vacancy: VacancyListItem | Vacancy;
-  index: number;
+  /** Номер строки в таблице; без него заголовок — только канал. */
+  index?: number;
   onClose: () => void;
   /** Резюме, выбранное на странице вакансий; без него матчинг недоступен. */
   resumeId?: number | null;
@@ -123,6 +124,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
       setMatch(data);
       setMatchExpanded(true);
       void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
+      void queryClient.invalidateQueries({ queryKey: ["skill-gaps"] });
     },
   });
 
@@ -192,7 +194,9 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
         <button type="button" className="modal-close" onClick={onClose} aria-label="Закрыть">
           ×
         </button>
-        <h3>№{index} — @{v.source_channel}</h3>
+        <h3>
+          {index != null && `№${index} — `}@{v.source_channel}
+        </h3>
         <div className="modal-actions">
           {v.post_url && (
             <a href={cleanPostUrl(v.post_url)} target="_blank" rel="noreferrer" className="btn-link">

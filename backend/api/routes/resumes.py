@@ -18,6 +18,7 @@ from backend.schemas import (
     ResumeListResponse,
     ResumeOut,
     ResumeUpdate,
+    SkillGapsOut,
     VacancyMatchOut,
 )
 from backend.services.llm_job_service import (
@@ -28,6 +29,7 @@ from backend.services.llm_job_service import (
     llm_job_runner,
 )
 from backend.services.llm_result_freshness import cover_letter_is_stale, current_ai_config, match_is_stale
+from backend.services.skill_gap_service import skill_gaps
 from tg_jobs_parser.ai.schema import MatchBreakdown, SkillMatch
 from tg_jobs_parser.config.schema import AiConfig
 
@@ -96,6 +98,17 @@ def delete_resume(
 ) -> None:
     if not repo.delete_resume(db, resume_id, user_id=user.id):
         raise HTTPException(status_code=404, detail="Resume not found")
+
+
+@resumes_router.get("/{resume_id}/skill-gaps", response_model=SkillGapsOut)
+def get_skill_gaps(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> SkillGapsOut:
+    """Сводка недостающих навыков по всем сохранённым оценкам резюме (без вызова LLM)."""
+    _get_own_resume(db, resume_id, user)
+    return skill_gaps(db, resume_id=resume_id)
 
 
 def _match_to_out(row: VacancyMatchRow, *, cached: bool, ai: AiConfig) -> VacancyMatchOut:
