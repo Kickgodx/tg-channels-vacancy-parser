@@ -98,7 +98,6 @@ const GRADE_ORDER = [
   "junior",
   "junior+",
   "middle",
-  "middle+",
   "senior",
   "lead",
   "staff",

@@ -145,7 +145,7 @@
 - **THEN** нижняя граница — 120 000 USD до нормализации периода
 
 ### Requirement: Грейд — старший из найденных
-Грейд MUST выбираться как самый старший из найденных по порядку `intern` < `junior` < `junior+` < `middle` < `middle+` < `senior` < `lead` < `staff` < `principal`; не найден — `unknown`. `staff` SHALL распознаваться только как уровень (Staff Engineer), не как слово «staff» в обычном значении. Отдельного грейда `senior+` нет: «Senior+» в тексте, а также значение `senior+` от LLM или из старых данных MUST приводиться к `senior`.
+Грейд MUST выбираться как самый старший из найденных по порядку `intern` < `junior` < `junior+` < `middle` < `senior` < `lead` < `staff` < `principal`; не найден — `unknown`. `staff` SHALL распознаваться только как уровень (Staff Engineer), не как слово «staff» в обычном значении. Отдельных грейдов `senior+` и `middle+` нет: «Senior+» / «Middle+» в тексте, а также значения `senior+` / `middle+` от LLM или из старых данных MUST приводиться к `senior` / `middle`.
 
 #### Scenario: Несколько грейдов
 - **WHEN** в посте упомянуты Middle и Senior
@@ -158,6 +158,10 @@
 #### Scenario: Senior+
 - **WHEN** в посте «Senior+ Python Developer»
 - **THEN** грейд — `senior`
+
+#### Scenario: Middle+
+- **WHEN** в посте «Middle+ Android developer» или LLM вернула `middle+`
+- **THEN** грейд — `middle`
 
 #### Scenario: Старое значение senior+
 - **WHEN** LLM или кэш ответа вернул грейд `senior+`

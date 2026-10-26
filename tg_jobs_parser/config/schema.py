@@ -499,7 +499,7 @@ class AiConfig(BaseModel):
     )
     use_few_shot: bool = False
     prompt_version: str = Field(
-        default="extract-v10",
+        default="extract-v11",
         description=(
             "Должен совпадать с EXTRACT_PROMPT_VERSION в ai/prompts.py. "
             "Кэш всегда ключуется константой; расхождение → warning."
