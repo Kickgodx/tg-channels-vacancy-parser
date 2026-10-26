@@ -14,6 +14,7 @@ import type {
   MetricsSummary,
   ProgressEvent,
   Resume,
+  SkillGaps,
   RunCreateBody,
   RunDetail,
   RunStatus,
@@ -861,6 +862,8 @@ export const api = {
       undefined,
       signal,
     ),
+
+  getSkillGaps: (resumeId: number) => request<SkillGaps>(`/resumes/${resumeId}/skill-gaps`),
 
   getVacancyMatch: (resumeId: number, vacancyId: string) =>
     request<VacancyMatch>(`/resumes/${resumeId}/match/${vacancyId}`),

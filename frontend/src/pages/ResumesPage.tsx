@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
+import SkillGapsPanel from "../components/SkillGapsPanel";
 import type { Resume } from "../types/api";
 
 export default function ResumesPage() {
@@ -21,6 +22,7 @@ export default function ResumesPage() {
     void queryClient.invalidateQueries({ queryKey: ["vacancies"] });
     // Смена текста резюме удаляет на бэкенде его матчи и письма.
     void queryClient.invalidateQueries({ queryKey: ["cover-letter"] });
+    void queryClient.invalidateQueries({ queryKey: ["skill-gaps"] });
   };
 
   const closeForm = () => {
@@ -146,6 +148,8 @@ export default function ResumesPage() {
           </div>
         </div>
       )}
+
+      {selected && !formOpen && <SkillGapsPanel resumeId={selected.id} />}
 
       {formOpen && (
         <div className="card">

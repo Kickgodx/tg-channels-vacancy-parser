@@ -396,6 +396,31 @@ class VacancyMatchOut(BaseModel):
     )
 
 
+class SkillGapItem(BaseModel):
+    """Недостающий навык в сводке по оценкам резюме."""
+
+    name: str
+    vacancies: int = Field(description="Разных оценённых вакансий с этим пробелом.")
+    critical: int = 0
+    important: int = 0
+    secondary: int = 0
+    share: float = Field(description="vacancies / evaluated.")
+    vacancy_ids: list[str] = Field(default_factory=list, description="До трёх примеров, свежие оценки первыми.")
+    market_vacancies: int | None = Field(
+        default=None,
+        description="Только у технологий: активных уникальных вакансий каталога с этой технологией.",
+    )
+
+
+class SkillGapsOut(BaseModel):
+    """Сводка недостающих навыков по всем оценкам резюме."""
+
+    resume_id: int
+    evaluated: int
+    technologies: list[SkillGapItem] = Field(default_factory=list)
+    other: list[SkillGapItem] = Field(default_factory=list)
+
+
 CoverLetterTone = Literal["neutral", "friendly", "formal"]
 
 

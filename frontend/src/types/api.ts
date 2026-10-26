@@ -354,6 +354,26 @@ export interface SkillMatch {
   evidence: string;
 }
 
+/** Недостающий навык в сводке по оценкам резюме (GET /resumes/{id}/skill-gaps). */
+export interface SkillGapItem {
+  name: string;
+  vacancies: number;
+  critical: number;
+  important: number;
+  secondary: number;
+  share: number;
+  vacancy_ids: string[];
+  /** Только у технологий: активных уникальных вакансий каталога с этой технологией. */
+  market_vacancies: number | null;
+}
+
+export interface SkillGaps {
+  resume_id: number;
+  evaluated: number;
+  technologies: SkillGapItem[];
+  other: SkillGapItem[];
+}
+
 export interface MatchBreakdown {
   role_match: number;
   skills_match: number;
