@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db, verify_api_key
 from backend.api.params import vacancy_filters
-from backend.db import analytics
+from backend.db import analytics, technology_analytics
 from backend.db.aggregate_cache import cached_aggregate
-from backend.schemas import CompanyAnalytics, SalaryAnalytics, SourceAnalytics, VacancyQuery
+from backend.schemas import CompanyAnalytics, SalaryAnalytics, SourceAnalytics, TechnologyAnalytics, VacancyQuery
 
 router = APIRouter(
     prefix="/analytics",
@@ -47,3 +47,15 @@ def company_stats(
         lambda: CompanyAnalytics(items=analytics.top_companies(db, query, limit=limit)),
         limit=limit,
     )
+
+
+@router.get("/technologies", response_model=TechnologyAnalytics)
+def technology_stats(
+    query: VacancyQuery = Depends(vacancy_filters),
+    db: Session = Depends(get_db),
+) -> TechnologyAnalytics:
+    """Технологии: зарплатная премия с поправкой на грейд, спрос по месяцам, рост и падение.
+
+    Фильтр по технологии не применяется — премия под ним не имеет смысла.
+    """
+    return cached_aggregate("technologies", query, lambda: technology_analytics.technology_analytics(db, query))

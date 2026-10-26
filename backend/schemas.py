@@ -320,6 +320,60 @@ class CompanyAnalytics(BaseModel):
     items: list[CompanyStats] = Field(default_factory=list)
 
 
+class TechnologyGradeStats(BaseModel):
+    """Медианы зарплаты в ₽ внутри грейда: с технологией и без неё."""
+
+    grade: str
+    with_count: int
+    with_median: float | None = None
+    without_count: int
+    without_median: float | None = None
+    compared: bool = Field(description="Грейд вошёл в расчёт премии (обе группы достаточно велики).")
+
+
+class TechnologyPremium(BaseModel):
+    technology: str
+    vacancies: int = Field(description="Вакансий с технологией и рублёвой зарплатой.")
+    median: float | None = None
+    premium: float | None = Field(
+        default=None,
+        description=(
+            "Средневзвешенное по грейдам (медиана с технологией / медиана без − 1); null — мало сопоставимых вакансий."
+        ),
+    )
+    compared_vacancies: int = Field(description="Вакансий с технологией в грейдах, вошедших в сравнение.")
+    by_grade: list[TechnologyGradeStats] = Field(default_factory=list)
+
+
+class TechnologySeries(BaseModel):
+    technology: str
+    counts: list[int] = Field(default_factory=list, description="Вакансий с технологией по месяцам ``months``.")
+
+
+class TechnologyTrend(BaseModel):
+    months: list[str] = Field(default_factory=list, description="YYYY-MM по возрастанию.")
+    totals: list[int] = Field(default_factory=list, description="Всего вакансий по месяцам.")
+    series: list[TechnologySeries] = Field(default_factory=list)
+
+
+class TechnologyMomentum(BaseModel):
+    technology: str
+    recent: int
+    previous: int
+    recent_share: float
+    previous_share: float
+    delta_pp: float = Field(description="Изменение доли вакансий с технологией, п.п.")
+
+
+class TechnologyAnalytics(BaseModel):
+    premium: list[TechnologyPremium] = Field(default_factory=list)
+    trend: TechnologyTrend = Field(default_factory=TechnologyTrend)
+    momentum: list[TechnologyMomentum] = Field(default_factory=list)
+    momentum_window_days: int
+    momentum_anchor: date | None = Field(default=None, description="Последняя дата поста под фильтрами.")
+    salary_display: SalaryDisplayMeta | None = None
+
+
 # Имя обрезается до проверки длины: иначе «   » проходило min_length и сохранялось пустым.
 UserItemName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 

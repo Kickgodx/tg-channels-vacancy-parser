@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { api, type VacancyQueryParams } from "../api/client";
+import TechnologyAnalyticsSection from "./TechnologyAnalyticsSection";
 import type {
   SalaryAnalytics,
   SalaryGroupStats,
@@ -624,6 +625,8 @@ export default function AnalyticsPanel({ params }: Props) {
           title={`Разброс зарплат по грейдам${suffix}`}
           rows={salaries?.by_grade ?? []}
         />
+
+        <TechnologyAnalyticsSection params={panelParams} />
 
         {sources.length > 0 && (
           <div className="card chart-card chart-wide">

@@ -573,3 +573,47 @@ export interface ParseFormState {
   ignoreLlmCache: boolean;
   fullRescan: boolean;
 }
+
+export interface TechnologyGradeStats {
+  grade: string;
+  with_count: number;
+  with_median: number | null;
+  without_count: number;
+  without_median: number | null;
+  /** Грейд вошёл в расчёт премии. */
+  compared: boolean;
+}
+
+export interface TechnologyPremium {
+  technology: string;
+  vacancies: number;
+  median: number | null;
+  /** Средневзвешенное по грейдам (медиана с / медиана без − 1); null — мало данных. */
+  premium: number | null;
+  compared_vacancies: number;
+  by_grade: TechnologyGradeStats[];
+}
+
+export interface TechnologyTrend {
+  months: string[];
+  totals: number[];
+  series: { technology: string; counts: number[] }[];
+}
+
+export interface TechnologyMomentum {
+  technology: string;
+  recent: number;
+  previous: number;
+  recent_share: number;
+  previous_share: number;
+  delta_pp: number;
+}
+
+export interface TechnologyAnalytics {
+  premium: TechnologyPremium[];
+  trend: TechnologyTrend;
+  momentum: TechnologyMomentum[];
+  momentum_window_days: number;
+  momentum_anchor: string | null;
+  salary_display?: { display_currency: string; rates_as_of?: string | null; rates_source: string } | null;
+}

@@ -15,6 +15,7 @@ import type {
   ProgressEvent,
   Resume,
   SkillGaps,
+  TechnologyAnalytics,
   RunCreateBody,
   RunDetail,
   RunStatus,
@@ -662,6 +663,12 @@ export const api = {
     return request<{ items: SourceStats[] }>(`/analytics/sources${qs ? `?${qs}` : ""}`);
   },
 
+  getTechnologyAnalytics: (params?: VacancyQueryParams) => {
+    const q = new URLSearchParams();
+    appendSearchParams(q, params);
+    const qs = q.toString();
+    return request<TechnologyAnalytics>(`/analytics/technologies${qs ? `?${qs}` : ""}`);
+  },
   getCompanyStats: (params?: VacancyQueryParams) => {
     const q = new URLSearchParams();
     appendSearchParams(q, params);

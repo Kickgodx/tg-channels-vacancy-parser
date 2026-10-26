@@ -695,3 +695,17 @@ tr.clickable:hover {
   padding: 0.25rem 0.6rem;
   font-size: 0.85rem;
 }
+
+.tooltip-table {
+  margin: 0.25rem 0;
+  font-size: 0.8rem;
+}
+
+.tooltip-table th,
+.tooltip-table td {
+  padding: 0.1rem 0.4rem;
+}
+
+.momentum-title {
+  margin: 0.5rem 0 0.25rem;
+}

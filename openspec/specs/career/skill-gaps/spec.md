@@ -1,7 +1,8 @@
 # career/skill-gaps Specification
 
 ## Purpose
-TBD - created by archiving change skill-gaps. Update Purpose after archive.
+Сводка недостающих навыков резюме по всем его сохранённым оценкам: какие технологии и
+навыки чаще всего мешают, насколько критично и сколько вакансий каталога их требуют.
 
 ## Requirements
 
