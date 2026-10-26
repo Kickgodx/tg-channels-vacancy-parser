@@ -26,6 +26,7 @@ _TRACER = trace.get_tracer(__name__)
 
 KIND_MATCH = "match"
 KIND_COVER_LETTER = "cover_letter"
+KIND_RESUME_TAILOR = "resume_tailor"
 KIND_IMPORT = "import"
 KIND_REEXTRACT = "reextract"
 # Пакетные джобы (импорт текстов, переразбор вакансий): без резюме и вакансии, не

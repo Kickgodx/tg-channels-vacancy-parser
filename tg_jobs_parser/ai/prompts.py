@@ -1,6 +1,6 @@
 """Промпты для извлечения полей вакансии (RU + EN).
 
-Версии промптов (EXTRACT / MATCH / COVER_LETTER):
+Версии промптов (EXTRACT / MATCH / COVER_LETTER / RESUME_TAILOR):
 - Bump при смысловом изменении system/user/few-shot (правила полей, схема,
   примеры) — иначе кэш LLM отдаст ответы от старого промпта.
 - Не bump при правках комментариев в этом файле или опечатках вне текста,
@@ -620,6 +620,101 @@ def build_cover_letter_messages(
                 vacancy=vacancy_text,
                 match_block=match_block,
                 notes_block=notes_block,
+            ),
+        },
+    ]
+
+
+RESUME_TAILOR_PROMPT_VERSION = "resume-tailor-v1"
+
+RESUME_TAILOR_SYSTEM_PROMPT = """
+You are an expert IT recruiter helping a candidate adapt their resume to a
+specific vacancy before applying.
+
+Goal: concrete edits that make REAL experience from the resume easier to
+match against THIS vacancy — wording, order, emphasis, the vacancy's
+terminology. Not a rewrite of the whole resume.
+
+Honesty rules (most important):
+- Every suggestion must be grounded in facts already present in the resume.
+  Rephrase, reorder, quantify only with numbers that are in the resume.
+- NEVER add skills, tools, employers, years of experience, achievements or
+  metrics that the resume does not contain.
+- Vacancy requirements the resume does not support go to "do_not_claim" —
+  the candidate must not add them without real experience.
+
+Suggestions:
+- 3-8 items, most impactful first.
+- "section": where the edit goes (e.g. "О себе", "Навыки", "Опыт: <company>").
+- "current": a short quote from the resume being changed; empty string if the
+  edit adds a new line built from facts elsewhere in the resume.
+- "suggested": the ready-to-paste new wording.
+- "reason": which vacancy requirement it addresses.
+- "priority": high | medium | low.
+
+"keywords": up to 10 terms from the vacancy that the resume already supports
+but names differently or not at all (e.g. vacancy says "CI/CD", resume
+mentions "GitLab pipelines").
+
+"summary": 1-2 sentences — the main thing to change for this vacancy.
+
+Language: write summary, section, suggested, reason and do_not_claim in the
+language of the resume (usually Russian).
+
+Output: valid JSON only, matching the schema exactly:
+{
+  "summary": "string",
+  "suggestions": [
+    {"section": "string", "current": "string", "suggested": "string",
+     "reason": "string", "priority": "high|medium|low"}
+  ],
+  "keywords": ["string"],
+  "do_not_claim": ["string"]
+}
+""".strip()
+
+RESUME_TAILOR_USER_PROMPT = """Suggest how to adapt this resume to the vacancy.
+
+<CANDIDATE_RESUME>
+{resume}
+</CANDIDATE_RESUME>
+
+<VACANCY>
+{vacancy}
+</VACANCY>
+{match_block}"""
+
+_RESUME_TAILOR_MATCH_BLOCK = """
+<MATCH_CONTEXT>
+A previous evaluation of this resume against this vacancy:
+Matching skills: {matching_skills}
+Missing skills (not in the resume — candidates for do_not_claim, never for suggestions): {missing_skills}
+</MATCH_CONTEXT>
+"""
+
+
+def build_resume_tailor_messages(
+    *,
+    resume_text: str,
+    vacancy_text: str,
+    match_summary: dict | None = None,
+) -> list[dict[str, str]]:
+    """Сообщения адаптации резюме (ответ — JSON ``ResumeTailoringExtraction``).
+
+    ``match_summary`` — опционально из сохранённой оценки: ``matching_skills``, ``missing_skills``.
+    """
+    match_block = ""
+    if match_summary:
+        match_block = _RESUME_TAILOR_MATCH_BLOCK.format(
+            matching_skills=", ".join(match_summary.get("matching_skills") or []) or "—",
+            missing_skills=", ".join(match_summary.get("missing_skills") or []) or "—",
+        )
+    return [
+        {"role": "system", "content": RESUME_TAILOR_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": RESUME_TAILOR_USER_PROMPT.format(
+                resume=resume_text, vacancy=vacancy_text, match_block=match_block
             ),
         },
     ]

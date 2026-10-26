@@ -339,6 +339,31 @@ class CoverLetterRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 
+class ResumeTailoringRow(Base):
+    """Адаптация резюме под вакансию (LLM). PK (resume+vacancy) — и кэш генерации, как у писем."""
+
+    __tablename__ = "resume_tailorings"
+
+    resume_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("resumes.id", ondelete="CASCADE", name="fk_resume_tailorings_resume_id"), primary_key=True
+    )
+    vacancy_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("vacancies.id", ondelete="CASCADE", name="fk_resume_tailorings_vacancy_id"),
+        primary_key=True,
+        index=True,
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    suggestions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    keywords: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    do_not_claim: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Фактически ответившая модель (может быть fallback); запрошенная и версия промпта — для stale.
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    requested_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+
+
 class HhListingRow(Base):
     """Кэш короткой выдачи HH: last_seen + флаг detail_fetched для anti-DDOS."""
 
@@ -424,7 +449,9 @@ class LlmJobRow(Base):
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # match | cover_letter | import
+    kind: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )  # match | cover_letter | resume_tailor | import | reextract
     # Индексы на FK (миграция 018): каскадное удаление резюме / вакансии без seq scan.
     # У импорта (миграция 023) их нет — тексты в params.
     resume_id: Mapped[int | None] = mapped_column(

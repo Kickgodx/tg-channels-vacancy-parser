@@ -37,6 +37,8 @@ dependencies = [
   "opentelemetry-instrumentation-httpx==0.65b0",
   "redis (>=5.0.0)",
   "rq (>=2.0.0)",
+  # Текст резюме из PDF (загрузка файла); DOCX разбирается stdlib.
+  "pypdf (>=5.0.0)",
 ]
 
 [project.optional-dependencies]

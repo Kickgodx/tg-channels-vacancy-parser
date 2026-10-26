@@ -15,6 +15,8 @@ import type {
   ProgressEvent,
   Resume,
   SkillGaps,
+  ResumeFileText,
+  ResumeTailoring,
   CompanyProfile,
   VacancyFlags,
   MarketSalary,
@@ -902,6 +904,27 @@ export const api = {
 
   getCoverLetter: (resumeId: number, vacancyId: string) =>
     request<CoverLetter>(`/resumes/${resumeId}/cover-letter/${vacancyId}`),
+
+  /** Адаптация резюме: кэш → сразу; иначе 202 job + SSE/poll. */
+  tailorResume: (resumeId: number, vacancyId: string, force = false, signal?: AbortSignal) =>
+    postInteractiveLlm<ResumeTailoring>(
+      `/resumes/${resumeId}/tailor/${vacancyId}${force ? "?force=true" : ""}`,
+      { method: "POST" },
+      (job) => job.resume_tailoring,
+      undefined,
+      signal,
+    ),
+
+  getResumeTailoring: (resumeId: number, vacancyId: string) =>
+    request<ResumeTailoring>(`/resumes/${resumeId}/tailor/${vacancyId}`),
+
+  /** Текст резюме из PDF/DOCX: тело запроса — сам файл (без multipart). */
+  parseResumeFile: (file: File) =>
+    request<ResumeFileText>("/resumes/parse-file", {
+      method: "POST",
+      body: file,
+      headers: { "Content-Type": "application/octet-stream" },
+    }),
 
   subscribeRunEvents(
     runId: string,

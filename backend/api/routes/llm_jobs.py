@@ -22,7 +22,7 @@ from backend.api.deps import (
     sse_credentials,
     verify_api_key,
 )
-from backend.api.routes.resumes import _letter_to_out, _match_to_out
+from backend.api.routes.resumes import _letter_to_out, _match_to_out, _tailoring_to_out
 from backend.api.sse import (
     DB_POLL_INTERVAL_S,
     HEARTBEAT_INTERVAL_S,
@@ -41,7 +41,13 @@ from backend.observability import LLM_JOB_SSE_CONNECTIONS
 from backend.schemas import LlmJobOut
 from backend.services import import_service, llm_job_service, reextract_service
 from backend.services.llm_job_events import channel_for
-from backend.services.llm_job_service import KIND_COVER_LETTER, KIND_IMPORT, KIND_MATCH, KIND_REEXTRACT
+from backend.services.llm_job_service import (
+    KIND_COVER_LETTER,
+    KIND_IMPORT,
+    KIND_MATCH,
+    KIND_REEXTRACT,
+    KIND_RESUME_TAILOR,
+)
 from backend.services.llm_result_freshness import current_ai_config
 from backend.services.pubsub_hub import PubSubUnavailable, get_pubsub_hub
 from backend.settings import get_settings
@@ -56,6 +62,7 @@ router = APIRouter(prefix="/llm-jobs", tags=["llm-jobs"])
 def _job_to_out(db: Session, row) -> LlmJobOut:
     match_out = None
     letter_out = None
+    tailoring_out = None
     import_out = None
     reextract_out = None
     if row.kind == KIND_REEXTRACT:
@@ -74,6 +81,10 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
             c = repo.get_cover_letter(db, resume_id=row.resume_id, vacancy_id=row.vacancy_id)
             if c is not None:
                 letter_out = _letter_to_out(c, cached=False, ai=current_ai_config())
+        elif row.kind == KIND_RESUME_TAILOR:
+            t = repo.get_resume_tailoring(db, resume_id=row.resume_id, vacancy_id=row.vacancy_id)
+            if t is not None:
+                tailoring_out = _tailoring_to_out(t, cached=False, ai=current_ai_config())
 
     return LlmJobOut(
         id=row.id,
@@ -84,6 +95,7 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
         error_message=row.error_message,
         match=match_out,
         cover_letter=letter_out,
+        resume_tailoring=tailoring_out,
         import_result=import_out,
         reextract_result=reextract_out,
         cancel_requested=bool(row.cancel_requested),

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import MarketSalaryBlock from "./MarketSalaryBlock";
+import ResumeTailoringPanel from "./ResumeTailoringPanel";
 import VacancyFlagsBlock from "./VacancyFlagsBlock";
 import type {
   CoverLetter,
@@ -404,6 +405,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
             )}
           </aside>
         )}
+        {resumeId != null && <ResumeTailoringPanel resumeId={resumeId} vacancyId={listItem.id} />}
         <div className="meta-line">
           {v.post_date && <span>Дата: {new Date(v.post_date).toLocaleString()}</span>}
           {v.detected_salary_avg != null && (

@@ -1,4 +1,4 @@
-"""Репозиторий per-user контента: users, filters, resumes, matches, letters."""
+"""Репозиторий per-user контента: users, filters, resumes, matches, letters, адаптации резюме."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from backend.db.llm_job_repository import refund_queued_llm_jobs_of_resume
 from backend.db.models import (
     CoverLetterRow,
     ResumeRow,
+    ResumeTailoringRow,
     SavedFilterRow,
     UserRow,
     VacancyMatchRow,
@@ -123,7 +124,7 @@ def update_resume(
         row.name = name
     if text is not None and text != row.text:
         row.text = text
-        # Матчи и письма — кэш по старому тексту: без сброса POST match вернёт его с cached=true.
+        # Матчи, письма и адаптации — кэш по старому тексту: без сброса POST match вернёт его с cached=true.
         _delete_resume_llm_results(session, resume_id)
     session.flush()
     return row
@@ -132,6 +133,7 @@ def update_resume(
 def _delete_resume_llm_results(session: Session, resume_id: int) -> None:
     session.query(VacancyMatchRow).filter(VacancyMatchRow.resume_id == resume_id).delete()
     session.query(CoverLetterRow).filter(CoverLetterRow.resume_id == resume_id).delete()
+    session.query(ResumeTailoringRow).filter(ResumeTailoringRow.resume_id == resume_id).delete()
 
 
 def delete_resume(session: Session, resume_id: int, user_id: int | None = None) -> bool:
@@ -249,6 +251,49 @@ def upsert_cover_letter(
 
 def delete_cover_letter(session: Session, *, resume_id: int, vacancy_id: str) -> bool:
     row = session.get(CoverLetterRow, (resume_id, vacancy_id))
+    if row is None:
+        return False
+    session.delete(row)
+    session.flush()
+    return True
+
+
+def get_resume_tailoring(session: Session, *, resume_id: int, vacancy_id: str) -> ResumeTailoringRow | None:
+    return session.get(ResumeTailoringRow, (resume_id, vacancy_id))
+
+
+def upsert_resume_tailoring(
+    session: Session,
+    *,
+    resume_id: int,
+    vacancy_id: str,
+    summary: str,
+    suggestions: list,
+    keywords: list,
+    do_not_claim: list,
+    model: str,
+    requested_model: str | None = None,
+    prompt_version: str | None = None,
+) -> ResumeTailoringRow:
+    """Записать/обновить адаптацию пары (resume, vacancy) — кэш генерации по PK."""
+    row = session.get(ResumeTailoringRow, (resume_id, vacancy_id))
+    if row is None:
+        row = ResumeTailoringRow(resume_id=resume_id, vacancy_id=vacancy_id)
+        session.add(row)
+    row.summary = summary
+    row.suggestions = suggestions
+    row.keywords = keywords
+    row.do_not_claim = do_not_claim
+    row.model = model
+    row.requested_model = requested_model
+    row.prompt_version = prompt_version
+    row.created_at = datetime.now(UTC)
+    session.flush()
+    return row
+
+
+def delete_resume_tailoring(session: Session, *, resume_id: int, vacancy_id: str) -> bool:
+    row = session.get(ResumeTailoringRow, (resume_id, vacancy_id))
     if row is None:
         return False
     session.delete(row)

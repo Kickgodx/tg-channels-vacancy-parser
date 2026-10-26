@@ -14,7 +14,13 @@ from backend.db import llm_job_repository as llm_jobs
 from backend.db import repository as repo
 from backend.db.session import session_scope
 from backend.observability import record_llm_job, record_llm_worker_job
-from backend.services import cover_letter_service, import_service, match_service, reextract_service
+from backend.services import (
+    cover_letter_service,
+    import_service,
+    match_service,
+    reextract_service,
+    resume_tailoring_service,
+)
 from backend.services.llm_job_events import publish_llm_job_event
 from backend.services.llm_job_service import (
     BATCH_KINDS,
@@ -22,6 +28,7 @@ from backend.services.llm_job_service import (
     KIND_IMPORT,
     KIND_MATCH,
     KIND_REEXTRACT,
+    KIND_RESUME_TAILOR,
     LlmJobCancelled,
 )
 from backend.workers import liveness
@@ -160,6 +167,14 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                     vacancy_text=vacancy_text,
                     tone=str(params.get("tone") or "neutral"),
                     extra_notes=params.get("extra_notes"),
+                    is_cancelled=is_cancelled,
+                )
+            elif kind == KIND_RESUME_TAILOR:
+                resume_tailoring_service.generate_single(
+                    resume_id=resume_id,
+                    resume_text=resume_text,
+                    vacancy_id=vacancy_id,
+                    vacancy_text=vacancy_text,
                     is_cancelled=is_cancelled,
                 )
             else:

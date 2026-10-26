@@ -192,7 +192,7 @@ JWT_SECRET=...        # python -c "import secrets; print(secrets.token_urlsafe(4
 | **Импорт** | `/import` — вставка текста вакансии вручную (например, с hh.ru): rules + LLM-разбор (фоновой джобой, с прогрессом) и запись в общую базу; ниже — последние импортированные |
 | **HH** | `/hh` — только для админа: sync вакансий с HH.ru (поиск AQA/Python), без LLM; кэш listings + skip detail |
 | **Вакансии** | Все уникальные вакансии из PostgreSQL: поиск, фильтры, пресеты, пагинация, сортировка по клику на заголовок; вкладка **Аналитика** |
-| **Резюме** | Список резюме пользователя: просмотр текста, создание, редактирование, удаление |
+| **Резюме** | Список резюме пользователя: просмотр текста, создание (вставкой или из PDF/DOCX), редактирование, удаление; «Чего не хватает» по оценкам |
 
 Возможности таблицы: сортировка asc/desc по дате, зарплате, валюте, формату, грейду, score, match; двухуровневая сортировка «дата + зарплата ₽» (Shift+клик по второй колонке или кнопка над таблицей): по дню поста (UTC), внутри дня — по рублёвой зарплате, или по зарплате, при равной — по дате (`then_by` / `then_order`, в URL, пресетах и экспорте); выбор видимых колонок; модальное окно с полным текстом, оценкой соответствия резюме и ссылками на пост/канал.
 
@@ -406,13 +406,38 @@ LLM пишет черновик отклика под конкретную ва�
   reasoning-флаг и уровень общие с матчингом (`ai.match_reasoning_enabled`,
   `ai.match_reasoning_effort`).
 
+### Адаптация резюме под вакансию
+
+В карточке вакансии при выбранном резюме — блок «Адаптация резюме»: LLM подсказывает,
+как переписать **реальный** опыт из резюме под требования вакансии (`POST
+/resumes/{id}/tailor/{vacancy_id}`, фоновая джоба `kind=resume_tailor`). Ответ: короткий
+вывод, до 8 правок («Было» → «Стало» или «Добавить», раздел резюме, какое требование
+закрывает, приоритет; у каждой — «Копировать»), термины вакансии, которые резюме уже
+подтверждает, и список «Не добавлять без реального опыта» — требования, которых в резюме
+нет. Промпт запрещает выдумывать навыки, работодателей и цифры; недостающие навыки из
+сохранённой оценки уходят в этот список, а не в правки.
+
+Механика — как у писем: результат хранится парой `(resume_id, vacancy_id)` в
+`resume_tailorings` и отдаётся из БД без вызова LLM, «Пересчитать» — `force=true`, `DELETE`
+сбрасывает. Модель — та же, что у писем (`ai.cover_letter_model` → `match_model` →
+`model`); смена модели или `RESUME_TAILOR_PROMPT_VERSION` делает результат `stale`. Квота
+и отмена — общие для пользовательского LLM. Правка текста резюме сбрасывает его оценки,
+письма и адаптации.
+
+**Резюме из файла.** В форме резюме — «Загрузить из файла»: `POST /resumes/parse-file`, тело
+запроса — сам файл (PDF или DOCX до 5 МБ, без multipart). Формат определяется по
+сигнатуре; PDF читается `pypdf` (текстовый слой, до 30 страниц), DOCX — из
+`word/document.xml` стандартной библиотекой. Текст подставляется в поле для правки и не
+сохраняется, пока не нажать «Сохранить»; длиннее 50 000 символов — обрезается с пометкой.
+Скан без текстового слоя, PDF с паролем и другие форматы — 422 с причиной.
+
 ### Аутентификация и per-user данные
 
 Своя лёгкая JWT-аутентификация: argon2-хэш пароля (`pwdlib`) + HS256
 (`pyjwt`). Первый зарегистрированный аккаунт становится админом и наследует
 резюме/пресеты, созданные до появления пользователей.
 
-- Приватное (по `user_id`): резюме, пресеты фильтров, матчи, письма.
+- Приватное (по `user_id`): резюме, пресеты фильтров, матчи, письма, адаптации резюме.
 - Общее: вакансии, аналитика, курсы ЦБ — единый корпус. Читает любой
   залогиненный пользователь; менять (курсы, кэш LLM) может только админ.
 - Только админ: прогоны целиком (запуск, отмена, история, экспорт, SSE), ручной
@@ -557,6 +582,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `POST` `GET` | `/resumes/{id}/match/{vacancy_id}` | Оценка: свежая из БД → 200; нет / устарела (`stale`) → фоновая джоба → 202 `{job_id}` (`force=true` — пересчёт) |
 | `GET` | `/resumes/{id}/skill-gaps` | Сводка недостающих навыков по всем оценкам резюме: технологии (со спросом в каталоге) и прочее |
 | `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Письмо: свежее того же тона → 200; иначе 202 `{job_id}` (`force`, `tone`/`extra_notes`) |
+| `POST` `GET` `DELETE` | `/resumes/{id}/tailor/{vacancy_id}` | Адаптация резюме: свежая из БД → 200; иначе 202 `{job_id}` (`force`) |
+| `POST` | `/resumes/parse-file` | Текст резюме из PDF/DOCX (тело — файл, до 5 МБ); не сохраняется |
 | `GET` | `/llm-jobs/{job_id}` | Статус LLM-задачи; при `done` — payload match/letter |
 | `GET` | `/llm-jobs/{job_id}/events` | SSE статусов (`?ticket=` или Bearer); poll остаётся fallback |
 | `POST` | `/llm-jobs/{job_id}/cancel` | Отмена своей LLM-задачи: `queued` → `cancelled` сразу, `running` — флаг; ответ — текущая задача |
@@ -645,8 +672,8 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…040`, номера 005 нет; head —
-`040_vacancies_company_key`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…041`, номера 005 нет; head —
+`041_resume_tailorings`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -661,6 +688,7 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 | `vacancy_matches` | Оценки соответствия, PK `(resume_id, vacancy_id)` — он же кэш матчинга; `requested_model` + `prompt_version` — для `stale` |
 | `llm_jobs` | Фоновые LLM-задачи: мэтчинг, письма, ручной импорт (`queued`/`running`/`done`/`error`/`cancelled`) |
 | `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации; `requested_model` + `prompt_version` — для `stale` |
+| `resume_tailorings` | Адаптации резюме под вакансию, PK `(resume_id, vacancy_id)` — как у писем |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 | `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
 | `llm_user_usage` | Вызовы LLM пользователя за сутки — квота `LLM_USER_DAILY_CALLS` |
@@ -701,7 +729,7 @@ tg_jobs_parser/
     workers/               — parse/llm/hh_worker (RQ, общий runner), *_tasks, recover*,
                              liveness (heartbeat + watchdog), healthcheck
     queue/                 — RQ Redis connection (очереди parse, llm, hh)
-  alembic/                 — миграции SQL (001…040)
+  alembic/                 — миграции SQL (001…041)
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes
@@ -847,7 +875,7 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 | Golden dataset | `evals/golden/extraction.jsonl` |
 | Offline fixtures | `evals/fixtures/extraction_outputs.json` |
 | Scorer | `tg_jobs_parser/evals/score_extraction.py` |
-| Версии промптов | `EXTRACT_PROMPT_VERSION` / `MATCH_PROMPT_VERSION` / `COVER_LETTER_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py` |
+| Версии промптов | `EXTRACT_PROMPT_VERSION` / `MATCH_PROMPT_VERSION` / `COVER_LETTER_PROMPT_VERSION` / `RESUME_TAILOR_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py` |
 
 ```powershell
 # Offline (в обычном pytest -q)
