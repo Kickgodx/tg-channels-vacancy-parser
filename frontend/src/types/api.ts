@@ -223,6 +223,7 @@ export interface SavedFilterParams {
   date_to?: string | null;
   has_salary?: boolean | null;
   include_archived?: boolean;
+  search_mode?: "text" | "semantic";
   sort_by?: string;
   sort_order?: string;
   then_by?: string | null;
@@ -414,7 +415,7 @@ export interface CoverLetter {
   stale: boolean;
 }
 
-export type LlmJobKind = "match" | "cover_letter" | "resume_tailor" | "import" | "reextract";
+export type LlmJobKind = "match" | "cover_letter" | "resume_tailor" | "import" | "reextract" | "match_batch";
 
 export interface ResumeTailoringSuggestion {
   section: string;
@@ -470,6 +471,8 @@ export interface LlmJob {
   import_result?: VacancyImportResponse | null;
   /** Переразбор (kind=reextract): итог по уже обработанным вакансиям. */
   reextract_result?: VacancyReextractResponse | null;
+  /** Пакетная оценка (kind=match_batch): итог по уже оценённым вакансиям. */
+  match_batch_result?: MatchBatchResponse | null;
   /** Запрошена отмена; у running — воркер остановит задачу в ближайшей точке проверки. */
   cancel_requested: boolean;
   created_at: string;
@@ -723,4 +726,41 @@ export interface VacancyFlags {
   vacancy_id: string;
   company_key: string | null;
   flags: VacancyFlag[];
+}
+
+export interface MatchBatchItem {
+  index: number;
+  vacancy_id: string;
+  status: "scored" | "skipped" | "error";
+  score: number | null;
+  message: string | null;
+}
+
+export interface MatchBatchResponse {
+  total: number;
+  items: MatchBatchItem[];
+  scored: number;
+  /** Свежая оценка уже была — LLM не вызывался. */
+  skipped: number;
+  errors: number;
+  warning?: string | null;
+}
+
+export interface SimilarVacancy {
+  vacancy: VacancyListItem;
+  /** 1 − косинусное расстояние эмбеддингов. */
+  similarity: number;
+}
+
+export interface SimilarVacanciesResponse {
+  items: SimilarVacancy[];
+  /** У вакансии ещё нет эмбеддинга — индексация впереди. */
+  pending: boolean;
+}
+
+export interface SemanticStatus {
+  enabled: boolean;
+  model: string;
+  vacancies: number;
+  embedded: number;
 }

@@ -15,6 +15,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, defer
 
 from backend.db.aggregate_cache import invalidate_aggregate_cache
+from backend.db.embedding_queries import vacancy_distance
 from backend.db.models import (
     ParseRunRow,
     ParseRunVacancyRow,
@@ -161,6 +162,11 @@ def _selected_order(query: VacancyQuery, *, vacancy=None, match=None) -> list:
     """
     if _sorts_by_match(query):
         return [_directed((match.c if match is not None else VacancyMatchRow).overall_score, query.sort_order)]
+    if query.sort_by == "resume_fit" and query.resume_vector is not None:
+        # Ближе по смыслу к резюме — выше; вакансии без вектора — в конце, новые первыми.
+        vid = vacancy.c.id if vacancy is not None else VacancyRow.id
+        post = vacancy.c.post_date if vacancy is not None else VacancyRow.post_date
+        return [vacancy_distance(vid, query.resume_vector).asc().nulls_last(), post.desc().nulls_last()]
 
     def col(field: str):
         name = _SORT_COLUMNS.get(field, VacancyRow.post_date).key
@@ -196,9 +202,22 @@ def _rank_window_ids(query: VacancyQuery):
     return stmt.order_by(*order, v.c.id.asc()).limit(FTS_RANK_WINDOW)
 
 
+def _semantic_relevance_first(query: VacancyQuery) -> bool:
+    """Смысловой поиск при сортировке по умолчанию (дата, без второй ступени) — по близости."""
+    return (
+        bool(query.q)
+        and query.search_mode == "semantic"
+        and query.semantic_vector is not None
+        and query.sort_by == "post_date"
+        and query.then_by is None
+    )
+
+
 def _vacancy_order_by(query: VacancyQuery) -> list:
     order = _selected_order(query)
-    if not query.q:
+    if _semantic_relevance_first(query):
+        return [vacancy_distance(VacancyRow.id, query.semantic_vector).asc().nulls_last(), *order]
+    if not query.q or query.search_mode == "semantic":
         return order
     # CASE вычисляется лениво: ts_rank считается только для строк окна.
     rank = case(

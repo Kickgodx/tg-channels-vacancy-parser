@@ -42,6 +42,17 @@ def fts_query(document, q: str):
     return document, func.websearch_to_tsquery(literal_column("'russian'"), q)
 
 
+def _semantic_ids(query: VacancyQuery, *, include_duplicates: bool):
+    """Окно смыслового поиска: ближайшие к запросу вакансии под остальными фильтрами."""
+    from backend.db.embedding_queries import semantic_window_ids
+
+    v = VacancyRow.__table__.alias("semantic_window")
+    rest = query.model_copy(update={"q": None, "semantic_vector": None})
+    return semantic_window_ids(
+        v, query.semantic_vector, vacancy_filter_conditions(rest, table=v, include_duplicates=include_duplicates)
+    )
+
+
 def vacancy_filter_conditions(
     query: VacancyQuery,
     *,
@@ -72,7 +83,9 @@ def vacancy_filter_conditions(
     if query.date_to:
         dt_to = datetime.combine(query.date_to, time.max, tzinfo=UTC)
         conditions.append(c.post_date <= dt_to)
-    if query.q:
+    if query.q and query.search_mode == "semantic" and query.semantic_vector is not None:
+        conditions.append(c.id.in_(_semantic_ids(query, include_duplicates=include_duplicates)))
+    elif query.q:
         document, ts_query = fts_query(c.search_tsv, query.q)
         conditions.append(document.op("@@")(ts_query))
     # «С зарплатой» — есть рублёвая сумма, как в метриках и аналитике: иначе список

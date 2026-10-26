@@ -29,9 +29,10 @@ KIND_COVER_LETTER = "cover_letter"
 KIND_RESUME_TAILOR = "resume_tailor"
 KIND_IMPORT = "import"
 KIND_REEXTRACT = "reextract"
-# Пакетные джобы (импорт текстов, переразбор вакансий): без резюме и вакансии, не
+KIND_MATCH_BATCH = "match_batch"
+# Пакетные джобы (импорт текстов, переразбор вакансий, пакетная оценка): без вакансии, не
 # переиспользуются, мимо interactive-бюджета, квота — в воркере по элементам.
-BATCH_KINDS = frozenset({KIND_IMPORT, KIND_REEXTRACT})
+BATCH_KINDS = frozenset({KIND_IMPORT, KIND_REEXTRACT, KIND_MATCH_BATCH})
 
 # Импорт — до 50 текстов, каждый со своим вызовом LLM: базового таймаута RQ на него мало.
 IMPORT_SECONDS_PER_TEXT = 60

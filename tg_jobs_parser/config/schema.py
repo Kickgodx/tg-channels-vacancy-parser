@@ -382,6 +382,30 @@ class AiMergeConfig(BaseModel):
     min_confidence: float = Field(default=0.45, ge=0, le=1)
 
 
+class AiEmbeddingsConfig(BaseModel):
+    """Эмбеддинги вакансий и резюме (OpenRouter /embeddings): похожие, подбор, смысловой поиск."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Фоновая индексация вакансий и смысловые функции. Без OPENROUTER_API_KEY — пропуск.",
+    )
+    model: str = Field(
+        default="openai/text-embedding-3-small",
+        description=(
+            "Модель эмбеддингов (размерность 1536 — колонка vector(1536)). Смена модели — "
+            "переиндексация каталога фоновой задачей."
+        ),
+    )
+    sweep_interval_seconds: int = Field(
+        default=300, ge=30, le=86400, description="Как часто лидер API индексирует новые вакансии."
+    )
+    batch_size: int = Field(default=64, ge=1, le=256, description="Текстов в одном запросе к API.")
+    max_per_sweep: int = Field(
+        default=2000, ge=0, le=100_000, description="Вакансий за один проход индексации; 0 — не индексировать."
+    )
+    max_input_chars: int = Field(default=8000, ge=500, le=30_000, description="Символов текста на эмбеддинг.")
+
+
 class AiConfig(BaseModel):
     enabled: bool = False
     mode: str = Field(
@@ -533,6 +557,7 @@ class AiConfig(BaseModel):
     )
     allow_unknown_specializations: bool = True
     merge: AiMergeConfig = Field(default_factory=AiMergeConfig)
+    embeddings: AiEmbeddingsConfig = Field(default_factory=AiEmbeddingsConfig)
 
     @model_validator(mode="before")
     @classmethod

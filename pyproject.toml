@@ -43,7 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Poetry: poetry install --extras telethon — опционально cryptg для ускорения Telethon на Windows
-# testcontainers: тесты сами поднимают postgres:16 в Docker, если не задан TEST_DATABASE_URL.
+# testcontainers: тесты сами поднимают postgres:16 + pgvector (docker/postgres), если не задан TEST_DATABASE_URL.
 dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0", "pytest-cov>=6.0.0", "ruff>=0.14.0,<1.0.0", "fakeredis>=2.26.0", "testcontainers>=4.8.0"]
 telethon = ["cryptg>=0.5.0"]
 

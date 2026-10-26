@@ -95,6 +95,16 @@ def _periodic_cleanup() -> None:
 _CLEANUP_INTERVAL_S = 60 * 60
 
 
+def _sweep_embeddings() -> None:
+    """Проход индексации эмбеддингов; ошибки — в лог, следующий проход через интервал."""
+    try:
+        from backend.services.embedding_service import sweep_vacancies
+
+        sweep_vacancies()
+    except Exception as e:
+        logging.getLogger(__name__).warning("Индексация эмбеддингов не выполнена: %s", e)
+
+
 class _LeaderDuties:
     """Общая для процессов API работа: её выполняет только лидер (``backend.leader``).
 
@@ -106,6 +116,24 @@ class _LeaderDuties:
     def __init__(self) -> None:
         self._metrics_server = None
         self._last_cleanup = 0.0
+        self._last_embedding_sweep = 0.0
+        self._embedding_thread: threading.Thread | None = None
+
+    def _maybe_sweep_embeddings(self) -> None:
+        """Индексация новых вакансий раз в ``ai.embeddings.sweep_interval_seconds`` — в своём потоке."""
+        import time
+
+        if self._embedding_thread is not None and self._embedding_thread.is_alive():
+            return
+        try:
+            interval = load_config(get_settings().config_path).ai.embeddings.sweep_interval_seconds
+        except Exception:
+            return
+        if self._last_embedding_sweep and time.monotonic() - self._last_embedding_sweep < interval:
+            return
+        self._last_embedding_sweep = time.monotonic()
+        self._embedding_thread = threading.Thread(target=_sweep_embeddings, name="embedding-sweep", daemon=True)
+        self._embedding_thread.start()
 
     def on_acquire(self) -> None:
         import time
@@ -114,6 +142,7 @@ class _LeaderDuties:
         self._last_cleanup = time.monotonic()
         threading.Thread(target=_sync_fx_on_startup, name="fx-startup-sync", daemon=True).start()
         self._metrics_server = _start_metrics_server()
+        self._maybe_sweep_embeddings()
 
     def on_tick(self) -> None:
         import time
@@ -124,6 +153,7 @@ class _LeaderDuties:
         if time.monotonic() - self._last_cleanup >= _CLEANUP_INTERVAL_S:
             self._last_cleanup = time.monotonic()
             _periodic_cleanup()
+        self._maybe_sweep_embeddings()
 
     def on_lose(self) -> None:
         server, self._metrics_server = self._metrics_server, None

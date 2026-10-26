@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import MarketSalaryBlock from "./MarketSalaryBlock";
 import ResumeTailoringPanel from "./ResumeTailoringPanel";
+import SimilarVacanciesBlock from "./SimilarVacanciesBlock";
 import VacancyFlagsBlock from "./VacancyFlagsBlock";
 import type {
   CoverLetter,
@@ -140,6 +141,8 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
     },
   });
 
+  // Похожая вакансия открывается поверх текущей (своя модалка, закрытие возвращает сюда).
+  const [nested, setNested] = useState<VacancyListItem | null>(null);
   const canMatch = resumeId != null;
   const matchTitle = canMatch
     ? "LLM оценит, насколько выбранное резюме подходит этой вакансии"
@@ -439,6 +442,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
         )}
         <VacancyFlagsBlock vacancyId={listItem.id} />
         <MarketSalaryBlock vacancyId={listItem.id} />
+        <SimilarVacanciesBlock vacancyId={listItem.id} onOpen={setNested} />
         <hr />
         <div className="vacancy-full-text">
           {!hasFullText && detailQ.isLoading
@@ -460,6 +464,8 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
             <p>{detail?.ai_notes ?? v.ai_notes}</p>
           </aside>
         )}
+        {/* Внутри .modal: клик по фону вложенной не всплывает до оверлея этой и не закрывает её. */}
+        {nested && <VacancyModal vacancy={nested} resumeId={resumeId} onClose={() => setNested(null)} />}
       </div>
     </div>
   );

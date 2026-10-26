@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
@@ -11,11 +13,31 @@ import sqlalchemy as sa
 # --- Postgres -------------------------------------------------------------------------
 # База для тестов — тот же Postgres 16, что в docker-compose.yml. Источник:
 #   * TEST_DATABASE_URL — готовый сервер (compose-Postgres, CI-сервис); нужна роль с CREATEDB;
-#   * иначе testcontainers поднимает postgres:16-alpine в Docker на время прогона.
+#   * иначе testcontainers поднимает образ docker/postgres (postgres:16-alpine + pgvector) в Docker
+#     на время прогона; нет образа — собирает его (один раз, дальше из кэша Docker).
 # Контейнер поднимает один процесс-контроллер (pytest_configure), xdist-воркеры получают URL
 # через env. Каждый воркер создаёт свою базу и прогоняет в ней миграции; перед тестом — TRUNCATE.
 
-_PG_IMAGE = "postgres:16-alpine"
+_PG_DOCKERFILE_DIR = Path(__file__).resolve().parents[1] / "docker" / "postgres"
+
+
+def _pg_image() -> str:
+    """Тег образа как в docker-compose.yml: версия pgvector — из ARG Dockerfile."""
+    text = (_PG_DOCKERFILE_DIR / "Dockerfile").read_text(encoding="utf-8")
+    version = re.search(r"^ARG PGVECTOR_VERSION=(\S+)", text, re.MULTILINE).group(1)
+    return f"tgjobs-postgres:16-pgvector{version}"
+
+
+def _ensure_pg_image(image: str) -> None:
+    import docker
+
+    client = docker.from_env()
+    try:
+        client.images.get(image)
+    except docker.errors.ImageNotFound:
+        client.images.build(path=str(_PG_DOCKERFILE_DIR), tag=image, rm=True)
+
+
 # Данные в tmpfs без fsync: тестовой базе durability не нужна, а запись заметно быстрее.
 _PG_COMMAND = "postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c max_connections=300"
 _PG_ERROR_ENV = "TGJOBS_TEST_PG_ERROR"
@@ -46,8 +68,10 @@ def pytest_configure(config) -> None:
     try:
         from testcontainers.community.postgres import PostgresContainer
 
+        image = _pg_image()
+        _ensure_pg_image(image)
         _container = (
-            PostgresContainer(_PG_IMAGE, driver="psycopg")
+            PostgresContainer(image, driver="psycopg")
             .with_command(_PG_COMMAND)
             .with_tmpfs_mount("/var/lib/postgresql/data")
         )
@@ -211,6 +235,8 @@ filters:
   work_formats: [any]
 ai:
   enabled: false
+  embeddings:
+    enabled: false
 fx:
   enabled: false
 """

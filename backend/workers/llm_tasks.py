@@ -17,6 +17,7 @@ from backend.observability import record_llm_job, record_llm_worker_job
 from backend.services import (
     cover_letter_service,
     import_service,
+    match_batch_service,
     match_service,
     reextract_service,
     resume_tailoring_service,
@@ -27,6 +28,7 @@ from backend.services.llm_job_service import (
     KIND_COVER_LETTER,
     KIND_IMPORT,
     KIND_MATCH,
+    KIND_MATCH_BATCH,
     KIND_REEXTRACT,
     KIND_RESUME_TAILOR,
     LlmJobCancelled,
@@ -143,6 +145,16 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                     lease_lost.set()
             elif kind == KIND_REEXTRACT:
                 if not reextract_service.run_reextract_job(
+                    jid,
+                    user_id=user_id,
+                    params=params,
+                    result=job_result,
+                    lease_owner=lease_owner,
+                    is_cancelled=is_cancelled,
+                ):
+                    lease_lost.set()
+            elif kind == KIND_MATCH_BATCH:
+                if not match_batch_service.run_match_batch_job(
                     jid,
                     user_id=user_id,
                     params=params,

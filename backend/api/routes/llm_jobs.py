@@ -39,12 +39,13 @@ from backend.db.llm_job_repository import TERMINAL_LLM_STATUSES
 from backend.db.session import session_scope
 from backend.observability import LLM_JOB_SSE_CONNECTIONS
 from backend.schemas import LlmJobOut
-from backend.services import import_service, llm_job_service, reextract_service
+from backend.services import import_service, llm_job_service, match_batch_service, reextract_service
 from backend.services.llm_job_events import channel_for
 from backend.services.llm_job_service import (
     KIND_COVER_LETTER,
     KIND_IMPORT,
     KIND_MATCH,
+    KIND_MATCH_BATCH,
     KIND_REEXTRACT,
     KIND_RESUME_TAILOR,
 )
@@ -65,7 +66,11 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
     tailoring_out = None
     import_out = None
     reextract_out = None
-    if row.kind == KIND_REEXTRACT:
+    match_batch_out = None
+    if row.kind == KIND_MATCH_BATCH:
+        if row.result:
+            match_batch_out = match_batch_service.match_batch_response(row.result)
+    elif row.kind == KIND_REEXTRACT:
         if row.result:
             reextract_out = reextract_service.reextract_response(row.result)
     elif row.kind == KIND_IMPORT:
@@ -98,6 +103,7 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
         resume_tailoring=tailoring_out,
         import_result=import_out,
         reextract_result=reextract_out,
+        match_batch_result=match_batch_out,
         cancel_requested=bool(row.cancel_requested),
         created_at=row.created_at,
         started_at=row.started_at,

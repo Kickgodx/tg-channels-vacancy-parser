@@ -15,6 +15,9 @@ import type {
   ProgressEvent,
   Resume,
   SkillGaps,
+  MatchBatchResponse,
+  SemanticStatus,
+  SimilarVacanciesResponse,
   ResumeFileText,
   ResumeTailoring,
   CompanyProfile,
@@ -584,6 +587,29 @@ export const api = {
     request<VacancyFlags>(`/vacancies/${encodeURIComponent(id)}/flags`),
   getCompanyProfile: (name: string) =>
     request<CompanyProfile>(`/companies/profile?${new URLSearchParams({ name }).toString()}`),
+  getSimilarVacancies: (id: string, limit = 8) =>
+    request<SimilarVacanciesResponse>(`/vacancies/${encodeURIComponent(id)}/similar?limit=${limit}`),
+  getSemanticStatus: () => request<SemanticStatus>("/vacancies/semantic-status"),
+
+  /** LLM-оценка резюме по нескольким вакансиям одной задачей; `onProgress` — частичный итог. */
+  matchBatch: (
+    resumeId: number,
+    vacancyIds: string[],
+    onProgress?: (partial: MatchBatchResponse) => void,
+    signal?: AbortSignal,
+  ) => {
+    const empty: MatchBatchResponse = { total: vacancyIds.length, items: [], scored: 0, skipped: 0, errors: 0 };
+    return postInteractiveLlm<MatchBatchResponse>(
+      `/resumes/${resumeId}/match-batch`,
+      { method: "POST", body: JSON.stringify({ vacancy_ids: vacancyIds }) },
+      (job) => job.match_batch_result ?? empty,
+      (job) => {
+        if (job.match_batch_result) onProgress?.(job.match_batch_result);
+      },
+      signal,
+      { pickCancelled: (job) => job.match_batch_result ?? empty },
+    );
+  },
   getMarketSalary: (id: string) =>
     request<MarketSalary>(`/vacancies/${encodeURIComponent(id)}/market-salary`),
 

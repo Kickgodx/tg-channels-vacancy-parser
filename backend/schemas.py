@@ -158,6 +158,7 @@ VacancySortField = Literal[
     "salary_currency",
     "vacancy_score",
     "match_score",
+    "resume_fit",
 ]
 VacancySortOrder = Literal["asc", "desc"]
 # Вторая ступень сортировки — только пара «дата ↔ зарплата в рублях»: под неё есть индексы.
@@ -213,6 +214,16 @@ class VacancyQuery(BaseModel):
         default=None,
         description="Подмешать LLM-оценку соответствия этому резюме (join vacancy_matches).",
     )
+    search_mode: Literal["text", "semantic"] = Field(
+        default="text",
+        description=(
+            "text — полнотекстовый поиск по q; semantic — по смыслу: ближайшие к q по эмбеддингу "
+            "вакансии (до 300) под остальными фильтрами."
+        ),
+    )
+    # Векторы считает роут (запрос к провайдеру), в фильтры и ключ кэша агрегатов они не входят.
+    semantic_vector: list[float] | None = Field(default=None, exclude=True, repr=False)
+    resume_vector: list[float] | None = Field(default=None, exclude=True, repr=False)
 
     @model_validator(mode="after")
     def _check_sort_pair(self) -> VacancyQuery:
@@ -643,6 +654,7 @@ class LlmJobOut(BaseModel):
     resume_tailoring: ResumeTailoringOut | None = None
     import_result: VacancyImportResponse | None = None
     reextract_result: VacancyReextractResponse | None = None
+    match_batch_result: MatchBatchResponse | None = None
     cancel_requested: bool = Field(
         default=False,
         description="Запрошена отмена; у running — воркер остановит задачу в ближайшей точке проверки.",
@@ -703,6 +715,49 @@ class VacancyReextractResponse(BaseModel):
     kept: int = 0
     errors: int = 0
     warning: str | None = None
+
+
+MatchBatchStatus = Literal["scored", "skipped", "error"]
+
+
+class MatchBatchItem(BaseModel):
+    index: int
+    vacancy_id: str
+    status: MatchBatchStatus
+    score: int | None = None
+    message: str | None = None
+
+
+class MatchBatchResponse(BaseModel):
+    """Итог пакетной оценки: по вакансиям, растёт, пока джоба ``running``."""
+
+    total: int = 0
+    items: list[MatchBatchItem] = Field(default_factory=list)
+    scored: int = 0
+    skipped: int = Field(default=0, description="Свежая оценка уже была — LLM не вызывался.")
+    errors: int = 0
+    warning: str | None = None
+
+
+class MatchBatchRequest(BaseModel):
+    vacancy_ids: list[str] = Field(min_length=1, max_length=20)
+
+
+class SimilarVacancy(BaseModel):
+    vacancy: VacancyListItem
+    similarity: float = Field(description="1 − косинусное расстояние эмбеддингов (1 — тот же смысл).")
+
+
+class SimilarVacanciesResponse(BaseModel):
+    items: list[SimilarVacancy] = Field(default_factory=list)
+    pending: bool = Field(default=False, description="У вакансии ещё нет эмбеддинга — индексация впереди.")
+
+
+class EmbeddingStatus(BaseModel):
+    enabled: bool
+    model: str
+    vacancies: int = Field(description="Уникальных вакансий в базе (с архивом).")
+    embedded: int = Field(description="Из них с эмбеддингом текущей модели.")
 
 
 class VacancyReextractInfo(BaseModel):

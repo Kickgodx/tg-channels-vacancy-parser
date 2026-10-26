@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Query
 from pydantic import BeforeValidator
@@ -40,9 +40,9 @@ def check_list_depth(page: int, page_size: int) -> None:
 
 
 def check_sort_needs_resume(sort_by: str, resume_id: int | None) -> None:
-    """422 для ``sort_by=match_score`` без резюме: иначе список молча сортировался бы по дате."""
-    if sort_by == "match_score" and resume_id is None:
-        raise http_error(422, CODE_VALIDATION, "Сортировка по оценке (match_score) требует resume_id.")
+    """422 для ``match_score`` / ``resume_fit`` без резюме: иначе список молча сортировался бы по дате."""
+    if sort_by in ("match_score", "resume_fit") and resume_id is None:
+        raise http_error(422, CODE_VALIDATION, f"Сортировка {sort_by} требует resume_id.")
 
 
 def check_sort_pair(sort_by: str, then_by: str | None) -> None:
@@ -63,8 +63,16 @@ def vacancy_filters(
     has_salary: bool | None = None,
     q: Annotated[str | None, Query(max_length=500)] = None,
     include_archived: bool = False,
+    search_mode: Literal["text", "semantic"] = "text",
 ) -> VacancyQuery:
-    """Фильтры корпуса без пагинации и сортировки (их добавляет обработчик списка)."""
+    """Фильтры корпуса без пагинации и сортировки (их добавляет обработчик списка).
+
+    ``search_mode=semantic`` с ``q`` — вектор запроса считается здесь (провайдер эмбеддингов);
+    недоступен — 503, а не тихий откат к полнотекстовому поиску.
+    """
+    semantic_vector = None
+    if q and q.strip() and search_mode == "semantic":
+        semantic_vector = _semantic_vector(q)
     return VacancyQuery(
         source_channel=source_channel,
         grade=grade,
@@ -76,4 +84,16 @@ def vacancy_filters(
         has_salary=has_salary,
         q=q,
         include_archived=include_archived,
+        search_mode=search_mode,
+        semantic_vector=semantic_vector,
     )
+
+
+def _semantic_vector(q: str) -> list[float]:
+    from backend.errors import CODE_UPSTREAM_UNAVAILABLE
+    from backend.services.embedding_service import EmbeddingsUnavailable, query_embedding
+
+    try:
+        return query_embedding(q)
+    except EmbeddingsUnavailable as e:
+        raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, f"Смысловой поиск недоступен: {e}", retryable=True) from e

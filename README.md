@@ -406,6 +406,37 @@ LLM пишет черновик отклика под конкретную ва�
   reasoning-флаг и уровень общие с матчингом (`ai.match_reasoning_enabled`,
   `ai.match_reasoning_effort`).
 
+### Смысловой поиск, похожие вакансии и подбор под резюме
+
+У каждой уникальной вакансии — эмбеддинг (OpenRouter `/embeddings`, `ai.embeddings.model`,
+по умолчанию `openai/text-embedding-3-small`) в таблице `vacancy_embeddings` (pgvector,
+HNSW по косинусу). Текст для вектора — роль, грейд, технологии, формат и сам пост.
+Индексирует лидер API раз в `ai.embeddings.sweep_interval_seconds` (5 мин): новые,
+изменённые (по `updated_at` и хэшу текста) и посчитанные другой моделью; вакансия,
+которую просто встретили снова, к API не идёт. Отдельный клиент OpenRouter — без суточного
+бюджета пользовательского LLM: каталог из 2,3 тыс. вакансий индексируется примерно за
+минуту и несколько центов.
+
+- **Похожие вакансии** — блок в карточке (`GET /vacancies/{id}/similar`): ближайшие
+  активные, без почти того же текста (перепост с правками) и не больше двух от одной
+  компании. Клик открывает вакансию поверх текущей.
+- **Смысловой поиск** — переключатель «По словам / По смыслу» у поиска
+  (`search_mode=semantic`): совпадения — 300 ближайших к запросу вакансий под остальными
+  фильтрами, при сортировке по умолчанию — ближайшие первыми. Это условие фильтра, поэтому
+  аналитика и экспорт считают ту же выборку. Вектор запроса кэшируется в памяти процесса;
+  провайдер недоступен — 503 `UPSTREAM_UNAVAILABLE`, без тихого отката к словам.
+- **Подбор под резюме** — при выбранном резюме флажок «Подбор под резюме»
+  (`sort_by=resume_fit`): список по близости эмбеддингов вакансии и резюме (вектор резюме
+  хранится в `resume_embeddings` и пересчитывается при смене текста), вакансии без вектора
+  — в конце. Кнопка «Оценить топ-N» ставит одну LLM-задачу `match_batch`
+  (`POST /resumes/{id}/match-batch`, до 20 вакансий): свежие оценки не пересчитываются,
+  квота — за каждую оценённую, прогресс — по SSE, итог — в колонке Match.
+
+`GET /vacancies/semantic-status` — сколько вакансий уже проиндексировано текущей моделью.
+Нужен Postgres с расширением vector: compose собирает его из `docker/postgres`
+(`postgres:16-alpine` + pgvector, тот же musl и сортировка строк, что у прежнего образа —
+том `pgdata` подходит без REINDEX).
+
 ### Адаптация резюме под вакансию
 
 В карточке вакансии при выбранном резюме — блок «Адаптация резюме»: LLM подсказывает,
@@ -566,6 +597,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `GET` | `/vacancies/{id}/market-salary` | Рыночная вилка: квантили зарплаты похожих вакансий за год (грейд → роль → технологии) и позиция зарплаты вакансии |
 | `GET` | `/vacancies/{id}/flags` | Флаги вакансии по правилам: перепосты в разные дни, давно висит, частый найм на роль, нет зарплаты |
 | `GET` | `/companies/profile?name=` | Профиль компании по любому написанию названия: вакансии, зарплаты, роли, каналы, последние вакансии |
+| `GET` | `/vacancies/{id}/similar` | Похожие активные вакансии по эмбеддингу (`pending: true` — ещё не проиндексирована) |
+| `GET` | `/vacancies/semantic-status` | Покрытие эмбеддингами: вакансий и сколько из них проиндексировано текущей моделью |
 | `GET` | `/vacancies/technologies` | Технологии по числу вакансий под фильтрами (без учёта собственного `technology`) — варианты фильтра |
 | `GET` `POST` | `/vacancies/reextract` | Переразбор LLM активных вакансий не из HH без специализации (admin): `GET` — сколько их, `POST` — 202 `{job_id}` (идёт — id текущей) |
 | `GET` | `/hh/status` | Статус HH sync (admin): токен задан?, TTL listings, счётчики кэша |
@@ -584,6 +617,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Письмо: свежее того же тона → 200; иначе 202 `{job_id}` (`force`, `tone`/`extra_notes`) |
 | `POST` `GET` `DELETE` | `/resumes/{id}/tailor/{vacancy_id}` | Адаптация резюме: свежая из БД → 200; иначе 202 `{job_id}` (`force`) |
 | `POST` | `/resumes/parse-file` | Текст резюме из PDF/DOCX (тело — файл, до 5 МБ); не сохраняется |
+| `POST` | `/resumes/{id}/match-batch` | Пакетная LLM-оценка резюме по вакансиям (до 20): 202 `{job_id}`, итог — `match_batch_result` |
 | `GET` | `/llm-jobs/{job_id}` | Статус LLM-задачи; при `done` — payload match/letter |
 | `GET` | `/llm-jobs/{job_id}/events` | SSE статусов (`?ticket=` или Bearer); poll остаётся fallback |
 | `POST` | `/llm-jobs/{job_id}/cancel` | Отмена своей LLM-задачи: `queued` → `cancelled` сразу, `running` — флаг; ответ — текущая задача |
@@ -672,8 +706,8 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…041`, номера 005 нет; head —
-`041_resume_tailorings`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…042`, номера 005 нет; head —
+`042_embeddings`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -689,6 +723,7 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 | `llm_jobs` | Фоновые LLM-задачи: мэтчинг, письма, ручной импорт (`queued`/`running`/`done`/`error`/`cancelled`) |
 | `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации; `requested_model` + `prompt_version` — для `stale` |
 | `resume_tailorings` | Адаптации резюме под вакансию, PK `(resume_id, vacancy_id)` — как у писем |
+| `vacancy_embeddings` / `resume_embeddings` | Эмбеддинги (pgvector `vector(1536)`, HNSW по косинусу у вакансий), `model` + `content_hash` — для переиндексации |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 | `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
 | `llm_user_usage` | Вызовы LLM пользователя за сутки — квота `LLM_USER_DAILY_CALLS` |
@@ -729,7 +764,7 @@ tg_jobs_parser/
     workers/               — parse/llm/hh_worker (RQ, общий runner), *_tasks, recover*,
                              liveness (heartbeat + watchdog), healthcheck
     queue/                 — RQ Redis connection (очереди parse, llm, hh)
-  alembic/                 — миграции SQL (001…041)
+  alembic/                 — миграции SQL (001…042)
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes
@@ -1146,7 +1181,7 @@ pytest
 pytest -n 8     # параллельно (pytest-xdist)
 ```
 
-Тесты идут на Postgres 16: `tests/conftest.py` поднимает `postgres:16-alpine` через
+Тесты идут на Postgres 16: `tests/conftest.py` поднимает образ `docker/postgres` (`postgres:16-alpine` + pgvector) через
 testcontainers (нужен запущенный Docker). Готовый сервер вместо контейнера —
 `TEST_DATABASE_URL=postgresql+psycopg://user:pass@127.0.0.1:5432/db` (роль с правом
 CREATEDB; тесты создают и удаляют свои базы `tgjobs_test_*`).

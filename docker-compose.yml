@@ -60,7 +60,9 @@ x-worker-healthcheck: &worker-healthcheck
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # postgres:16-alpine + pgvector (docker/postgres/Dockerfile): эмбеддинги вакансий и резюме.
+    build: docker/postgres
+    image: tgjobs-postgres:16-pgvector0.8.7
     logging: *default-logging
     # POSTGRES_PASSWORD применяется только при инициализации пустого pgdata; сменить на
     # существующем томе: docker compose exec postgres psql -U tgjobs -c "ALTER ROLE tgjobs PASSWORD '...'"
@@ -103,11 +105,13 @@ services:
 
   # Плановый pg_dump всей базы + проверка восстановления во временный кластер внутри
   # контейнера (scripts/pg_backup.sh). Дампы — на хосте в BACKUP_HOST_DIR (переживают
-  # down -v). Образ — та же major-версия, что у postgres: pg_dump не может быть старше сервера.
+  # down -v). Образ — тот же, что у postgres: pg_dump не может быть старше сервера, а проверка
+  # восстановления создаёт расширение vector во временном кластере.
   # Внеплановый дамп: docker compose exec pg-backup /scripts/pg_backup.sh once
   # unhealthy — последний проверенный дамп старше 1,5 × BACKUP_INTERVAL_HOURS.
   pg-backup:
-    image: postgres:16-alpine
+    build: docker/postgres
+    image: tgjobs-postgres:16-pgvector0.8.7
     logging: *default-logging
     entrypoint: ["/bin/sh", "/scripts/pg_backup.sh"]
     environment:
