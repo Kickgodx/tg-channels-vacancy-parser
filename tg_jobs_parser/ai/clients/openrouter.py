@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +15,8 @@ from opentelemetry.trace import SpanKind
 
 from tg_jobs_parser.ai.models_catalog import LlmModelEntry
 from tg_jobs_parser.ai.prompts import (
+    build_ask_market_answer_messages,
+    build_ask_market_plan_messages,
     build_cover_letter_messages,
     build_interview_prep_messages,
     build_market_digest_messages,
@@ -28,6 +31,7 @@ from tg_jobs_parser.ai.rate_limit import (
 )
 from tg_jobs_parser.ai.schema import (
     InterviewPrepExtraction,
+    MarketQueryPlan,
     ResumeTailoringExtraction,
     VacancyAIExtraction,
     VacancyMatchExtraction,
@@ -149,6 +153,22 @@ def _parse_digest(raw: str) -> str:
     return text
 
 
+def _parse_market_plan(raw: str) -> MarketQueryPlan:
+    text = _extract_json_text(raw)
+    return MarketQueryPlan.model_validate(json.loads(text))
+
+
+def _parse_market_answer(raw: str) -> str:
+    """Ответ — обычный текст; снимаем markdown-ограждение, если модель его добавила."""
+    text = raw.strip()
+    m = _JSON_FENCE_RE.search(text)
+    if m:
+        text = m.group(1).strip()
+    if not text:
+        raise ValueError("OpenRouter: пустой ответ на вопрос о рынке")
+    return text
+
+
 _LLM_TASKS = {
     _parse_extraction: "extract",
     _parse_match: "match",
@@ -156,6 +176,8 @@ _LLM_TASKS = {
     _parse_tailoring: "resume_tailor",
     _parse_interview_prep: "interview_prep",
     _parse_digest: "market_digest",
+    _parse_market_plan: "ask_market_plan",
+    _parse_market_answer: "ask_market_answer",
 }
 
 
@@ -755,6 +777,83 @@ class OpenRouterClient:
         except ValueError as e:
             _LOG.warning("Обзор рынка: пустой ответ LLM (%s), повторный запрос", e)
             return call()
+
+    def _with_fallback(self, task: str, call: Callable[[str | None], tuple[Any, LLMUsage]]) -> tuple[Any, LLMUsage]:
+        """Основная модель, при ошибке (кроме лимитов) — ``ai.fallback_models`` по очереди."""
+        if self._rate_limiter.llm_disabled:
+            raise LlmQuotaExhausted(self._rate_limiter.llm_disabled_reason or "LLM отключён")
+        try:
+            return call(None)
+        except LlmQuotaExhausted:
+            raise
+        except Exception as first_err:
+            if _is_rate_limit_error(first_err):
+                raise
+            fallbacks = self._ai.resolved_fallback_models()
+            if not fallbacks:
+                raise
+            last_err: Exception = first_err
+            for fb in fallbacks:
+                try:
+                    _LOG.warning("%s: основная модель недоступна (%s), пробуем fallback: %s", task, first_err, fb)
+                    return call(fb)
+                except LlmQuotaExhausted:
+                    raise
+                except Exception as e:
+                    last_err = e
+                    _LOG.warning("Fallback %s не удался (%s): %s", fb, task, e)
+            raise RuntimeError(
+                f"OpenRouter: все модели недоступны (основная + {len(fallbacks)} fallback): {last_err}"
+            ) from last_err
+
+    def market_plan(
+        self, *, question: str, history_json: str, today: str, roles: str, grades: str, formats: str
+    ) -> tuple[MarketQueryPlan, LLMUsage]:
+        """«Спросить базу», шаг 1: план запроса к каталогу (strict JSON); модель — как у писем.
+
+        Невалидный JSON — один controlled retry той же модели; дальше — fallback-модели.
+        """
+        messages = build_ask_market_plan_messages(
+            question=question, history_json=history_json, today=today, roles=roles, grades=grades, formats=formats
+        )
+
+        def call(model: str | None) -> tuple[MarketQueryPlan, LLMUsage]:
+            once = lambda: self._call_llm(  # noqa: E731
+                messages=messages,
+                parse=_parse_market_plan,
+                model=model or self._ai.resolved_cover_letter_model(),
+                reasoning=self._ai.match_reasoning_enabled,
+                reasoning_effort=self._ai.match_reasoning_effort,
+                json_schema=_strict_json_schema(MarketQueryPlan),
+            )
+            try:
+                return once()
+            except (json.JSONDecodeError, ValueError) as e:
+                _LOG.warning("Спросить базу: невалидный план от LLM (%s), повторный запрос", e)
+                return once()
+
+        return self._with_fallback("ask market plan", call)
+
+    def market_answer(self, *, question: str, facts_json: str) -> tuple[str, LLMUsage]:
+        """«Спросить базу», шаг 2: ответ обычным текстом только по посчитанным фактам."""
+        messages = build_ask_market_answer_messages(question=question, facts_json=facts_json)
+
+        def call(model: str | None) -> tuple[str, LLMUsage]:
+            once = lambda: self._call_llm(  # noqa: E731
+                messages=messages,
+                parse=_parse_market_answer,
+                model=model or self._ai.resolved_cover_letter_model(),
+                reasoning=self._ai.match_reasoning_enabled,
+                reasoning_effort=self._ai.match_reasoning_effort,
+                plain_text=True,
+            )
+            try:
+                return once()
+            except ValueError as e:
+                _LOG.warning("Спросить базу: пустой ответ LLM (%s), повторный запрос", e)
+                return once()
+
+        return self._with_fallback("ask market answer", call)
 
     def extract_with_fallback(
         self,

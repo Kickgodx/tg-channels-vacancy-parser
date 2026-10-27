@@ -451,7 +451,8 @@ export type LlmJobKind =
   | "interview_prep"
   | "import"
   | "reextract"
-  | "match_batch";
+  | "match_batch"
+  | "ask_market";
 
 export interface ResumeTailoringSuggestion {
   section: string;
@@ -523,6 +524,47 @@ export interface LlmJobAccepted {
   status: string;
 }
 
+/** Фильтры каталога (поля VacancyQuery без пустых), по которым считали ответ «Спросить базу». */
+export interface AskMarketFilters {
+  specializations?: string[];
+  technologies?: string[];
+  grade?: string;
+  work_format?: string;
+  date_from?: string;
+  date_to?: string;
+  has_salary?: boolean;
+  q?: string;
+}
+
+export interface AskMarketExample {
+  id: string;
+  date: string | null;
+  company: string | null;
+  roles: string[];
+  grade: string;
+  salary: number | null;
+  work_format: string | null;
+}
+
+export interface AskMarketResult {
+  question: string;
+  answerable: boolean;
+  answer: string;
+  filters: AskMarketFilters;
+  topics: string[];
+  variants: { label: string; filters: AskMarketFilters }[];
+  unrecognized: string[];
+  facts: ({ count?: { vacancies: number; active: number; with_salary: number }; examples?: AskMarketExample[] } & Record<string, unknown>) | null;
+  model: string | null;
+  prompt_version: string | null;
+}
+
+export interface AskMarketTurn {
+  question: string;
+  answer: string;
+  filters: AskMarketFilters;
+}
+
 export interface LlmJob {
   id: string;
   kind: LlmJobKind;
@@ -541,6 +583,8 @@ export interface LlmJob {
   reextract_result?: VacancyReextractResponse | null;
   /** Пакетная оценка (kind=match_batch): итог по уже оценённым вакансиям. */
   match_batch_result?: MatchBatchResponse | null;
+  /** «Спросить базу» (kind=ask_market): ответ, когда задача done. */
+  ask_market_result?: AskMarketResult | null;
   /** Запрошена отмена; у running — воркер остановит задачу в ближайшей точке проверки. */
   cancel_requested: boolean;
   created_at: string;

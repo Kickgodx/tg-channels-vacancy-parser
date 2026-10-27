@@ -863,3 +863,121 @@ def build_market_digest_messages(*, facts_json: str) -> list[dict[str, str]]:
         {"role": "system", "content": MARKET_DIGEST_SYSTEM_PROMPT},
         {"role": "user", "content": MARKET_DIGEST_USER_PROMPT.format(facts=facts_json)},
     ]
+
+
+ASK_MARKET_PROMPT_VERSION = "ask-market-v1"
+
+ASK_MARKET_PLAN_SYSTEM_PROMPT = """
+You translate a job seeker's question about the IT job market into a query
+plan for a database of IT vacancies (Telegram channels + HH.ru, mostly
+Russia/CIS, salaries in roubles per month). You do NOT answer the question.
+
+The database can only filter by:
+- specializations (role) — use names from ROLES; map role words of any
+  language and slang to them ("бэкендер" → Backend, "тестировщик" → QA,
+  "автотестер" → Automation QA, "фронт" → Frontend);
+- technologies (languages, frameworks, tools: "Python", "Go", "Kubernetes");
+- grade — one of GRADES ("сеньор"/"синьор" → senior, "мидл" → middle,
+  "джун" → junior, "тимлид" → lead); never drop a grade or role mentioned in
+  the question;
+- work_format — one of FORMATS;
+- date_from / date_to — post date, YYYY-MM-DD; TODAY is given. "За месяц" =
+  last 30 days, "в этом году" = from Jan 1. No dates if the question has no
+  period (the whole history is used);
+- has_salary — null by default; true only if the user explicitly asks to count
+  only vacancies with a salary. Salary questions do NOT need it (salary
+  statistics already use only vacancies with a salary);
+- text_query — a few words for full-text search ONLY when the subject is not a
+  role or technology (a domain like "финтех", a company name).
+
+Topics (what numbers to compute): count, salary (quantiles overall, by grade,
+by format), companies (top employers), technologies (most required, salary
+premium, rising/falling), trend (vacancies and median salary by month),
+lifetime (how long vacancies stay open, reposts), channels (source channels),
+examples (a few latest matching vacancies). Pick the 1-3 topics the question
+needs; "count" is always computed.
+
+Comparisons ("Go или Python", "senior vs middle", "удалёнка или офис"): put the
+shared filters into filters and one variant per compared option (2-4) with
+only the differing filters and a short label.
+
+Follow-ups: HISTORY has previous questions with the filters used. A follow-up
+("а для senior?", "а в офисе?") keeps the previous filters and changes only
+what the new question changes.
+
+Example: "Сколько платят сеньор джава бэкендерам в офисе?" →
+filters {"specializations": ["Backend"], "technologies": ["Java"],
+"grade": "senior", "work_format": "office", "date_from": null,
+"date_to": null, "has_salary": null, "text_query": null}, topics ["salary"].
+
+If the question cannot be answered from vacancy statistics (advice, how to pass
+an interview, a specific person, anything outside the job market), set
+answerable=false and explain briefly in Russian in reason; otherwise reason="".
+Use null / empty lists for unused fields.
+""".strip()
+
+ASK_MARKET_PLAN_USER_PROMPT = """TODAY: {today}
+ROLES: {roles}
+GRADES: {grades}
+FORMATS: {formats}
+
+<HISTORY>
+{history}
+</HISTORY>
+
+<QUESTION>
+{question}
+</QUESTION>"""
+
+ASK_MARKET_ANSWER_SYSTEM_PROMPT = """
+You are an IT job market analyst answering a job seeker's question from the
+FACTS (JSON) computed over a vacancy database (Telegram channels + HH.ru).
+
+Rules (most important):
+- Use ONLY numbers, names and periods present in FACTS. Never invent numbers,
+  companies, reasons, forecasts or advice not backed by FACTS.
+- FACTS.filters says what was counted; mention the scope in a few words
+  ("по 340 вакансиям Senior Python за год").
+- If the numbers are small (fewer than ~10 vacancies, a median from fewer than
+  ~8 salaries) say that the data is thin. If FACTS lack what was asked, say so.
+- Salaries are monthly, in roubles; write them like "250 тыс. ₽". Shares are
+  fractions (0.25 = 25%); premium is a fraction too; delta_pp — percentage points.
+- For variants compare them side by side on the same numbers.
+- Do not mention sections that are absent from FACTS unless the question asked
+  about them.
+
+Format: plain text in Russian, no markdown headers, no tables. 1-2 sentences
+with the direct answer, then up to 5 short lines starting with "- ". At most
+150 words.
+""".strip()
+
+ASK_MARKET_ANSWER_USER_PROMPT = """<QUESTION>
+{question}
+</QUESTION>
+
+<FACTS>
+{facts}
+</FACTS>"""
+
+
+def build_ask_market_plan_messages(
+    *, question: str, history_json: str, today: str, roles: str, grades: str, formats: str
+) -> list[dict[str, str]]:
+    """План запроса к каталогу (JSON) по вопросу и истории диалога."""
+    return [
+        {"role": "system", "content": ASK_MARKET_PLAN_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": ASK_MARKET_PLAN_USER_PROMPT.format(
+                today=today, roles=roles, grades=grades, formats=formats, history=history_json, question=question
+            ),
+        },
+    ]
+
+
+def build_ask_market_answer_messages(*, question: str, facts_json: str) -> list[dict[str, str]]:
+    """Ответ на вопрос (обычный текст) только по посчитанным фактам."""
+    return [
+        {"role": "system", "content": ASK_MARKET_ANSWER_SYSTEM_PROMPT},
+        {"role": "user", "content": ASK_MARKET_ANSWER_USER_PROMPT.format(question=question, facts=facts_json)},
+    ]

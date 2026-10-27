@@ -802,6 +802,43 @@ class CoverLetterOut(BaseModel):
     )
 
 
+class AskMarketTurn(BaseModel):
+    """Прошлый вопрос диалога «Спросить базу»: для уточнений («а для senior?»)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(max_length=500)
+    answer: str = Field(default="", max_length=4000)
+    filters: dict[str, Any] = Field(default_factory=dict, description="Фильтры, по которым считали ответ.")
+
+
+class AskMarketRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=500)]
+    history: list[AskMarketTurn] = Field(default_factory=list, max_length=3)
+
+
+class AskMarketVariant(BaseModel):
+    label: str
+    filters: dict[str, Any] = Field(default_factory=dict)
+
+
+class AskMarketResult(BaseModel):
+    """Ответ «Спросить базу»: фильтры, по которым считали, цифры и текст модели по ним."""
+
+    question: str
+    answerable: bool
+    answer: str = ""
+    filters: dict[str, Any] = Field(default_factory=dict, description="Поля VacancyQuery (без пустых).")
+    topics: list[str] = Field(default_factory=list)
+    variants: list[AskMarketVariant] = Field(default_factory=list)
+    unrecognized: list[str] = Field(default_factory=list, description="Роли, грейды, форматы из вопроса не из словаря.")
+    facts: dict[str, Any] | None = None
+    model: str | None = None
+    prompt_version: str | None = None
+
+
 class LlmJobAccepted(BaseModel):
     """Ответ 202: LLM-задача поставлена в очередь."""
 
@@ -830,6 +867,7 @@ class LlmJobOut(BaseModel):
     import_result: VacancyImportResponse | None = None
     reextract_result: VacancyReextractResponse | None = None
     match_batch_result: MatchBatchResponse | None = None
+    ask_market_result: AskMarketResult | None = None
     cancel_requested: bool = Field(
         default=False,
         description="Запрошена отмена; у running — воркер остановит задачу в ближайшей точке проверки.",

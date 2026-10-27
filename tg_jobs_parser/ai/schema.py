@@ -428,3 +428,95 @@ class InterviewPrepExtraction(BaseModel):
     @classmethod
     def norm_ask(cls, v: object) -> list[str]:
         return _coerce_str_list(v)[:5]
+
+
+# «Спросить базу»: план запроса к каталогу. Модель выбирает только фильтры и разделы цифр,
+# сами цифры считает backend — модель не пишет SQL и не видит строк вакансий.
+MarketTopic = Literal["count", "salary", "companies", "technologies", "trend", "lifetime", "channels", "examples"]
+MARKET_TOPICS: tuple[str, ...] = (
+    "count",
+    "salary",
+    "companies",
+    "technologies",
+    "trend",
+    "lifetime",
+    "channels",
+    "examples",
+)
+
+
+class MarketQueryFilters(BaseModel):
+    """Фильтры каталога из вопроса; пустое поле — без фильтра."""
+
+    specializations: list[str] = Field(default_factory=list, max_length=5)
+    technologies: list[str] = Field(default_factory=list, max_length=5)
+    grade: str | None = None
+    work_format: str | None = None
+    date_from: str | None = Field(default=None, description="YYYY-MM-DD")
+    date_to: str | None = Field(default=None, description="YYYY-MM-DD")
+    has_salary: bool | None = None
+    text_query: str | None = Field(default=None, description="Слова для полнотекстового поиска, если нет фильтра.")
+
+    @field_validator("specializations", "technologies", mode="before")
+    @classmethod
+    def norm_lists(cls, v: object) -> list[str]:
+        return _coerce_str_list(v)[:5]
+
+    @field_validator("grade", "work_format", "date_from", "date_to", "text_query", mode="before")
+    @classmethod
+    def norm_optional(cls, v: object) -> str | None:
+        return _coerce_optional_str(v)
+
+
+class MarketQueryVariant(BaseModel):
+    """Вариант сравнения: свои фильтры поверх общих («Go» против «Python»)."""
+
+    label: str = ""
+    filters: MarketQueryFilters = Field(default_factory=MarketQueryFilters)
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def norm_label(cls, v: object) -> str:
+        return (_coerce_optional_str(v) or "")[:60]
+
+    @field_validator("filters", mode="before")
+    @classmethod
+    def norm_filters(cls, v: object) -> object:
+        return v if isinstance(v, (dict, MarketQueryFilters)) else {}
+
+
+class MarketQueryPlan(BaseModel):
+    """Ответ LLM на первом шаге «Спросить базу»: можно ли ответить по каталогу и что посчитать."""
+
+    answerable: bool = True
+    reason: str = Field(default="", description="Почему по базе не ответить, или пусто.")
+    filters: MarketQueryFilters = Field(default_factory=MarketQueryFilters)
+    topics: list[MarketTopic] = Field(default_factory=list)
+    variants: list[MarketQueryVariant] = Field(default_factory=list, max_length=4)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def norm_reason(cls, v: object) -> str:
+        return _coerce_optional_str(v) or ""
+
+    @field_validator("filters", mode="before")
+    @classmethod
+    def norm_filters(cls, v: object) -> object:
+        # При answerable=false модель часто отдаёт filters: null.
+        return v if isinstance(v, (dict, MarketQueryFilters)) else {}
+
+    @field_validator("topics", mode="before")
+    @classmethod
+    def norm_topics(cls, v: object) -> list[str]:
+        out: list[str] = []
+        for t in _coerce_str_list(v):
+            key = t.strip().lower()
+            if key in MARKET_TOPICS and key not in out:
+                out.append(key)
+        return out
+
+    @field_validator("variants", mode="before")
+    @classmethod
+    def norm_variants(cls, v: object) -> list:
+        items = v if isinstance(v, list) else []
+        return [x for x in items if isinstance(x, dict)][:4]
