@@ -167,6 +167,12 @@ retention:
   # Курсы валют старше N дней (последняя дата и окно fx.sync_days_on_startup остаются). 0 — хранить.
   exchange_rates_ttl_days: 60
 
+digest:
+  # Еженедельный обзор рынка (страница «Обзор»): лидер API раз в час проверяет прошедшую неделю.
+  enabled: true
+  # Текст обзора от LLM (модель писем) по посчитанным цифрам; false — только цифры.
+  llm_summary: true
+
 hh:
   enabled: true
   # TTL кэша короткой выдачи (hh_listings). После purge detail снова запросится.

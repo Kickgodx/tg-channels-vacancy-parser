@@ -16,6 +16,7 @@ from tg_jobs_parser.ai.models_catalog import LlmModelEntry
 from tg_jobs_parser.ai.prompts import (
     build_cover_letter_messages,
     build_interview_prep_messages,
+    build_market_digest_messages,
     build_match_messages,
     build_messages,
     build_resume_tailor_messages,
@@ -137,12 +138,24 @@ def _parse_interview_prep(raw: str) -> InterviewPrepExtraction:
     return result
 
 
+def _parse_digest(raw: str) -> str:
+    """Обзор — обычный текст; снимаем markdown-ограждение, если модель его добавила."""
+    text = raw.strip()
+    m = _JSON_FENCE_RE.search(text)
+    if m:
+        text = m.group(1).strip()
+    if not text:
+        raise ValueError("OpenRouter: пустой обзор рынка")
+    return text
+
+
 _LLM_TASKS = {
     _parse_extraction: "extract",
     _parse_match: "match",
     _parse_cover_letter: "cover_letter",
     _parse_tailoring: "resume_tailor",
     _parse_interview_prep: "interview_prep",
+    _parse_digest: "market_digest",
 }
 
 
@@ -720,6 +733,28 @@ class OpenRouterClient:
             raise RuntimeError(
                 f"OpenRouter: все модели недоступны (основная + {len(fallbacks)} fallback): {last_err}"
             ) from last_err
+
+    def market_digest(self, *, facts_json: str, model: str | None = None) -> tuple[str, LLMUsage]:
+        """Текст еженедельного обзора по фактам — обычный текст; модель — как у писем.
+
+        Пустой ответ — один controlled retry той же модели.
+        """
+        messages = build_market_digest_messages(facts_json=facts_json)
+        call = lambda: self._call_llm(  # noqa: E731
+            messages=messages,
+            parse=_parse_digest,
+            model=model or self._ai.resolved_cover_letter_model(),
+            reasoning=self._ai.match_reasoning_enabled,
+            reasoning_effort=self._ai.match_reasoning_effort,
+            plain_text=True,
+        )
+        try:
+            return call()
+        except LlmQuotaExhausted:
+            raise
+        except ValueError as e:
+            _LOG.warning("Обзор рынка: пустой ответ LLM (%s), повторный запрос", e)
+            return call()
 
     def extract_with_fallback(
         self,

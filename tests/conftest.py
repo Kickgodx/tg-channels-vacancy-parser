@@ -239,6 +239,8 @@ ai:
     enabled: false
 fx:
   enabled: false
+digest:
+  enabled: false
 """
 
 

@@ -23,6 +23,8 @@ import type {
   ResumeTailoring,
   InterviewPrep,
   CompanyProfile,
+  Digest,
+  DigestListItem,
   VacancyFlags,
   MarketSalary,
   TechnologyAnalytics,
@@ -587,6 +589,17 @@ export const api = {
   getVacancy: (id: string) => request<Vacancy>(`/vacancies/${encodeURIComponent(id)}`),
   getVacancyFlags: (id: string) =>
     request<VacancyFlags>(`/vacancies/${encodeURIComponent(id)}/flags`),
+  listDigests: () => request<{ items: DigestListItem[] }>("/digests"),
+
+  getDigest: (periodStart: string) => request<Digest>(`/digests/${periodStart}`),
+
+  /** Админ: сформировать обзор недели (по умолчанию прошедшей); LLM-вызов идёт в запросе. */
+  generateDigest: (weekStart: string | null, force: boolean) =>
+    request<Digest>("/digests", {
+      method: "POST",
+      body: JSON.stringify({ week_start: weekStart, force }),
+    }),
+
   getCompanyProfile: (name: string) =>
     request<CompanyProfile>(`/companies/profile?${new URLSearchParams({ name }).toString()}`),
   getSimilarVacancies: (id: string, limit = 8) =>

@@ -817,3 +817,42 @@ def build_interview_prep_messages(
             ),
         },
     ]
+
+
+MARKET_DIGEST_PROMPT_VERSION = "market-digest-v1"
+
+MARKET_DIGEST_SYSTEM_PROMPT = """
+You are an IT job market analyst. Write a short weekly digest for job
+seekers from the FACTS (JSON) about vacancies collected this week from the
+tracked Telegram channels and HH.ru.
+
+Rules (most important):
+- Use ONLY numbers and names present in FACTS. Never invent numbers,
+  percentages, companies, reasons or forecasts.
+- Compare only what FACTS compares: this week vs the previous week
+  (vacancies, roles, formats, companies), 28 days vs the previous 28 days
+  (salaries), this week vs the 4 weeks before (technology shares).
+- If a section is empty or the numbers are small, skip it rather than
+  draw conclusions. Do not explain causes.
+- Salaries are monthly, in roubles; write them like "250 тыс. ₽".
+- Shares are fractions in FACTS (0.25 = 25%); delta_pp is percentage points.
+
+Format: plain text in Russian, no markdown headers. 1 lead sentence with
+the main change of the week, then 3-6 short lines starting with "- "
+(volume, roles/formats, salaries, technologies, companies). At most 120
+words.
+""".strip()
+
+MARKET_DIGEST_USER_PROMPT = """Write the weekly digest.
+
+<FACTS>
+{facts}
+</FACTS>"""
+
+
+def build_market_digest_messages(*, facts_json: str) -> list[dict[str, str]]:
+    """Сообщения обзора рынка (ответ — обычный текст) по фактам недели в JSON."""
+    return [
+        {"role": "system", "content": MARKET_DIGEST_SYSTEM_PROMPT},
+        {"role": "user", "content": MARKET_DIGEST_USER_PROMPT.format(facts=facts_json)},
+    ]
