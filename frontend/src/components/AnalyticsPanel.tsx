@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { api, type VacancyQueryParams } from "../api/client";
 import TechnologyAnalyticsSection from "./TechnologyAnalyticsSection";
+import VacancyLifetimeSection from "./VacancyLifetimeSection";
 import type {
   SalaryAnalytics,
   SalaryGroupStats,
@@ -628,6 +629,8 @@ export default function AnalyticsPanel({ params }: Props) {
         />
 
         <TechnologyAnalyticsSection params={panelParams} />
+
+        <VacancyLifetimeSection params={panelParams} />
 
         {sources.length > 0 && (
           <div className="card chart-card chart-wide">

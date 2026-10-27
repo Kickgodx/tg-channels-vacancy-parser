@@ -1,6 +1,7 @@
 import type {
   AuthUser,
   CompanyStats,
+  LifetimeAnalytics,
   ConfigDefaults,
   CoverLetter,
   CoverLetterTone,
@@ -735,6 +736,12 @@ export const api = {
     appendSearchParams(q, params);
     const qs = q.toString();
     return request<TechnologyAnalytics>(`/analytics/technologies${qs ? `?${qs}` : ""}`);
+  },
+  getLifetimeAnalytics: (params?: VacancyQueryParams) => {
+    const q = new URLSearchParams();
+    appendSearchParams(q, params);
+    const qs = q.toString();
+    return request<LifetimeAnalytics>(`/analytics/lifetime${qs ? `?${qs}` : ""}`);
   },
   getCompanyStats: (params?: VacancyQueryParams) => {
     const q = new URLSearchParams();

@@ -467,6 +467,64 @@ class TechnologyAnalytics(BaseModel):
     salary_display: SalaryDisplayMeta | None = None
 
 
+class LifetimeBucket(BaseModel):
+    label: str
+    min_days: int
+    max_days: int | None = Field(default=None, description="Включительно; null — без верхней границы.")
+    count: int
+
+
+class LifetimeGroup(BaseModel):
+    """Жизнь вакансий в группе (роль или грейд)."""
+
+    name: str
+    vacancies: int
+    republished: int = Field(description="Публиковали в 2+ разных дня.")
+    republished_share: float
+    long_open: int = Field(description="Между первой и последней публикацией не меньше ``long_open_days``.")
+    median_span_days: float | None = Field(default=None, description="Медиана срока у повторно публикуемых.")
+
+
+class LifetimeCompany(BaseModel):
+    company: str
+    vacancies: int
+    republished: int
+    long_open: int
+    max_span_days: int
+
+
+class LifetimeVacancy(BaseModel):
+    id: str
+    company: str | None = None
+    specializations: list[str] = Field(default_factory=list)
+    grade: str = "unknown"
+    source_channel: str
+    first_at: datetime
+    last_at: datetime
+    span_days: int
+    publication_days: int
+    posts: int
+    archived: bool = False
+
+
+class LifetimeAnalytics(BaseModel):
+    """Сколько вакансия остаётся на рынке по публикациям в Telegram (HH не входит)."""
+
+    vacancies: int = Field(description="Вакансий Telegram под фильтрами (с хотя бы одной публикацией).")
+    republished: int
+    republished_share: float
+    long_open: int
+    long_open_days: int
+    span_p50_days: float | None = Field(default=None, description="Медиана срока у повторно публикуемых.")
+    span_p90_days: float | None = None
+    buckets: list[LifetimeBucket] = Field(default_factory=list)
+    by_role: list[LifetimeGroup] = Field(default_factory=list)
+    by_grade: list[LifetimeGroup] = Field(default_factory=list)
+    companies: list[LifetimeCompany] = Field(default_factory=list)
+    longest: list[LifetimeVacancy] = Field(default_factory=list)
+    min_group: int = Field(description="Роль или грейд показываются от стольких вакансий.")
+
+
 # Имя обрезается до проверки длины: иначе «   » проходило min_length и сохранялось пустым.
 UserItemName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 

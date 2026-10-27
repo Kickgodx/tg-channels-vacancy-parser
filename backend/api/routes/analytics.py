@@ -5,9 +5,16 @@ from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db, verify_api_key
 from backend.api.params import vacancy_filters
-from backend.db import analytics, technology_analytics
+from backend.db import analytics, technology_analytics, vacancy_lifetime
 from backend.db.aggregate_cache import cached_aggregate
-from backend.schemas import CompanyAnalytics, SalaryAnalytics, SourceAnalytics, TechnologyAnalytics, VacancyQuery
+from backend.schemas import (
+    CompanyAnalytics,
+    LifetimeAnalytics,
+    SalaryAnalytics,
+    SourceAnalytics,
+    TechnologyAnalytics,
+    VacancyQuery,
+)
 
 router = APIRouter(
     prefix="/analytics",
@@ -59,3 +66,12 @@ def technology_stats(
     Фильтр по технологии не применяется — премия под ним не имеет смысла.
     """
     return cached_aggregate("technologies", query, lambda: technology_analytics.technology_analytics(db, query))
+
+
+@router.get("/lifetime", response_model=LifetimeAnalytics)
+def lifetime_stats(
+    query: VacancyQuery = Depends(vacancy_filters),
+    db: Session = Depends(get_db),
+) -> LifetimeAnalytics:
+    """Жизнь вакансии по публикациям в Telegram: повторные публикации, срок, роли, компании, долгожители."""
+    return cached_aggregate("lifetime", query, lambda: vacancy_lifetime.vacancy_lifetime(db, query))
