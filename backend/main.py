@@ -18,6 +18,7 @@ from backend.api.routes import (
     auth,
     companies,
     config,
+    digests,
     filters,
     fx,
     health,
@@ -105,6 +106,19 @@ def _sweep_embeddings() -> None:
         logging.getLogger(__name__).warning("Индексация эмбеддингов не выполнена: %s", e)
 
 
+def _ensure_digest() -> None:
+    """Обзор рынка за прошедшую неделю, если его ещё нет; ошибки — в лог, повтор через час."""
+    try:
+        from backend.services.market_digest_service import ensure_latest_digest
+
+        ensure_latest_digest()
+    except Exception as e:
+        logging.getLogger(__name__).warning("Обзор рынка не сформирован: %s", e)
+
+
+_DIGEST_CHECK_INTERVAL_S = 60 * 60
+
+
 class _LeaderDuties:
     """Общая для процессов API работа: её выполняет только лидер (``backend.leader``).
 
@@ -118,6 +132,20 @@ class _LeaderDuties:
         self._last_cleanup = 0.0
         self._last_embedding_sweep = 0.0
         self._embedding_thread: threading.Thread | None = None
+        self._last_digest_check = 0.0
+        self._digest_thread: threading.Thread | None = None
+
+    def _maybe_ensure_digest(self) -> None:
+        """Раз в час — обзор за прошедшую неделю (LLM-вызов — в своём потоке, не в тике лидера)."""
+        import time
+
+        if self._digest_thread is not None and self._digest_thread.is_alive():
+            return
+        if self._last_digest_check and time.monotonic() - self._last_digest_check < _DIGEST_CHECK_INTERVAL_S:
+            return
+        self._last_digest_check = time.monotonic()
+        self._digest_thread = threading.Thread(target=_ensure_digest, name="market-digest", daemon=True)
+        self._digest_thread.start()
 
     def _maybe_sweep_embeddings(self) -> None:
         """Индексация новых вакансий раз в ``ai.embeddings.sweep_interval_seconds`` — в своём потоке."""
@@ -143,6 +171,7 @@ class _LeaderDuties:
         threading.Thread(target=_sync_fx_on_startup, name="fx-startup-sync", daemon=True).start()
         self._metrics_server = _start_metrics_server()
         self._maybe_sweep_embeddings()
+        self._maybe_ensure_digest()
 
     def on_tick(self) -> None:
         import time
@@ -154,6 +183,7 @@ class _LeaderDuties:
             self._last_cleanup = time.monotonic()
             _periodic_cleanup()
         self._maybe_sweep_embeddings()
+        self._maybe_ensure_digest()
 
     def on_lose(self) -> None:
         server, self._metrics_server = self._metrics_server, None
@@ -337,6 +367,7 @@ app.include_router(hh.sse_router, prefix="/api/v1")
 app.include_router(ai_cache.router, prefix="/api/v1")
 app.include_router(fx.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
+app.include_router(digests.router, prefix="/api/v1")
 app.include_router(companies.router, prefix="/api/v1")
 app.include_router(filters.router, prefix="/api/v1")
 app.include_router(resumes.resumes_router, prefix="/api/v1")

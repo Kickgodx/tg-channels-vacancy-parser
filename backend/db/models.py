@@ -19,6 +19,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -418,6 +419,25 @@ class InterviewPrepRow(Base):
     requested_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+
+
+class MarketDigestRow(Base):
+    """Еженедельный обзор рынка: факты недели (JSON) и текст LLM по ним; одна строка на неделю."""
+
+    __tablename__ = "market_digests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    facts: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    requested_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("period_start", name="uq_market_digests_period_start"),)
 
 
 class HhListingRow(Base):

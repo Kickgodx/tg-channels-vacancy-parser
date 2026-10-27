@@ -1000,3 +1000,44 @@ tr.clickable:hover {
   background: #fff4e6;
   color: #a0520a;
 }
+
+/* Обзор рынка: недели кнопками, текст LLM, блоки фактов сеткой. */
+.digest-weeks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+
+.digest-admin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.digest-summary {
+  white-space: pre-wrap;
+  margin: 0.5rem 0;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: #f8f9fa;
+  border-left: 3px solid #2a78d6;
+  line-height: 1.5;
+}
+
+.digest-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem 1.5rem;
+  margin-top: 0.75rem;
+}
+
+.digest-block h4 {
+  margin: 0.25rem 0;
+}
+
+.digest-block table {
+  width: 100%;
+}

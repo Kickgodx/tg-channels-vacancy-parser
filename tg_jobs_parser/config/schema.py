@@ -871,6 +871,19 @@ class HhConfig(BaseModel):
     app_version: str = Field(default="1.0")
 
 
+class DigestConfig(BaseModel):
+    """Еженедельный обзор рынка: факты по вакансиям недели + короткий текст LLM."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Лидер API формирует обзор за прошедшую неделю (пн–вс, UTC), если в ней есть вакансии.",
+    )
+    llm_summary: bool = Field(
+        default=True,
+        description="Текст обзора от LLM (модель писем) по посчитанным фактам; без ключа OpenRouter — только факты.",
+    )
+
+
 class TelegramConfig(BaseModel):
     """Получение сообщений только через Telethon (MTProto, файл сессии)."""
 
@@ -904,6 +917,7 @@ class AppConfig(BaseModel):
     fx: FxConfig = Field(default_factory=FxConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     hh: HhConfig = Field(default_factory=HhConfig)
+    digest: DigestConfig = Field(default_factory=DigestConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     dictionaries: DictionariesConfig = Field(default_factory=DictionariesConfig)
 

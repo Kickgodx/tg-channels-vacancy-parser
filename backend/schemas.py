@@ -877,3 +877,84 @@ class TokenResponse(BaseModel):
 class SseTicketResponse(BaseModel):
     ticket: str = Field(description="Одноразовый тикет для ?ticket= SSE-эндпоинта")
     expires_in: int = Field(description="Сколько секунд тикет можно предъявить")
+
+
+class DigestCount(BaseModel):
+    """Число вакансий недели с признаком и за прошлую неделю."""
+
+    name: str
+    count: int
+    previous: int = 0
+
+
+class DigestSalary(BaseModel):
+    """Медиана рублёвой зарплаты за 28 дней до конца недели и за 28 дней перед ними."""
+
+    grade: str = Field(description="Грейд или «all» — все грейды.")
+    median: float | None = None
+    count: int = 0
+    previous_median: float | None = None
+    previous_count: int = 0
+
+
+class DigestTechnology(BaseModel):
+    """Доля вакансий недели с технологией против доли за 4 недели до неё."""
+
+    name: str
+    share: float
+    previous_share: float
+    delta_pp: float = Field(description="Изменение доли в процентных пунктах.")
+
+
+class DigestFacts(BaseModel):
+    """Посчитанные факты недели — вход LLM и данные страницы обзора."""
+
+    period_start: date
+    period_end: date
+    vacancies: int = Field(description="Уникальных вакансий с датой поста в неделе (с архивом).")
+    previous_vacancies: int = Field(description="То же за прошлую неделю.")
+    avg_4w_vacancies: float = Field(description="Среднее в неделю за 4 недели до этой.")
+    with_salary_share: float | None = Field(default=None, description="Доля вакансий недели с рублёвой зарплатой.")
+    roles: list[DigestCount] = Field(default_factory=list)
+    work_formats: list[DigestCount] = Field(default_factory=list)
+    salaries: list[DigestSalary] = Field(default_factory=list)
+    salary_window_days: int = 28
+    technologies_up: list[DigestTechnology] = Field(default_factory=list)
+    technologies_down: list[DigestTechnology] = Field(default_factory=list)
+    top_companies: list[DigestCount] = Field(default_factory=list)
+    new_companies: list[DigestCount] = Field(
+        default_factory=list, description="Компании, чья первая вакансия в базе — на этой неделе."
+    )
+    sources: list[DigestCount] = Field(default_factory=list, description="Каналы и HH с числом вакансий недели.")
+
+
+class DigestListItem(BaseModel):
+    period_start: date
+    period_end: date
+    vacancies: int
+    has_summary: bool
+    created_at: datetime
+
+
+class DigestListResponse(BaseModel):
+    items: list[DigestListItem] = Field(default_factory=list)
+
+
+class DigestOut(BaseModel):
+    """Обзор рынка за неделю: факты и текст LLM по ним."""
+
+    period_start: date
+    period_end: date
+    facts: DigestFacts
+    summary: str | None = None
+    summary_error: str | None = Field(default=None, description="Почему нет текста LLM (факты при этом есть).")
+    model: str | None = None
+    created_at: datetime
+    stale: bool = Field(default=False, description="Текст получен другой моделью или версией промпта.")
+
+
+class DigestGenerateRequest(BaseModel):
+    week_start: date | None = Field(
+        default=None, description="Понедельник недели (UTC); по умолчанию — прошедшая неделя."
+    )
+    force: bool = Field(default=False, description="Пересчитать, даже если обзор за неделю уже есть.")

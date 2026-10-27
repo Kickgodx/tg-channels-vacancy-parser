@@ -832,3 +832,64 @@ export interface SemanticStatus {
   vacancies: number;
   embedded: number;
 }
+
+/** Обзор рынка: число вакансий недели с признаком и за прошлую неделю. */
+export interface DigestCount {
+  name: string;
+  count: number;
+  previous: number;
+}
+
+export interface DigestSalary {
+  /** Грейд или «all». */
+  grade: string;
+  median: number | null;
+  count: number;
+  previous_median: number | null;
+  previous_count: number;
+}
+
+export interface DigestTechnology {
+  name: string;
+  share: number;
+  previous_share: number;
+  delta_pp: number;
+}
+
+export interface DigestFacts {
+  period_start: string;
+  period_end: string;
+  vacancies: number;
+  previous_vacancies: number;
+  avg_4w_vacancies: number;
+  with_salary_share: number | null;
+  roles: DigestCount[];
+  work_formats: DigestCount[];
+  salaries: DigestSalary[];
+  salary_window_days: number;
+  technologies_up: DigestTechnology[];
+  technologies_down: DigestTechnology[];
+  top_companies: DigestCount[];
+  new_companies: DigestCount[];
+  sources: DigestCount[];
+}
+
+export interface DigestListItem {
+  period_start: string;
+  period_end: string;
+  vacancies: number;
+  has_summary: boolean;
+  created_at: string;
+}
+
+/** Еженедельный обзор рынка (GET /digests/{period_start}). */
+export interface Digest {
+  period_start: string;
+  period_end: string;
+  facts: DigestFacts;
+  summary: string | null;
+  summary_error: string | null;
+  model: string | null;
+  created_at: string;
+  stale: boolean;
+}

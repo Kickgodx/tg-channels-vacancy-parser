@@ -44,10 +44,10 @@ bash scripts/check_alerts.sh                   # при правке observabili
 ## LLM hygiene (промпты / golden / evals)
 
 - Версии: `EXTRACT_PROMPT_VERSION`, `MATCH_PROMPT_VERSION`,
-  `COVER_LETTER_PROMPT_VERSION`, `RESUME_TAILOR_PROMPT_VERSION`, `INTERVIEW_PREP_PROMPT_VERSION`
-  в `tg_jobs_parser/ai/prompts.py`.
+  `COVER_LETTER_PROMPT_VERSION`, `RESUME_TAILOR_PROMPT_VERSION`, `INTERVIEW_PREP_PROMPT_VERSION`,
+  `MARKET_DIGEST_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py`.
   Смысловое изменение промпта → **bump** версии: кэш extraction ключуется
-  версией, а сохранённые оценки, письма, адаптации резюме и подготовка к собеседованию с прежней версией становятся `stale`
+  версией, а сохранённые оценки, письма, адаптации резюме, подготовка к собеседованию и текст обзора рынка с прежней версией становятся `stale`
   и пересчитываются при следующем запросе без `force`.
 - Golden extraction: `evals/golden/extraction.jsonl`. Новый кейс — новая
   строка JSONL + запись в `evals/fixtures/extraction_outputs.json` (для
