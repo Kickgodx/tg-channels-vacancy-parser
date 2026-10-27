@@ -23,7 +23,7 @@ def _skills(items) -> list[str]:
     return [str(s.get("skill", "")) for s in items or [] if isinstance(s, dict) and s.get("skill")]
 
 
-def _match_summary(*, resume_id: int, vacancy_id: str) -> dict | None:
+def saved_match_skills(*, resume_id: int, vacancy_id: str) -> dict | None:
     """Совпадающие и недостающие навыки из сохранённой оценки (если она есть)."""
     with session_scope() as session:
         row = repo.get_vacancy_match(session, resume_id=resume_id, vacancy_id=vacancy_id)
@@ -47,7 +47,7 @@ def generate_single(
         cfg = load_config(get_settings().config_path)
         max_chars = cfg.ai.max_input_chars
         requested_model = cfg.ai.resolved_cover_letter_model()
-        match_summary = _match_summary(resume_id=resume_id, vacancy_id=vacancy_id)
+        match_summary = saved_match_skills(resume_id=resume_id, vacancy_id=vacancy_id)
         span.set_attribute("resume_tailor.has_match_summary", match_summary is not None)
         result, usage = get_interactive_client().tailor_resume_with_fallback(
             resume_text=resume_text[:max_chars],

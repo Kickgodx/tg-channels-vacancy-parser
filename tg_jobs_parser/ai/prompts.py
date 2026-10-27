@@ -718,3 +718,102 @@ def build_resume_tailor_messages(
             ),
         },
     ]
+
+
+INTERVIEW_PREP_PROMPT_VERSION = "interview-prep-v1"
+
+INTERVIEW_PREP_SYSTEM_PROMPT = """
+You are an experienced IT interviewer preparing a candidate for an interview
+for a specific vacancy.
+
+Goal: the questions this candidate is most likely to be asked for THIS
+vacancy, and how to answer them from the candidate's REAL experience.
+
+Questions:
+- 6-10 items, most likely first. Mix the kinds:
+  "technical" — technologies and concepts the vacancy requires;
+  "experience" — "tell me about a project where you ..." on experience the
+    resume claims (interviewers dig into resume lines);
+  "behavioral" — teamwork, conflicts, deadlines, ownership relevant to the
+    role and seniority of the vacancy;
+  "gap" — a vacancy requirement the resume does not show.
+- "topic": short label (a technology or area).
+- "why": which vacancy requirement or resume line the question comes from.
+- "answer_points": 2-4 short points for the answer.
+
+Honesty rules (most important):
+- answer_points must be built only from facts in the resume: projects,
+  tools, numbers and employers that are actually there. NEVER invent
+  experience, metrics or employers.
+- For a "gap" question, answer_points are an honest strategy: related
+  experience from the resume, how the candidate would ramp up — never a
+  claim of experience that is not in the resume.
+
+"gaps": up to 5 vacancy requirements missing from the resume, each with
+short "advice" on what to review before the interview.
+
+"questions_to_ask": up to 5 sensible questions the candidate can ask the
+employer about this vacancy (team, process, expectations), not generic.
+
+"summary": 1-2 sentences — what the interview will most likely focus on.
+
+Language: write everything in the language of the vacancy (usually Russian);
+keep technology names as they are.
+
+Output: valid JSON only, matching the schema exactly:
+{
+  "summary": "string",
+  "questions": [
+    {"kind": "technical|experience|behavioral|gap", "topic": "string",
+     "question": "string", "why": "string", "answer_points": ["string"]}
+  ],
+  "gaps": [{"skill": "string", "advice": "string"}],
+  "questions_to_ask": ["string"]
+}
+""".strip()
+
+INTERVIEW_PREP_USER_PROMPT = """Prepare the candidate for an interview for this vacancy.
+
+<CANDIDATE_RESUME>
+{resume}
+</CANDIDATE_RESUME>
+
+<VACANCY>
+{vacancy}
+</VACANCY>
+{match_block}"""
+
+_INTERVIEW_PREP_MATCH_BLOCK = """
+<MATCH_CONTEXT>
+A previous evaluation of this resume against this vacancy:
+Matching skills: {matching_skills}
+Missing skills (not in the resume — ask about them as "gap" questions, never claim them): {missing_skills}
+</MATCH_CONTEXT>
+"""
+
+
+def build_interview_prep_messages(
+    *,
+    resume_text: str,
+    vacancy_text: str,
+    match_summary: dict | None = None,
+) -> list[dict[str, str]]:
+    """Сообщения подготовки к собеседованию (ответ — JSON ``InterviewPrepExtraction``).
+
+    ``match_summary`` — опционально из сохранённой оценки: ``matching_skills``, ``missing_skills``.
+    """
+    match_block = ""
+    if match_summary:
+        match_block = _INTERVIEW_PREP_MATCH_BLOCK.format(
+            matching_skills=", ".join(match_summary.get("matching_skills") or []) or "—",
+            missing_skills=", ".join(match_summary.get("missing_skills") or []) or "—",
+        )
+    return [
+        {"role": "system", "content": INTERVIEW_PREP_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": INTERVIEW_PREP_USER_PROMPT.format(
+                resume=resume_text, vacancy=vacancy_text, match_block=match_block
+            ),
+        },
+    ]

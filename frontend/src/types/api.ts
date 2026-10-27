@@ -444,7 +444,14 @@ export interface CoverLetter {
   stale: boolean;
 }
 
-export type LlmJobKind = "match" | "cover_letter" | "resume_tailor" | "import" | "reextract" | "match_batch";
+export type LlmJobKind =
+  | "match"
+  | "cover_letter"
+  | "resume_tailor"
+  | "interview_prep"
+  | "import"
+  | "reextract"
+  | "match_batch";
 
 export interface ResumeTailoringSuggestion {
   section: string;
@@ -464,6 +471,37 @@ export interface ResumeTailoring {
   keywords: string[];
   /** Требования, которых в резюме нет: не добавлять без реального опыта. */
   do_not_claim: string[];
+  model: string;
+  created_at: string;
+  cached: boolean;
+  stale: boolean;
+}
+
+export type InterviewQuestionKind = "technical" | "experience" | "behavioral" | "gap";
+
+export interface InterviewQuestion {
+  kind: InterviewQuestionKind;
+  topic: string;
+  question: string;
+  /** Откуда вопрос: требование вакансии или строка резюме. */
+  why: string;
+  /** Тезисы ответа — только из фактов резюме. */
+  answer_points: string[];
+}
+
+export interface InterviewGap {
+  skill: string;
+  advice: string;
+}
+
+/** Подготовка к собеседованию (POST/GET /resumes/{id}/interview-prep/{vacancy_id}). */
+export interface InterviewPrep {
+  resume_id: number;
+  vacancy_id: string;
+  summary: string;
+  questions: InterviewQuestion[];
+  gaps: InterviewGap[];
+  questions_to_ask: string[];
   model: string;
   created_at: string;
   cached: boolean;
@@ -496,6 +534,7 @@ export interface LlmJob {
   match?: VacancyMatch | null;
   cover_letter?: CoverLetter | null;
   resume_tailoring?: ResumeTailoring | null;
+  interview_prep?: InterviewPrep | null;
   /** Импорт: итог по уже обработанным текстам — растёт, пока джоба running. */
   import_result?: VacancyImportResponse | null;
   /** Переразбор (kind=reextract): итог по уже обработанным вакансиям. */

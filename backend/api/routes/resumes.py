@@ -9,12 +9,13 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.api.deps import CurrentUser, get_current_user, get_db, verify_api_key
 from backend.db import repository as repo
-from backend.db.models import CoverLetterRow, ResumeRow, ResumeTailoringRow, VacancyMatchRow
+from backend.db.models import CoverLetterRow, InterviewPrepRow, ResumeRow, ResumeTailoringRow, VacancyMatchRow
 from backend.observability import record_cover_letter, record_match
 from backend.schemas import (
     RESUME_TEXT_MAX_LENGTH,
     CoverLetterOut,
     CoverLetterRequest,
+    InterviewPrepOut,
     LlmJobAccepted,
     MatchBatchRequest,
     ResumeCreate,
@@ -29,6 +30,7 @@ from backend.schemas import (
 )
 from backend.services.llm_job_service import (
     KIND_COVER_LETTER,
+    KIND_INTERVIEW_PREP,
     KIND_MATCH,
     KIND_MATCH_BATCH,
     KIND_RESUME_TAILOR,
@@ -39,11 +41,18 @@ from backend.services.llm_job_service import (
 from backend.services.llm_result_freshness import (
     cover_letter_is_stale,
     current_ai_config,
+    interview_prep_is_stale,
     match_is_stale,
     resume_tailoring_is_stale,
 )
 from backend.services.skill_gap_service import skill_gaps
-from tg_jobs_parser.ai.schema import MatchBreakdown, ResumeTailoringSuggestion, SkillMatch
+from tg_jobs_parser.ai.schema import (
+    InterviewGap,
+    InterviewQuestion,
+    MatchBreakdown,
+    ResumeTailoringSuggestion,
+    SkillMatch,
+)
 from tg_jobs_parser.config.schema import AiConfig
 from tg_jobs_parser.utils.resume_file import ResumeFileError, extract_resume_text
 
@@ -436,6 +445,90 @@ def delete_resume_tailoring(
     _get_own_resume(db, resume_id, user)
     if not repo.delete_resume_tailoring(db, resume_id=resume_id, vacancy_id=vacancy_id):
         raise HTTPException(status_code=404, detail="Resume tailoring not found")
+
+
+def _interview_prep_to_out(row: InterviewPrepRow, *, cached: bool, ai: AiConfig) -> InterviewPrepOut:
+    return InterviewPrepOut(
+        resume_id=row.resume_id,
+        vacancy_id=row.vacancy_id,
+        summary=row.summary or "",
+        questions=[InterviewQuestion.model_validate(q) for q in row.questions or []],
+        gaps=[InterviewGap.model_validate(g) for g in row.gaps or []],
+        questions_to_ask=list(row.questions_to_ask or []),
+        model=row.model,
+        created_at=row.created_at,
+        cached=cached,
+        stale=interview_prep_is_stale(row, ai),
+    )
+
+
+@resumes_router.get("/{resume_id}/interview-prep/{vacancy_id}", response_model=InterviewPrepOut)
+def get_interview_prep(
+    resume_id: int,
+    vacancy_id: str,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> InterviewPrepOut:
+    """Сохранённая подготовка к собеседованию для пары; 404 — если ещё не запускалась."""
+    _get_own_resume(db, resume_id, user)
+    row = repo.get_interview_prep(db, resume_id=resume_id, vacancy_id=vacancy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Interview prep not found")
+    return _interview_prep_to_out(row, cached=True, ai=current_ai_config())
+
+
+@resumes_router.post(
+    "/{resume_id}/interview-prep/{vacancy_id}",
+    response_model=None,
+    responses={200: {"model": InterviewPrepOut}, 202: {"model": LlmJobAccepted}},
+)
+def prepare_interview(
+    resume_id: int,
+    vacancy_id: str,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Свежая подготовка без force → 200; иначе (нет, устарела, force) фоновая джоба → 202 ``{job_id}``."""
+    _get_own_resume(db, resume_id, user)
+    if repo.get_vacancy_row(db, vacancy_id) is None:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+    if not force:
+        existing = repo.get_interview_prep(db, resume_id=resume_id, vacancy_id=vacancy_id)
+        ai = current_ai_config()
+        if existing is not None and not interview_prep_is_stale(existing, ai):
+            return _interview_prep_to_out(existing, cached=True, ai=ai)
+    try:
+        result = llm_job_runner.enqueue(
+            user_id=user.id,
+            kind=KIND_INTERVIEW_PREP,
+            resume_id=resume_id,
+            vacancy_id=vacancy_id,
+            force=force,
+        )
+    except LlmJobUserLimitError as e:
+        from backend.errors import CODE_RATE_LIMITED, http_error
+
+        raise http_error(429, CODE_RATE_LIMITED, str(e), retryable=True) from e
+    except LlmDailyQuotaError as e:
+        from backend.errors import CODE_LLM_QUOTA_EXCEEDED, http_error
+
+        raise http_error(429, CODE_LLM_QUOTA_EXCEEDED, str(e), retryable=False) from e
+    accepted = LlmJobAccepted(job_id=result.job_id, status="queued")
+    return JSONResponse(status_code=202, content=accepted.model_dump(mode="json"))
+
+
+@resumes_router.delete("/{resume_id}/interview-prep/{vacancy_id}", status_code=204)
+def delete_interview_prep(
+    resume_id: int,
+    vacancy_id: str,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> None:
+    """Сбросить сохранённую подготовку пары."""
+    _get_own_resume(db, resume_id, user)
+    if not repo.delete_interview_prep(db, resume_id=resume_id, vacancy_id=vacancy_id):
+        raise HTTPException(status_code=404, detail="Interview prep not found")
 
 
 @resumes_router.post("/{resume_id}/match-batch", status_code=202, response_model=LlmJobAccepted)

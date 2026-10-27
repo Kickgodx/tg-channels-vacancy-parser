@@ -1,4 +1,4 @@
-"""Актуальность сохранённых оценки соответствия, письма и адаптации резюме.
+"""Актуальность сохранённых оценки соответствия, письма, адаптации резюме и подготовки к собеседованию.
 
 Результат устарел, если с момента запроса сменилась настроенная модель или версия
 промпта. Ответ fallback-модели сам по себе не устаревание: сравнивается запрошенная
@@ -15,6 +15,7 @@ from typing import Protocol
 from backend.settings import get_settings
 from tg_jobs_parser.ai.prompts import (
     COVER_LETTER_PROMPT_VERSION,
+    INTERVIEW_PREP_PROMPT_VERSION,
     MATCH_PROMPT_VERSION,
     RESUME_TAILOR_PROMPT_VERSION,
 )
@@ -60,4 +61,13 @@ def resume_tailoring_is_stale(row: _LlmResult, ai: AiConfig) -> bool:
         row,
         configured_model=ai.resolved_cover_letter_model(),
         prompt_version=RESUME_TAILOR_PROMPT_VERSION,
+    )
+
+
+def interview_prep_is_stale(row: _LlmResult, ai: AiConfig) -> bool:
+    """Подготовка получена другой моделью (та же, что у писем) или другой версией промпта."""
+    return _is_stale(
+        row,
+        configured_model=ai.resolved_cover_letter_model(),
+        prompt_version=INTERVIEW_PREP_PROMPT_VERSION,
     )

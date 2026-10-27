@@ -395,6 +395,31 @@ class ResumeEmbeddingRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 
+class InterviewPrepRow(Base):
+    """Подготовка к собеседованию (LLM). PK (resume+vacancy) — и кэш генерации, как у адаптаций."""
+
+    __tablename__ = "interview_preps"
+
+    resume_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("resumes.id", ondelete="CASCADE", name="fk_interview_preps_resume_id"), primary_key=True
+    )
+    vacancy_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("vacancies.id", ondelete="CASCADE", name="fk_interview_preps_vacancy_id"),
+        primary_key=True,
+        index=True,
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    questions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    gaps: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    questions_to_ask: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Фактически ответившая модель (может быть fallback); запрошенная и версия промпта — для stale.
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    requested_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+
+
 class HhListingRow(Base):
     """Кэш короткой выдачи HH: last_seen + флаг detail_fetched для anti-DDOS."""
 
@@ -482,7 +507,7 @@ class LlmJobRow(Base):
     )
     kind: Mapped[str] = mapped_column(
         String(32), nullable=False
-    )  # match | cover_letter | resume_tailor | import | reextract
+    )  # match | cover_letter | resume_tailor | interview_prep | import | reextract | match_batch
     # Индексы на FK (миграция 018): каскадное удаление резюме / вакансии без seq scan.
     # У импорта (миграция 023) их нет — тексты в params.
     resume_id: Mapped[int | None] = mapped_column(

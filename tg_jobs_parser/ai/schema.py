@@ -355,3 +355,76 @@ class ResumeTailoringExtraction(BaseModel):
     @classmethod
     def norm_do_not_claim(cls, v: object) -> list[str]:
         return _coerce_str_list(v)[:6]
+
+
+InterviewQuestionKind = Literal["technical", "experience", "behavioral", "gap"]
+_QUESTION_KINDS = ("technical", "experience", "behavioral", "gap")
+
+
+class InterviewQuestion(BaseModel):
+    """Вероятный вопрос собеседования и тезисы ответа из реального опыта резюме."""
+
+    kind: InterviewQuestionKind = "technical"
+    topic: str = ""
+    question: str = ""
+    why: str = ""
+    answer_points: list[str] = Field(default_factory=list, max_length=4)
+
+    @field_validator("topic", "question", "why", mode="before")
+    @classmethod
+    def norm_str(cls, v: object) -> str:
+        return _coerce_optional_str(v) or ""
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def norm_kind(cls, v: object) -> str:
+        key = str(v or "").strip().lower()
+        return key if key in _QUESTION_KINDS else "technical"
+
+    @field_validator("answer_points", mode="before")
+    @classmethod
+    def norm_points(cls, v: object) -> list[str]:
+        return _coerce_str_list(v)[:4]
+
+
+class InterviewGap(BaseModel):
+    """Требование вакансии, которого нет в резюме, и как к вопросу о нём подготовиться."""
+
+    skill: str = ""
+    advice: str = ""
+
+    @field_validator("skill", "advice", mode="before")
+    @classmethod
+    def norm_str(cls, v: object) -> str:
+        return _coerce_optional_str(v) or ""
+
+
+class InterviewPrepExtraction(BaseModel):
+    """Ответ LLM подготовки к собеседованию: вопросы, тезисы из резюме, пробелы, вопросы работодателю."""
+
+    summary: str = ""
+    questions: list[InterviewQuestion] = Field(default_factory=list, max_length=10)
+    gaps: list[InterviewGap] = Field(default_factory=list, max_length=5)
+    questions_to_ask: list[str] = Field(default_factory=list, max_length=5)
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def norm_summary(cls, v: object) -> str:
+        return _coerce_optional_str(v) or ""
+
+    @field_validator("questions", mode="before")
+    @classmethod
+    def drop_bad_questions(cls, v: object) -> list:
+        items = v if isinstance(v, list) else []
+        return [q for q in items if isinstance(q, dict) and _coerce_optional_str(q.get("question"))][:10]
+
+    @field_validator("gaps", mode="before")
+    @classmethod
+    def drop_bad_gaps(cls, v: object) -> list:
+        items = v if isinstance(v, list) else []
+        return [g for g in items if isinstance(g, dict) and _coerce_optional_str(g.get("skill"))][:5]
+
+    @field_validator("questions_to_ask", mode="before")
+    @classmethod
+    def norm_ask(cls, v: object) -> list[str]:
+        return _coerce_str_list(v)[:5]
