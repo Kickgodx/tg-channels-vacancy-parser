@@ -14,6 +14,28 @@ if TYPE_CHECKING:
     from tg_jobs_parser.parse_cancel import ParseCancellationToken
 
 
+@dataclass(frozen=True)
+class ForwardSource:
+    """Канал, из которого переслан пост: id Telegram, публичный username (если есть) и название."""
+
+    channel_id: int
+    username: str | None = None
+    title: str | None = None
+    # id сообщения в исходном канале (ссылка t.me/<username>/<id>), если Telegram его отдал.
+    post_id: int | None = None
+
+
+@dataclass(frozen=True)
+class ForwardedPost:
+    """Пересланный пост прогона: где встретили, откуда переслан, стал ли кандидатом в вакансии."""
+
+    channel: str
+    post_id: str
+    post_date: datetime | None
+    source: ForwardSource
+    is_vacancy: bool
+
+
 @dataclass
 class RawPost:
     """Сырой пост из источника."""
@@ -23,6 +45,7 @@ class RawPost:
     text: str
     post_date: datetime | None
     post_url: str | None
+    forward_from: ForwardSource | None = None
 
 
 @dataclass(frozen=True)

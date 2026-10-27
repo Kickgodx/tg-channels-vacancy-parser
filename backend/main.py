@@ -16,6 +16,7 @@ from backend.api.routes import (
     ai_cache,
     analytics,
     auth,
+    channels,
     companies,
     config,
     digests,
@@ -368,6 +369,7 @@ app.include_router(ai_cache.router, prefix="/api/v1")
 app.include_router(fx.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(digests.router, prefix="/api/v1")
+app.include_router(channels.router, prefix="/api/v1")
 app.include_router(companies.router, prefix="/api/v1")
 app.include_router(filters.router, prefix="/api/v1")
 app.include_router(resumes.resumes_router, prefix="/api/v1")

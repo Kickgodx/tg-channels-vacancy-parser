@@ -41,7 +41,13 @@ from tg_jobs_parser.parse_progress import (
     ParseProgressCallback,
     ParseProgressSnapshot,
 )
-from tg_jobs_parser.parsers.base import BaseChannelParser, ChannelCallback, ChannelCheckpoint, RawPost
+from tg_jobs_parser.parsers.base import (
+    BaseChannelParser,
+    ChannelCallback,
+    ChannelCheckpoint,
+    ForwardedPost,
+    RawPost,
+)
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import (
     clamp_range_days,
@@ -105,6 +111,7 @@ def _build_parse_result(
     incomplete_reason: str | None = None,
     channel_checkpoints: dict[str, ChannelCheckpoint] | None = None,
     total_elapsed_sec: float | None = None,
+    forwarded_posts: list[ForwardedPost] | None = None,
 ) -> ParseResult:
     _LOG.info(
         "Дедупликация: %s уникальных, %s дубликатов за %.1f с.",
@@ -175,6 +182,7 @@ def _build_parse_result(
         metrics=metrics,
         incomplete_reason=incomplete_reason,
         channel_checkpoints=channel_checkpoints or {},
+        forwarded_posts=forwarded_posts or [],
     )
 
 
@@ -449,6 +457,7 @@ def run_parse(
     posts_processed = 0
     channels_fetched = 0
     candidates: list[Vacancy] = []
+    forwarded: list[ForwardedPost] = []
     batch_step = progress_every_n_posts or config.parser.progress_batch_posts
 
     channels_unique: list[str] = []
@@ -643,10 +652,17 @@ def run_parse(
             remaining[ch] = remaining.get(ch, 0) + len(posts)
             backlog.extend((ch, p) for p in posts)
 
-        def _on_processed(ch: str, v: Vacancy | None) -> None:
+        def _on_processed(ch: str, post: RawPost, v: Vacancy | None) -> None:
             nonlocal posts_processed
             posts_processed += 1
             record_post_processed(candidate=v is not None)
+            src = post.forward_from
+            if src is not None and src.username != ch.lower():
+                forwarded.append(
+                    ForwardedPost(
+                        channel=ch, post_id=post.post_id, post_date=post.post_date, source=src, is_vacancy=v is not None
+                    )
+                )
             if v is not None:
                 _register_candidate(v)
             if posts_processed % batch_step == 0:
@@ -685,7 +701,7 @@ def run_parse(
         fetch.start()
         if not inline:
             pool = DaemonThreadPoolExecutor(max_workers=workers, thread_name_prefix="post-proc")
-        futures: dict[Future, str] = {}
+        futures: dict[Future, tuple[str, RawPost]] = {}
         while True:
             if cancel:
                 cancel.check()
@@ -695,15 +711,16 @@ def run_parse(
                 _take_channel(item)
             if inline and backlog:
                 ch, post = backlog.popleft()
-                _on_processed(ch, _process_one(post))
+                _on_processed(ch, post, _process_one(post))
                 continue
             while pool is not None and backlog and len(futures) < max_inflight:
                 ch, post = backlog.popleft()
-                futures[_submit_in_context(pool, _process_one, post)] = ch
+                futures[_submit_in_context(pool, _process_one, post)] = (ch, post)
             if futures:
                 done, _ = wait(futures, timeout=0.25, return_when=FIRST_COMPLETED)
                 for fut in done:
-                    _on_processed(futures.pop(fut), fut.result())
+                    ch, post = futures.pop(fut)
+                    _on_processed(ch, post, fut.result())
                 continue
             if fetch.exhausted:
                 break
@@ -802,6 +819,7 @@ def run_parse(
             incomplete_reason=incomplete_reason,
             channel_checkpoints=new_checkpoints,
             total_elapsed_sec=time.monotonic() - run_started,
+            forwarded_posts=forwarded,
         )
     except ParseCancelled:
         _LOG.warning("Прогон прерван (отмена).")
@@ -825,6 +843,7 @@ def run_parse(
             process_elapsed_sec=process_elapsed,
             fx_rates=fx_rates,
             total_elapsed_sec=time.monotonic() - run_started,
+            forwarded_posts=forwarded,
         )
     except KeyboardInterrupt:
         if cancel is not None:

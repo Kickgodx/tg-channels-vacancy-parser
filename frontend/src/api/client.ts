@@ -23,6 +23,7 @@ import type {
   ResumeTailoring,
   InterviewPrep,
   CompanyProfile,
+  ChannelCandidate,
   Digest,
   DigestListItem,
   VacancyFlags,
@@ -589,6 +590,17 @@ export const api = {
   getVacancy: (id: string) => request<Vacancy>(`/vacancies/${encodeURIComponent(id)}`),
   getVacancyFlags: (id: string) =>
     request<VacancyFlags>(`/vacancies/${encodeURIComponent(id)}/flags`),
+  listChannelCandidates: (includeIgnored: boolean) =>
+    request<{ items: ChannelCandidate[] }>(
+      `/channels/candidates${includeIgnored ? "?include_ignored=true" : ""}`,
+    ),
+
+  setChannelCandidateStatus: (channelId: number, status: ChannelCandidate["status"]) =>
+    request<{ status: string }>(`/channels/candidates/${channelId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+
   listDigests: () => request<{ items: DigestListItem[] }>("/digests"),
 
   getDigest: (periodStart: string) => request<Digest>(`/digests/${periodStart}`),

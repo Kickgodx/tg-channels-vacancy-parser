@@ -1041,3 +1041,22 @@ tr.clickable:hover {
 .digest-block table {
   width: 100%;
 }
+
+/* Кандидаты в источники по пересылкам — свёрнутый блок под полем каналов. */
+.channel-candidates {
+  margin: 0.5rem 0 0.75rem;
+}
+
+.channel-candidates summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.channel-candidate-actions {
+  white-space: nowrap;
+}
+
+.channel-candidate-actions .btn-link + .btn-link,
+.channel-candidate-actions .muted + .btn-link {
+  margin-left: 0.5rem;
+}

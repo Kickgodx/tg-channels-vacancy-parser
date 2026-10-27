@@ -893,3 +893,17 @@ export interface Digest {
   created_at: string;
   stale: boolean;
 }
+
+/** Канал, из которого пересылают посты в читаемые каналы (GET /channels/candidates, admin). */
+export interface ChannelCandidate {
+  channel_id: number;
+  username: string;
+  title: string | null;
+  status: "new" | "ignored";
+  forwards: number;
+  vacancy_forwards: number;
+  seen_in: string[];
+  first_post_date: string | null;
+  last_post_date: string | null;
+  example_url: string | null;
+}

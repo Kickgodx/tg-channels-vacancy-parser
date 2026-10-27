@@ -309,6 +309,23 @@ PostgreSQL, Kafka…) — **технологии** вакансии (`technologi
 
 Агрегаты (`/vacancies/metrics`, `/analytics/*`) кэшируются в памяти API на `ANALYTICS_CACHE_SECONDS` (30 с) по набору фильтров; запись вакансий в том же процессе сбрасывает кэш сразу, запись из воркера видна не позже чем через TTL. Фильтры по специализации и технологии на Postgres идут по GIN-индексам (`detected_specializations` — `JSONB`, миграция 019; `technologies` — `JSONB`, миграция 037). `config.yaml` перечитывается только при изменении файла (кэш по mtime).
 
+### Новые каналы из пересылок
+
+Каналы-агрегаторы пересылают вакансии из других каналов, и такие пересылки подсказывают,
+какие источники стоит добавить. Прогон запоминает каждый пост, пересланный из канала (не от
+пользователя и не со скрытым отправителем): откуда он, в какой наш канал и прошёл ли он как
+вакансия. Username и название исходного канала берутся из того же ответа истории, без
+лишних запросов к Telegram. Хранится это в `telegram_forwards` (канал + id поста:
+перечитанное окно не удваивает счётчики) и `channel_candidates`.
+
+На странице **Парсинг** под полем каналов — свёрнутый блок «Кандидаты из пересылок»
+(`GET /channels/candidates`, только admin). В нём каналы с публичным username, которых нет
+ни в `config.yaml`, ни среди уже читавшихся (по чекпоинтам). Порядок — по числу
+пересланных вакансий, затем по числу пересылок. Видно, в какие наши каналы пересылают, и
+есть ссылка на последний пересланный пост в источнике. «Добавить» вписывает канал в форму
+прогона, «Скрыть» убирает кандидата из списка (`PATCH /channels/candidates/{id}`, вернуть
+можно в «Показать скрытые»).
+
 ### Обзор рынка за неделю
 
 Страница **Обзор** (`/digest`): раз в неделю — что изменилось на рынке по базе вакансий.
@@ -643,6 +660,8 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `POST` | `/runs/{id}/cancel` | Отмена (admin; флаг в БД; работает после рестарта API); ответ — состояние прогона, и для уже завершённого |
 | `GET` | `/runs/{id}/vacancies` | Вакансии прогона (admin; `sort_by`, `sort_order`): все, что прогон встретил, — и новые, и уже известные; повторная встреча в следующем прогоне их из старого не убирает (связка `parse_run_vacancies`), архивные по TTL тоже остаются — с пометкой «архив» у даты |
 | `GET` | `/runs/{id}/export.xlsx` / `.json` | Скачивание отчёта (admin) |
+| `GET` | `/channels/candidates` | Admin: каналы, из которых пересылают в читаемые, кроме уже читаемых (`include_ignored`) |
+| `PATCH` | `/channels/candidates/{channel_id}` | Admin: скрыть кандидата или вернуть `{status: ignored\|new}` |
 | `GET` | `/vacancies` | Глобальный список (slim: `preview` без полных текстов; фильтры, сортировка `sort_by`/`sort_order` + вторая ступень `then_by`/`then_order` для пары «дата ↔ зарплата ₽», пагинация, `resume_id`) |
 | `GET` | `/vacancies/{id}` | Полная вакансия (`raw_text` / `cleaned_text`) для карточки |
 | `POST` | `/vacancies/import` | Импорт вакансий из текста (admin): `{texts, source_url?}` → rules + LLM → запись в БД |
@@ -763,8 +782,8 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…044`, номера 005 нет; head —
-`044_market_digests`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…045`, номера 005 нет; head —
+`045_channel_candidates`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -782,6 +801,8 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 | `resume_tailorings` | Адаптации резюме под вакансию, PK `(resume_id, vacancy_id)` — как у писем |
 | `interview_preps` | Подготовка к собеседованию, PK `(resume_id, vacancy_id)` — как у адаптаций |
 | `market_digests` | Еженедельный обзор рынка: факты недели (JSON) и текст LLM, одна строка на неделю |
+| `channel_candidates` | Каналы, из которых пересылают в читаемые: последние username и название, `status` new / ignored |
+| `telegram_forwards` | Пересланные посты читаемых каналов: PK (канал, id поста), источник, прошёл ли как вакансия |
 | `vacancy_embeddings` / `resume_embeddings` | Эмбеддинги (pgvector `vector(1536)`, HNSW по косинусу у вакансий), `model` + `content_hash` — для переиндексации |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 | `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
@@ -823,7 +844,7 @@ tg_jobs_parser/
     workers/               — parse/llm/hh_worker (RQ, общий runner), *_tasks, recover*,
                              liveness (heartbeat + watchdog), healthcheck
     queue/                 — RQ Redis connection (очереди parse, llm, hh)
-  alembic/                 — миграции SQL (001…044)
+  alembic/                 — миграции SQL (001…045)
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes

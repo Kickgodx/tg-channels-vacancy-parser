@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
 import type { ParseFormState } from "../types/api";
-import { buildRunBody, formFromDefaults } from "../utils/parseForm";
+import { buildRunBody, formFromDefaults, splitCsv } from "../utils/parseForm";
+import ChannelCandidatesPanel from "./ChannelCandidatesPanel";
 
 interface Props {
   onSubmit: (body: ReturnType<typeof buildRunBody>) => void;
@@ -82,6 +83,12 @@ export default function ParseForm({ onSubmit, disabled, isSubmitting }: Props) {
             placeholder="qa_jobs&#10;python_django_jobs"
           />
         </label>
+        <ChannelCandidatesPanel
+          inForm={splitCsv(form.channelsText).map((c) => c.replace(/^@/, "").toLowerCase())}
+          onAdd={(u) =>
+            patch({ channelsText: [...splitCsv(form.channelsText), u].join("\n") })
+          }
+        />
         <p className="caption">
           Сессия Telethon: <code>{d.telegram.telethon_session_file}</code> — задаётся в config.yaml на
           backend. Нужны TELEGRAM_API_ID / TELEGRAM_API_HASH в .env.

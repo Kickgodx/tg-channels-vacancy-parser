@@ -8,7 +8,7 @@ from pydantic import AliasChoices, BaseModel, Field
 
 from tg_jobs_parser.models.metrics import MetricsSummary
 from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.parsers.base import ChannelCheckpoint
+from tg_jobs_parser.parsers.base import ChannelCheckpoint, ForwardedPost
 
 
 class ParseResult(BaseModel):
@@ -37,4 +37,9 @@ class ParseResult(BaseModel):
         default_factory=dict,
         exclude=True,
         description="Новые чекпоинты каналов (инкрементальная вычитка); backend сохраняет их при completed.",
+    )
+    forwarded_posts: list[ForwardedPost] = Field(
+        default_factory=list,
+        exclude=True,
+        description="Посты, пересланные из других каналов: backend копит по ним кандидатов в источники.",
     )
