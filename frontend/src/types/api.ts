@@ -723,6 +723,61 @@ export interface TechnologyAnalytics {
   salary_display?: { display_currency: string; rates_as_of?: string | null; rates_source: string } | null;
 }
 
+export interface LifetimeBucket {
+  label: string;
+  min_days: number;
+  max_days: number | null;
+  count: number;
+}
+
+export interface LifetimeGroup {
+  name: string;
+  vacancies: number;
+  republished: number;
+  republished_share: number;
+  long_open: number;
+  median_span_days: number | null;
+}
+
+export interface LifetimeCompany {
+  company: string;
+  vacancies: number;
+  republished: number;
+  long_open: number;
+  max_span_days: number;
+}
+
+export interface LifetimeVacancy {
+  id: string;
+  company: string | null;
+  specializations: string[];
+  grade: string;
+  source_channel: string;
+  first_at: string;
+  last_at: string;
+  span_days: number;
+  publication_days: number;
+  posts: number;
+  archived: boolean;
+}
+
+/** GET /analytics/lifetime — жизнь вакансии по публикациям в Telegram. */
+export interface LifetimeAnalytics {
+  vacancies: number;
+  republished: number;
+  republished_share: number;
+  long_open: number;
+  long_open_days: number;
+  span_p50_days: number | null;
+  span_p90_days: number | null;
+  buckets: LifetimeBucket[];
+  by_role: LifetimeGroup[];
+  by_grade: LifetimeGroup[];
+  companies: LifetimeCompany[];
+  longest: LifetimeVacancy[];
+  min_group: number;
+}
+
 export type MarketSalaryLevel = "grade_role_tech" | "grade_role" | "grade_tech" | "role";
 
 /** Рыночная вилка вакансии (GET /vacancies/{id}/market-salary). */
