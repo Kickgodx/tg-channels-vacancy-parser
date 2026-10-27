@@ -39,8 +39,9 @@ WEEK = timedelta(days=7)
 SALARY_WINDOW = timedelta(days=28)
 BASE_WEEKS = 4
 SALARY_GRADES = ["junior", "middle", "senior", "lead"]
-# Медиана группы зарплат — от стольких вакансий, иначе null.
-MIN_SALARY_GROUP = 5
+# Медиана группы зарплат — от стольких вакансий, иначе null: на 5 зарплатах lead медиана
+# прыгала на десятки тысяч от недели к неделе.
+MIN_SALARY_GROUP = 10
 # Сдвиги технологий — только если в неделе и в базе (4 недели до неё) достаточно вакансий.
 TECH_MIN_WEEK = 20
 TECH_MIN_BASE = 40

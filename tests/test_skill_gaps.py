@@ -182,3 +182,12 @@ def test_summary_with_market_demand(api_client):
     [eng] = body["other"]
     assert eng["name"] == "Английский B2"
     assert eng["market_vacancies"] is None
+
+
+def test_mentions_whole_word_only():
+    from tg_jobs_parser.analytics.skill_gaps import mentions
+
+    assert mentions("Трекер Atlassian Jira, Ёлка", "jira")
+    assert mentions("ёлка", "Елка")
+    assert not mentions("JiraSync", "Jira")
+    assert not mentions("текст", "")

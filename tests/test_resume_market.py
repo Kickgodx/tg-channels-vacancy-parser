@@ -156,3 +156,14 @@ def test_market_embeddings_disabled_is_503(api_client):
     r = api_client.get(f"/api/v1/resumes/{rid}/market", headers=_h(token))
     assert r.status_code == 503
     assert r.json()["detail"]["code"] == "UPSTREAM_UNAVAILABLE"
+
+
+def test_nested_technology_name_counts_as_in_resume(api_client, fake_embed):
+    """«Atlassian Jira» в резюме — это Jira вакансии; словарь видит только длинное имя."""
+    _add(*[_vac("QA тестировщик", technologies=["Jira", "Atlassian Jira" if i < 5 else "Jira"]) for i in range(10)])
+    token = _token(api_client)
+    rid = _resume(api_client, token, "QA тестировщик, трекер Atlassian Jira")
+    m = api_client.get(f"/api/v1/resumes/{rid}/market", headers=_h(token)).json()
+    techs = {t["name"]: t["in_resume"] for t in m["technologies"]}
+    assert techs["Jira"] is True and techs["Atlassian Jira"] is True
+    assert m["coverage"] == 1.0

@@ -819,7 +819,7 @@ def build_interview_prep_messages(
     ]
 
 
-MARKET_DIGEST_PROMPT_VERSION = "market-digest-v1"
+MARKET_DIGEST_PROMPT_VERSION = "market-digest-v2"
 
 MARKET_DIGEST_SYSTEM_PROMPT = """
 You are an IT job market analyst. Write a short weekly digest for job
@@ -834,6 +834,13 @@ Rules (most important):
   (salaries), this week vs the 4 weeks before (technology shares).
 - If a section is empty or the numbers are small, skip it rather than
   draw conclusions. Do not explain causes.
+- New companies are ONLY those listed in new_companies. A company in
+  top_companies with previous = 0 simply had no vacancies last week — never
+  call it new.
+- Salaries: compare by grade (junior/middle/senior/lead) where both
+  medians are present. Mention the "all" median change only if the grades
+  move in the same direction; if they move the other way, the grade mix
+  changed — say that the medians by grade went down/up instead.
 - Salaries are monthly, in roubles; write them like "250 тыс. ₽".
 - Shares are fractions in FACTS (0.25 = 25%); delta_pp is percentage points.
 
