@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import ResumeMarketPanel from "../components/ResumeMarketPanel";
 import SkillGapsPanel from "../components/SkillGapsPanel";
+import SkillWhatIfPanel from "../components/SkillWhatIfPanel";
 import type { Resume } from "../types/api";
 
 export default function ResumesPage() {
@@ -169,6 +170,7 @@ export default function ResumesPage() {
       )}
 
       {selected && !formOpen && <ResumeMarketPanel resumeId={selected.id} />}
+      {selected && !formOpen && <SkillWhatIfPanel resumeId={selected.id} />}
       {selected && !formOpen && <SkillGapsPanel resumeId={selected.id} />}
 
       {formOpen && (

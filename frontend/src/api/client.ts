@@ -3,6 +3,7 @@ import type {
   CompanyStats,
   LifetimeAnalytics,
   RecruiterContacts,
+  SkillWhatIf,
   ConfigDefaults,
   CoverLetter,
   CoverLetterTone,
@@ -950,6 +951,7 @@ export const api = {
   getSkillGaps: (resumeId: number) => request<SkillGaps>(`/resumes/${resumeId}/skill-gaps`),
 
   getResumeMarket: (resumeId: number) => request<ResumeMarket>(`/resumes/${resumeId}/market`),
+  getSkillWhatIf: (resumeId: number) => request<SkillWhatIf>(`/resumes/${resumeId}/what-if`),
 
   getVacancyMatch: (resumeId: number, vacancyId: string) =>
     request<VacancyMatch>(`/resumes/${resumeId}/match/${vacancyId}`),

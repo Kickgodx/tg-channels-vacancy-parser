@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, text
@@ -50,12 +51,15 @@ def _shares(counter: Counter, total: int, limit: int) -> list[MarketShare]:
     return [MarketShare(name=name, share=n / total) for name, n in items]
 
 
-def _nearest(session: Session, vector: list[float], *, model: str, now: datetime) -> list:
+def nearest_vacancies(
+    session: Session, vector: list[float], *, model: str, now: datetime, limit: int = CANDIDATES
+) -> list:
+    """Ближайшие к вектору уникальные вакансии за окно: (грейд, роли, технологии, зарплата ₽)."""
     e = VacancyEmbeddingRow
     v = VacancyRow
     distance = e.embedding.cosine_distance(query_vector(vector))
     # HNSW отдаёт не больше ef_search строк (по умолчанию 40) — поднимаем до числа кандидатов.
-    session.execute(text(f"SET LOCAL hnsw.ef_search = {CANDIDATES}"))
+    session.execute(text(f"SET LOCAL hnsw.ef_search = {int(limit)}"))
     stmt = (
         select(v.detected_grade, v.detected_specializations, v.technologies, v.detected_salary_avg_rub)
         .select_from(e)
@@ -66,28 +70,36 @@ def _nearest(session: Session, vector: list[float], *, model: str, now: datetime
             v.post_date >= now - timedelta(days=WINDOW_DAYS),
         )
         .order_by(distance, e.vacancy_id)
-        .limit(CANDIDATES)
+        .limit(limit)
     )
     return session.execute(stmt).all()
+
+
+def resume_technology_check(session: Session, resume: ResumeRow) -> tuple[list[str], Callable[[str], bool]]:
+    """Технологии резюме по словарю и проверка «технология есть в резюме».
+
+    Словарь (с алиасами: Golang → Go) или само название в тексте («Atlassian Jira» → Jira).
+    """
+    resume_techs = technology_matcher(session).find(resume.text)
+    own = {t.lower() for t in resume_techs}
+    found: dict[str, bool] = {}
+
+    def in_resume(tech: str) -> bool:
+        key = tech.lower()
+        if key not in found:
+            found[key] = key in own or mentions(resume.text, tech)
+        return found[key]
+
+    return resume_techs, in_resume
 
 
 def resume_market(session: Session, resume: ResumeRow) -> ResumeMarketOut:
     """Профиль рынка для резюме; ``EmbeddingsUnavailable`` — эмбеддинги выключены или недоступны."""
     vector = embedding_service.resume_embedding(session, resume)
     model = embedding_service._ai().embeddings.model
-    rows = _nearest(session, vector, model=model, now=datetime.now(UTC))
+    rows = nearest_vacancies(session, vector, model=model, now=datetime.now(UTC))
     salary_display = _prepare_fx(session)
-
-    resume_techs = technology_matcher(session).find(resume.text)
-    own = {t.lower() for t in resume_techs}
-    found: dict[str, bool] = {}
-
-    def in_resume(tech: str) -> bool:
-        """Словарь (с алиасами: Golang → Go) или само название в тексте («Atlassian Jira» → Jira)."""
-        key = tech.lower()
-        if key not in found:
-            found[key] = key in own or mentions(resume.text, tech)
-        return found[key]
+    resume_techs, in_resume = resume_technology_check(session, resume)
 
     peers = rows[:PEERS]
     out = ResumeMarketOut(

@@ -97,8 +97,10 @@ def _tech_values(techs: list[str]):
     return func.unnest(cast(techs, ARRAY(Text))).table_valued("tech").render_derived(name="t")
 
 
-def _premium(session: Session, query: VacancyQuery) -> list[TechnologyPremium]:
-    techs = _top_technologies(session, query, limit=PREMIUM_TOP, salaried=True)
+def _premium(session: Session, query: VacancyQuery, techs: list[str] | None = None) -> list[TechnologyPremium]:
+    """Премия технологий под фильтрами: заданных или ``PREMIUM_TOP`` самых частых среди вакансий с зарплатой."""
+    if techs is None:
+        techs = _top_technologies(session, query, limit=PREMIUM_TOP, salaried=True)
     if not techs:
         return []
     v = _vacancies_alias()
@@ -161,6 +163,11 @@ def _premium(session: Session, query: VacancyQuery) -> list[TechnologyPremium]:
             )
         )
     return out
+
+
+def technology_premiums(session: Session, query: VacancyQuery, techs: list[str]) -> list[TechnologyPremium]:
+    """Премия с поправкой на грейд для заданных технологий (для «Что если выучить»)."""
+    return _premium(session, query, techs) if techs else []
 
 
 def _overall_medians(session: Session, query: VacancyQuery, techs: list[str]) -> dict[str, tuple[int, float | None]]:

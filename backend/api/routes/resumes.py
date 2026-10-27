@@ -26,6 +26,7 @@ from backend.schemas import (
     ResumeTailoringOut,
     ResumeUpdate,
     SkillGapsOut,
+    SkillWhatIfOut,
     VacancyMatchOut,
 )
 from backend.services.llm_job_service import (
@@ -190,6 +191,24 @@ def get_resume_market(
         return resume_market(db, resume)
     except EmbeddingsUnavailable as e:
         raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, f"Сравнение с рынком недоступно: {e}", retryable=True) from e
+
+
+@resumes_router.get("/{resume_id}/what-if", response_model=SkillWhatIfOut)
+def get_skill_what_if(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> SkillWhatIfOut:
+    """Что если выучить: недостающие технологии и их эффект для ближайших к резюме вакансий (без LLM)."""
+    from backend.errors import CODE_UPSTREAM_UNAVAILABLE, http_error
+    from backend.services.embedding_service import EmbeddingsUnavailable
+    from backend.services.skill_what_if_service import skill_what_if
+
+    resume = _get_own_resume(db, resume_id, user)
+    try:
+        return skill_what_if(db, resume)
+    except EmbeddingsUnavailable as e:
+        raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, f"Расчёт недоступен: {e}", retryable=True) from e
 
 
 def _match_to_out(row: VacancyMatchRow, *, cached: bool, ai: AiConfig) -> VacancyMatchOut:
