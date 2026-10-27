@@ -354,6 +354,15 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
         except Exception as e:
             _LOG.warning("Прогон %s: чекпоинты каналов не прочитаны, читаем окно целиком: %s", run_id, e)
 
+    known_vacancies = None
+    if config.parser.cross_run_dedup_days > 0 and config.parser.fuzzy_text_duplicate_threshold <= 100:
+        try:
+            with session_scope() as session:
+                known_vacancies = repo.recent_vacancies_for_dedup(session, days=config.parser.cross_run_dedup_days)
+            _LOG.info("Прогон %s: в дедупе %s вакансий прошлых прогонов", run_id, len(known_vacancies))
+        except Exception as e:
+            _LOG.warning("Прогон %s: вакансии прошлых прогонов для дедупа не прочитаны: %s", run_id, e)
+
     try:
         result = run_parse(
             config,
@@ -364,6 +373,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             fx_rates=fx_rates,
             channel_checkpoints=checkpoints,
             checkpoint_sink=save_checkpoints,
+            known_vacancies=known_vacancies,
         )
         save_forwards(result)
         if lease_lost.is_set():

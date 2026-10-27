@@ -164,6 +164,13 @@ class VacancyRow(Base):
     is_duplicate: Mapped[bool] = mapped_column(default=False)
     duplicate_group_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     duplicate_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Скрытая копия (``db merge-duplicates``) → исходная вакансия; у уникальных — NULL.
+    duplicate_of: Mapped[str | None] = mapped_column(
+        String(128),
+        ForeignKey("vacancies.id", ondelete="SET NULL", name="fk_vacancies_duplicate_of"),
+        nullable=True,
+        index=True,
+    )
 
     parsed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
     last_parse_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)

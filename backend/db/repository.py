@@ -87,6 +87,7 @@ from backend.db.vacancy_repository import (
     iter_export_vacancies,
     list_run_vacancies,
     list_vacancies,
+    recent_vacancies_for_dedup,
     upsert_vacancies,
 )
 
@@ -145,6 +146,7 @@ __all__ = [
     "new_llm_lease_owner",
     "patch_run_progress",
     "patch_run_vacancy_upsert_stats",
+    "recent_vacancies_for_dedup",
     "reclaim_expired_llm_job",
     "reclaim_expired_parse_run",
     "reclaim_legacy_stale_parse_run",

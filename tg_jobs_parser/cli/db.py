@@ -82,3 +82,26 @@ def import_cmd(
             fg=typer.colors.GREEN,
         )
     )
+
+
+@db_app.command("merge-duplicates")
+def merge_duplicates_cmd(
+    apply: bool = typer.Option(False, "--apply", help="Склеить; без флага — только показать пары"),
+    limit: int = typer.Option(20, "--show", help="Сколько пар показать"),
+) -> None:
+    """Склеить почти-дубли Telegram, накопленные до дедупа между прогонами (разово)."""
+    try_load_dotenv()
+    from backend.services.near_duplicate_merge import apply_merges, find_near_duplicates
+    from backend.settings import get_settings
+    from tg_jobs_parser.config.loader import load_config
+
+    config = load_config(get_settings().config_path)
+    with session_scope() as session:
+        pairs = find_near_duplicates(session, config)
+        for p in pairs[:limit]:
+            typer.echo(f"{p.duplicate_id[:12]} → {p.canonical_id[:12]}  ({p.reason})")
+        if not apply:
+            typer.echo(f"Найдено пар: {len(pairs)}. Склеить: --apply")
+            return
+        merged = apply_merges(session, pairs)
+    typer.echo(typer.style(f"Склеено копий: {merged}", fg=typer.colors.GREEN))

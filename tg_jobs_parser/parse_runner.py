@@ -379,6 +379,7 @@ def run_parse(
     fx_rates: dict[date, dict[str, float]] | None = None,
     channel_checkpoints: dict[str, ChannelCheckpoint] | None = None,
     checkpoint_sink: Callable[[dict[str, ChannelCheckpoint]], None] | None = None,
+    known_vacancies: list[Vacancy] | None = None,
 ) -> ParseResult:
     """
     Основной сценарий MVP.
@@ -402,6 +403,8 @@ def run_parse(
     его посты разобраны и записаны через ``vacancy_batch_sink``, пока ни один пост
     прогона не потерян из-за LLM. Повторный прогон после падения не перечитывает
     такие каналы.
+    ``known_vacancies`` — вакансии прошлых прогонов (из БД) для дедупа: перепост с правками
+    становится их дублем (``duplicate_of`` — id в БД), а не новой вакансией.
     """
     try_load_dotenv()
 
@@ -509,6 +512,8 @@ def run_parse(
 
     process_elapsed = 0.0
     deduplicator = VacancyDeduplicator(config)
+    if known_vacancies:
+        deduplicator.seed(known_vacancies)
     dedup_elapsed = 0.0
     db_flush_step = max(1, config.parser.db_flush_every_posts)
     db_flush_pending = max(1, config.parser.db_flush_pending_vacancies)
