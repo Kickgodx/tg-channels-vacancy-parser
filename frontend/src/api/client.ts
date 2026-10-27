@@ -2,6 +2,7 @@ import type {
   AuthUser,
   CompanyStats,
   LifetimeAnalytics,
+  RecruiterContacts,
   ConfigDefaults,
   CoverLetter,
   CoverLetterTone,
@@ -592,6 +593,8 @@ export const api = {
   getVacancy: (id: string) => request<Vacancy>(`/vacancies/${encodeURIComponent(id)}`),
   getVacancyHistory: (id: string) => request<VacancyHistory>(`/vacancies/${id}/history`),
 
+  getRecruiterContacts: (id: string) =>
+    request<RecruiterContacts>(`/vacancies/${encodeURIComponent(id)}/contacts`),
   getVacancyFlags: (id: string) =>
     request<VacancyFlags>(`/vacancies/${encodeURIComponent(id)}/flags`),
   listChannelCandidates: (includeIgnored: boolean) =>

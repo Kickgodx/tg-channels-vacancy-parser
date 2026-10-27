@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import MarketSalaryBlock from "./MarketSalaryBlock";
+import RecruiterContactBlock from "./RecruiterContactBlock";
 import InterviewPrepPanel from "./InterviewPrepPanel";
 import ResumeTailoringPanel from "./ResumeTailoringPanel";
 import SimilarVacanciesBlock from "./SimilarVacanciesBlock";
@@ -410,6 +411,13 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
             )}
           </aside>
         )}
+        <RecruiterContactBlock
+          vacancyId={listItem.id}
+          letterDraft={letterDraft}
+          role={v.detected_specializations?.[0]}
+          company={v.company}
+          postUrl={v.post_url ? cleanPostUrl(v.post_url) : null}
+        />
         {resumeId != null && <ResumeTailoringPanel resumeId={resumeId} vacancyId={listItem.id} />}
         {resumeId != null && <InterviewPrepPanel resumeId={resumeId} vacancyId={listItem.id} />}
         <div className="meta-line">

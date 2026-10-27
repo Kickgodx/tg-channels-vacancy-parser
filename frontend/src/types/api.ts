@@ -845,6 +845,22 @@ export interface VacancyFlag {
   value: number | null;
 }
 
+export interface RecruiterContact {
+  kind: "telegram" | "telegram_bot" | "email";
+  /** Username без «@» или email. */
+  value: string;
+  /** https://t.me/<username> или mailto:<email>; черновик добавляет UI. */
+  url: string;
+  has_contact_hint: boolean;
+}
+
+/** GET /vacancies/{id}/contacts — куда откликнуться. */
+export interface RecruiterContacts {
+  vacancy_id: string;
+  contacts: RecruiterContact[];
+  application_urls: string[];
+}
+
 export interface VacancyFlags {
   vacancy_id: string;
   company_key: string | null;
