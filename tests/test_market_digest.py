@@ -275,3 +275,19 @@ def test_api_read_for_users_generate_for_admin(api_client, digest_on, fake_summa
     assert got.status_code == 200 and got.json()["summary"].startswith("За неделю")
     assert api_client.get("/api/v1/digests/2020-01-06", headers=h_user).status_code == 404
     assert api_client.get("/api/v1/digests", headers={}).status_code == 401
+
+
+def test_prompt_v2_rules_new_companies_and_grade_mix():
+    system = build_market_digest_messages(facts_json="{}")[0]["content"]
+    assert "ONLY those listed in new_companies" in system
+    assert "grade mix" in system
+
+
+def test_small_salary_group_has_no_median(pg_db):
+    rows = [
+        _vac(WEEK, detected_grade="lead", detected_salary_avg_rub=300_000.0) for _ in range(svc.MIN_SALARY_GROUP - 1)
+    ]
+    _add(rows)
+    with session_scope() as s:
+        lead = next(x for x in svc.compute_facts(s, WEEK).salaries if x.grade == "lead")
+    assert lead.count == svc.MIN_SALARY_GROUP - 1 and lead.median is None

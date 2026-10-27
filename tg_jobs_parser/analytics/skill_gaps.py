@@ -59,6 +59,16 @@ class TechnologyMatcher:
         return found
 
 
+def mentions(text: str, name: str) -> bool:
+    """Название встречается в тексте целым словом (без учёта регистра и «ё»).
+
+    ``TechnologyMatcher`` берёт самое длинное совпадение: в «Atlassian Jira» он найдёт
+    «Atlassian Jira», а не «Jira». Проверка одной технологии — без этой конкуренции.
+    """
+    key = _norm(name)
+    return bool(key) and re.search(rf"(?<![{_WORD}]){re.escape(key)}(?![{_WORD}])", _norm(text)) is not None
+
+
 def other_skill_label(skill: str) -> str:
     """Навык без технологий: без пояснений в скобках, одиночные пробелы."""
     text = _SPACES_RE.sub(" ", _PARENS_RE.sub(" ", skill)).strip(" .,;:-—")

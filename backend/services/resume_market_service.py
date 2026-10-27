@@ -20,6 +20,7 @@ from backend.db.vector_type import query_vector
 from backend.schemas import MarketShare, ResumeMarketOut, ResumeMarketTechnology
 from backend.services import embedding_service
 from backend.services.skill_gap_service import technology_matcher
+from tg_jobs_parser.analytics.skill_gaps import mentions
 
 WINDOW_DAYS = 365
 # Профиль и технологии — по стольким ближайшим вакансиям.
@@ -79,6 +80,15 @@ def resume_market(session: Session, resume: ResumeRow) -> ResumeMarketOut:
 
     resume_techs = technology_matcher(session).find(resume.text)
     own = {t.lower() for t in resume_techs}
+    found: dict[str, bool] = {}
+
+    def in_resume(tech: str) -> bool:
+        """Словарь (с алиасами: Golang → Go) или само название в тексте («Atlassian Jira» → Jira)."""
+        key = tech.lower()
+        if key not in found:
+            found[key] = key in own or mentions(resume.text, tech)
+        return found[key]
+
     peers = rows[:PEERS]
     out = ResumeMarketOut(
         resume_id=resume.id,
@@ -93,9 +103,9 @@ def resume_market(session: Session, resume: ResumeRow) -> ResumeMarketOut:
     grades = Counter(g for g, *_ in peers if g and g != "unknown")
     roles = Counter(r for _, specs, *_ in peers for r in set(specs or []))
     techs = Counter(t for _, _, ts, _ in peers for t in set(ts or []))
-    coverages = [sum(1 for t in set(ts) if t.lower() in own) / len(set(ts)) for _, _, ts, _ in peers if ts]
+    coverages = [sum(1 for t in set(ts) if in_resume(t)) / len(set(ts)) for _, _, ts, _ in peers if ts]
     top_techs = [
-        ResumeMarketTechnology(name=s.name, share=s.share, in_resume=s.name.lower() in own)
+        ResumeMarketTechnology(name=s.name, share=s.share, in_resume=in_resume(s.name))
         for s in _shares(techs, len(peers), TOP_TECHNOLOGIES)
         if s.share >= MIN_TECH_SHARE
     ]
