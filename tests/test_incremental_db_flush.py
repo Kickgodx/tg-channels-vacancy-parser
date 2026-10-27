@@ -62,6 +62,7 @@ def _config(**parser_overrides) -> AppConfig:
         "vacancy_min_substantive_score": 1,
         # fuzzy-дедуп не тестируем: иначе шаблонные тексты сольются в дубликаты.
         "vacancy_fuzzy_duplicate_threshold": 101,
+        "fuzzy_text_duplicate_threshold": 101,
         **parser_overrides,
     }
     return AppConfig(

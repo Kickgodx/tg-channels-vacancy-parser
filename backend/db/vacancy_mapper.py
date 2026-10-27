@@ -113,6 +113,7 @@ def row_to_vacancy(row: VacancyRow) -> Vacancy:
         is_duplicate=row.is_duplicate,
         duplicate_group_id=row.duplicate_group_id,
         duplicate_reason=row.duplicate_reason,
+        duplicate_of=row.duplicate_of,
         parsed_at=row.parsed_at,
         archived_at=row.archived_at,
     )

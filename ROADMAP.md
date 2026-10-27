@@ -19,7 +19,7 @@
 | 5 | `feature/llm-evals-match` | Golden/evals для match + cover letter | нет |
 
 **Про миграции:** цепочка инкрементальная — head сейчас
-`045_channel_candidates`. Новые фичи просто продолжают её
+`046_vacancy_duplicate_of`. Новые фичи просто продолжают её
 (`alembic revision` → `upgrade head` на старте backend, без `down -v`).
 БД — только Postgres; constraint'ы (FK, индексы) — с явными именами.
 

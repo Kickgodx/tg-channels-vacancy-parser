@@ -212,6 +212,9 @@ parser:
   sleep_between_requests_seconds: 1
   vacancy_fuzzy_duplicate_threshold: 88
   fuzzy_compare_prefix_len: 500
+  # Перепост с правками: сходство полного текста с вакансией прогона или из БД за N дней.
+  fuzzy_text_duplicate_threshold: 95
+  cross_run_dedup_days: 40
 
 dictionaries:
   specializations: {}

@@ -10,7 +10,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 
-from sqlalchemy import Date, and_, case, cast, false, func, literal_column, null, or_, select, update
+from sqlalchemy import (
+    Date,
+    and_,
+    bindparam,
+    case,
+    cast,
+    false,
+    func,
+    literal_column,
+    null,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, defer
 
@@ -337,7 +350,8 @@ def upsert_vacancies(
             conflict_set["last_parse_run_id"] = parse_run_id
         session.execute(stmt.on_conflict_do_update(index_elements=["id"], set_=conflict_set))
     if parse_run_id is not None:
-        links = [{"parse_run_id": parse_run_id, "vacancy_id": vid} for vid in by_id]
+        resighted = _touch_canonicals_of_duplicates(session, vacancies, by_id, parse_run_id=parse_run_id, now=now)
+        links = [{"parse_run_id": parse_run_id, "vacancy_id": vid} for vid in [*by_id, *resighted]]
         for chunk in _chunks(links):
             session.execute(insert(ParseRunVacancyRow).values(chunk).on_conflict_do_nothing())
         _insert_sightings(session, vacancies, existing_ids=existing_ids, parse_run_id=parse_run_id, now=now)
@@ -353,6 +367,62 @@ def upsert_vacancies(
     if inserted or updated_existing:
         invalidate_vacancy_count_cache()
     return VacancyUpsertStats(inserted=inserted, updated_existing=updated_existing)
+
+
+def _touch_canonicals_of_duplicates(
+    session: Session,
+    vacancies: list[Vacancy],
+    by_id: dict[str, Vacancy],
+    *,
+    parse_run_id: uuid.UUID,
+    now: datetime,
+) -> list[str]:
+    """Дубль вакансии из БД (прошлой пачки или прогона): та же вакансия, встреченная снова.
+
+    Как и точный перепост, сдвигает ``post_date`` вперёд, возвращает из архива при более
+    позднем посте и привязывает вакансию к прогону. Возвращает id таких вакансий.
+    """
+    latest: dict[str, datetime | None] = {}
+    for v in vacancies:
+        if not (v.is_duplicate and v.duplicate_of) or v.duplicate_of in by_id:
+            continue
+        prev = latest.get(v.duplicate_of)
+        dates = [d for d in (prev, v.post_date) if d is not None]
+        latest[v.duplicate_of] = max(dates) if dates else None
+    if not latest:
+        return []
+    found = set(session.scalars(select(VacancyRow.id).where(VacancyRow.id.in_(list(latest)))).all())
+    if not found:
+        return []
+    t = VacancyRow.__table__
+    seen = bindparam("seen_date")
+    stmt = (
+        update(t)
+        .where(t.c.id == bindparam("canonical_id"))
+        .values(
+            post_date=func.coalesce(func.greatest(t.c.post_date, seen), t.c.post_date),
+            archived_at=case((seen > t.c.post_date, null()), else_=t.c.archived_at),
+            last_parse_run_id=parse_run_id,
+            updated_at=now,
+        )
+    )
+    session.execute(stmt, [{"canonical_id": vid, "seen_date": latest[vid]} for vid in sorted(found)])
+    return sorted(found)
+
+
+def recent_vacancies_for_dedup(session: Session, *, days: int) -> list[Vacancy]:
+    """Уникальные вакансии Telegram с постом за ``days`` дней (с архивом) — «известные» для дедупа прогона."""
+    since = datetime.now(UTC) - timedelta(days=days)
+    rows = session.scalars(
+        select(VacancyRow)
+        .where(
+            VacancyRow.is_duplicate.is_(False),
+            VacancyRow.source_channel.not_in(NON_TELEGRAM_CHANNELS),
+            VacancyRow.post_date >= since,
+        )
+        .order_by(VacancyRow.post_date, VacancyRow.id)
+    ).all()
+    return [row_to_vacancy(r) for r in rows]
 
 
 def _insert_sightings(

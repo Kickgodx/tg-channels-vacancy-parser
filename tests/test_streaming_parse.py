@@ -47,6 +47,7 @@ def _config(channels: list[str] = CHANNELS, **parser_overrides) -> AppConfig:
                 "vacancy_score_threshold": 1,
                 "vacancy_min_substantive_score": 1,
                 "vacancy_fuzzy_duplicate_threshold": 101,
+                "fuzzy_text_duplicate_threshold": 101,
                 **parser_overrides,
             }
         ),
