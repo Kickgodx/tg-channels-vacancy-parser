@@ -601,6 +601,40 @@ class TelegramChannelCheckpointRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
+class ChannelCandidateRow(Base):
+    """Канал, из которого пересылают посты в наши каналы: кандидат в источники."""
+
+    __tablename__ = "channel_candidates"
+
+    channel_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    # Последние увиденные: канал может сменить username или название.
+    username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="new", server_default="new"
+    )  # new | ignored
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+
+
+class TelegramForwardRow(Base):
+    """Пересланный пост нашего канала. PK — канал + id поста: перечитанное окно не удваивает счётчики."""
+
+    __tablename__ = "telegram_forwards"
+
+    channel: Mapped[str] = mapped_column(String(128), primary_key=True)
+    post_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_channel_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("channel_candidates.channel_id", ondelete="CASCADE", name="fk_telegram_forwards_source_channel_id"),
+        nullable=False,
+        index=True,
+    )
+    source_post_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    post_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_vacancy: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+
+
 class LlmUserUsageRow(Base):
     """Вызовы LLM пользователя за сутки (UTC) — для квоты ``LLM_USER_DAILY_CALLS``."""
 

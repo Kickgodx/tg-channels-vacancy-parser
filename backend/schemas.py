@@ -958,3 +958,26 @@ class DigestGenerateRequest(BaseModel):
         default=None, description="Понедельник недели (UTC); по умолчанию — прошедшая неделя."
     )
     force: bool = Field(default=False, description="Пересчитать, даже если обзор за неделю уже есть.")
+
+
+class ChannelCandidate(BaseModel):
+    """Канал, из которого пересылают посты в наши каналы, — кандидат в источники."""
+
+    channel_id: int
+    username: str
+    title: str | None = None
+    status: Literal["new", "ignored"] = "new"
+    forwards: int = Field(description="Разных пересланных постов в наших каналах.")
+    vacancy_forwards: int = Field(description="Из них прошли как вакансии (правила/LLM и фильтры).")
+    seen_in: list[str] = Field(default_factory=list, description="Наши каналы, куда пересылают.")
+    first_post_date: datetime | None = None
+    last_post_date: datetime | None = None
+    example_url: str | None = Field(default=None, description="Последний пересланный пост в исходном канале.")
+
+
+class ChannelCandidatesResponse(BaseModel):
+    items: list[ChannelCandidate] = Field(default_factory=list)
+
+
+class ChannelCandidatePatch(BaseModel):
+    status: Literal["new", "ignored"]

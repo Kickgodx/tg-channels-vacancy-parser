@@ -16,7 +16,13 @@ from tg_jobs_parser.observability.parse_metrics import (
     record_channel_fetched,
     record_flood_wait,
 )
-from tg_jobs_parser.parsers.base import BaseChannelParser, ChannelCallback, ChannelCheckpoint, RawPost
+from tg_jobs_parser.parsers.base import (
+    BaseChannelParser,
+    ChannelCallback,
+    ChannelCheckpoint,
+    ForwardSource,
+    RawPost,
+)
 from tg_jobs_parser.parsers.channel_username import normalize_channel_username
 from tg_jobs_parser.utils.dates import resolve_search_date_from, resolve_search_date_to
 from tg_jobs_parser.utils.env_loader import try_load_dotenv
@@ -137,6 +143,32 @@ def ensure_telethon_session(session_file: str | Path) -> TelethonSessionInfo:
             await _disconnect_client(client)
 
     return _asyncio_run(_run())
+
+
+def forward_source(msg) -> ForwardSource | None:
+    """Источник пересылки, если пост переслан из канала (не от пользователя и не скрытый).
+
+    Username и название — из сущностей, пришедших вместе с историей (``msg.forward.chat``),
+    без отдельного запроса к Telegram; нет сущности — только id канала.
+    """
+    fwd = getattr(msg, "fwd_from", None)
+    channel_id = getattr(getattr(fwd, "from_id", None), "channel_id", None)
+    if not isinstance(channel_id, int):
+        return None
+    chat = getattr(getattr(msg, "forward", None), "chat", None)
+    username = getattr(chat, "username", None)
+    if not username:
+        # Каналы с несколькими username (Fragment) отдают их списком.
+        usernames = [u for u in (getattr(chat, "usernames", None) or []) if getattr(u, "active", False)]
+        username = getattr(usernames[0], "username", None) if usernames else None
+    title = getattr(chat, "title", None)
+    source_post = getattr(fwd, "channel_post", None)
+    return ForwardSource(
+        channel_id=channel_id,
+        username=str(username).lower() if username else None,
+        title=str(title) if title else None,
+        post_id=source_post if isinstance(source_post, int) else None,
+    )
 
 
 def _combine_utc(d, end_of_day: bool = False) -> datetime:
@@ -471,6 +503,7 @@ class TelegramTelethonParser(BaseChannelParser):
                             text=text,
                             post_date=msg_dt,
                             post_url=post_url,
+                            forward_from=forward_source(msg),
                         )
                     )
                 break

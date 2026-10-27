@@ -314,6 +314,19 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
         mark_flushed(remaining)
         return totals
 
+    def save_forwards(res: ParseResult) -> None:
+        """Пересылки из чужих каналов — для кандидатов в источники; сбой записи прогон не роняет."""
+        if not res.forwarded_posts:
+            return
+        try:
+            from backend.db.channel_candidate_repository import save_forwards as _save
+
+            with session_scope() as session:
+                _save(session, res.forwarded_posts)
+            _LOG.info("Прогон %s: пересланных из других каналов постов — %s", run_id, len(res.forwarded_posts))
+        except Exception as e:
+            _LOG.warning("Прогон %s: пересылки не записаны: %s", run_id, e)
+
     fx_rates = None
     if config.fx.enabled:
         try:
@@ -352,6 +365,7 @@ def _run_parse_job_traced(run_id: uuid.UUID, span) -> None:
             channel_checkpoints=checkpoints,
             checkpoint_sink=save_checkpoints,
         )
+        save_forwards(result)
         if lease_lost.is_set():
             status = "failed"
             error = "lease lost"
