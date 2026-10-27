@@ -37,12 +37,15 @@ from backend.schemas import (
     SimilarVacancy,
     TechnologyCount,
     TechnologyFacetResponse,
+    VacancyChange,
     VacancyFlags,
+    VacancyHistory,
     VacancyImportRequest,
     VacancyImportResponse,
     VacancyListResponse,
     VacancyQuery,
     VacancyReextractInfo,
+    VacancySightingOut,
     VacancySortField,
     VacancySortOrder,
     VacancyThenSortField,
@@ -303,6 +306,41 @@ def vacancy_market_salary(vacancy_id: str, db: Session = Depends(get_db)) -> Mar
     if row is None:
         raise HTTPException(status_code=404, detail="Vacancy not found")
     return market_salary(db, row)
+
+
+def _post_url(channel: str, source_post_key: str) -> str | None:
+    """Ссылка на пост Telegram по ключу появления ``{channel}-{post_id}``."""
+    _, _, post_id = source_post_key.rpartition("-")
+    return f"https://t.me/{channel}/{post_id}" if post_id.isdigit() else None
+
+
+@router.get("/{vacancy_id}/history", response_model=VacancyHistory)
+def get_vacancy_history(vacancy_id: str, db: Session = Depends(get_db)) -> VacancyHistory:
+    """Появления вакансии по дате поста: первая публикация, перепосты и что в них поменялось."""
+    from tg_jobs_parser.deduplication.changes import is_edited_repost
+
+    row = repo.get_vacancy_row(db, vacancy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+    sightings = []
+    for s in repo.vacancy_history(db, vacancy_id):
+        kind = "original" if not s.is_duplicate else "edited" if is_edited_repost(s.duplicate_reason) else "repost"
+        sightings.append(
+            VacancySightingOut(
+                source_channel=s.source_channel,
+                post_date=s.post_date,
+                post_url=_post_url(s.source_channel, s.source_post_key),
+                kind=kind,
+                duplicate_reason=s.duplicate_reason,
+                changes=[VacancyChange.model_validate(c) for c in s.changes or []],
+            )
+        )
+    return VacancyHistory(
+        vacancy_id=vacancy_id,
+        duplicate_of=row.duplicate_of if row.is_duplicate else None,
+        sightings=sightings,
+        edits=sum(1 for s in sightings if s.changes),
+    )
 
 
 @router.get("/{vacancy_id}/flags", response_model=VacancyFlags)

@@ -981,3 +981,33 @@ class ChannelCandidatesResponse(BaseModel):
 
 class ChannelCandidatePatch(BaseModel):
     status: Literal["new", "ignored"]
+
+
+class VacancyChange(BaseModel):
+    """Отличие перепоста от первой публикации."""
+
+    field: Literal["salary", "work_format", "city", "technologies"]
+    old: Any = None
+    new: Any = None
+    added: list[str] = Field(default_factory=list, description="Только у technologies.")
+    removed: list[str] = Field(default_factory=list, description="Только у technologies.")
+
+
+class VacancySightingOut(BaseModel):
+    """Появление вакансии: первая публикация, перепост того же текста или перепост с правками."""
+
+    source_channel: str
+    post_date: datetime | None = None
+    post_url: str | None = None
+    kind: Literal["original", "repost", "edited"]
+    duplicate_reason: str | None = None
+    changes: list[VacancyChange] = Field(default_factory=list)
+
+
+class VacancyHistory(BaseModel):
+    vacancy_id: str
+    duplicate_of: str | None = Field(
+        default=None, description="Вакансия скрыта как копия этой (разовое склеивание почти-дублей)."
+    )
+    sightings: list[VacancySightingOut] = Field(default_factory=list)
+    edits: int = Field(default=0, description="Перепостов с изменёнными полями.")

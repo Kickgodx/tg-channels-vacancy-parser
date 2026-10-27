@@ -27,6 +27,7 @@ import type {
   Digest,
   DigestListItem,
   VacancyFlags,
+  VacancyHistory,
   MarketSalary,
   TechnologyAnalytics,
   RunCreateBody,
@@ -588,6 +589,8 @@ export const api = {
   },
 
   getVacancy: (id: string) => request<Vacancy>(`/vacancies/${encodeURIComponent(id)}`),
+  getVacancyHistory: (id: string) => request<VacancyHistory>(`/vacancies/${id}/history`),
+
   getVacancyFlags: (id: string) =>
     request<VacancyFlags>(`/vacancies/${encodeURIComponent(id)}/flags`),
   listChannelCandidates: (includeIgnored: boolean) =>

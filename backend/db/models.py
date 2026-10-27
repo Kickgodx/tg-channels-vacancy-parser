@@ -232,6 +232,9 @@ class VacancySightingRow(Base):
     is_duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # exact_raw_hash | normalized_hash | fuzzy:<score> | seen_before; NULL — оригинал.
     duplicate_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Перепост с правками: отличия от первой публикации (``deduplication.changes``); иначе NULL.
+    # none_as_null: «изменений нет» — SQL NULL, а не JSON null.
+    changes: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 

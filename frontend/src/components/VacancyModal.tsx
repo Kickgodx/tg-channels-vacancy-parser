@@ -7,6 +7,7 @@ import InterviewPrepPanel from "./InterviewPrepPanel";
 import ResumeTailoringPanel from "./ResumeTailoringPanel";
 import SimilarVacanciesBlock from "./SimilarVacanciesBlock";
 import VacancyFlagsBlock from "./VacancyFlagsBlock";
+import VacancyHistoryBlock from "./VacancyHistoryBlock";
 import type {
   CoverLetter,
   CoverLetterTone,
@@ -443,6 +444,12 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
           </p>
         )}
         <VacancyFlagsBlock vacancyId={listItem.id} />
+        <VacancyHistoryBlock
+          vacancyId={listItem.id}
+          onOpenId={(id) => {
+            void api.getVacancy(id).then((full) => setNested(toVacancyListItem(full)));
+          }}
+        />
         <MarketSalaryBlock vacancyId={listItem.id} />
         <SimilarVacanciesBlock vacancyId={listItem.id} onOpen={setNested} />
         <hr />

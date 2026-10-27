@@ -1060,3 +1060,22 @@ tr.clickable:hover {
 .channel-candidate-actions .muted + .btn-link {
   margin-left: 0.5rem;
 }
+
+/* История публикаций: перепосты и их правки. */
+.vacancy-history {
+  margin: 0.75rem 0;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  background: #f8f9fa;
+  border-left: 3px solid #868e96;
+  font-size: 0.9rem;
+}
+
+.vacancy-history ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.vacancy-history-changes {
+  color: #a0520a;
+}

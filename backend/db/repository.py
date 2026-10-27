@@ -89,6 +89,7 @@ from backend.db.vacancy_repository import (
     list_vacancies,
     recent_vacancies_for_dedup,
     upsert_vacancies,
+    vacancy_history,
 )
 
 __all__ = [
@@ -167,4 +168,5 @@ __all__ = [
     "upsert_resume_tailoring",
     "upsert_vacancies",
     "upsert_vacancy_match",
+    "vacancy_history",
 ]
