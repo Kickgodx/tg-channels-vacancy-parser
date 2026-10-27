@@ -54,6 +54,7 @@ from backend.services.llm_result_freshness import match_is_stale
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.config.schema import AiConfig, FxConfig
+from tg_jobs_parser.deduplication.changes import is_edited_repost, vacancy_changes
 from tg_jobs_parser.models.vacancy import Vacancy
 
 
@@ -410,6 +411,31 @@ def _touch_canonicals_of_duplicates(
     return sorted(found)
 
 
+def _originals_of_edited_reposts(session: Session, vacancies: list[Vacancy]) -> dict[str, object]:
+    """Первые публикации для перепостов с правками: из пачки или из БД (поля для сравнения)."""
+    wanted = {
+        v.duplicate_of for v in vacancies if v.is_duplicate and v.duplicate_of and is_edited_repost(v.duplicate_reason)
+    }
+    if not wanted:
+        return {}
+    out: dict[str, object] = {v.id: v for v in vacancies if not v.is_duplicate and v.id in wanted}
+    missing = wanted - set(out)
+    if missing:
+        out.update({r.id: r for r in session.scalars(select(VacancyRow).where(VacancyRow.id.in_(list(missing))))})
+    return out
+
+
+def vacancy_history(session: Session, vacancy_id: str) -> list[VacancySightingRow]:
+    """Появления вакансии (первая публикация, перепосты, перепосты с правками) по дате поста."""
+    return list(
+        session.scalars(
+            select(VacancySightingRow)
+            .where(VacancySightingRow.vacancy_id == vacancy_id)
+            .order_by(VacancySightingRow.post_date.asc().nulls_last(), VacancySightingRow.source_post_key)
+        )
+    )
+
+
 def recent_vacancies_for_dedup(session: Session, *, days: int) -> list[Vacancy]:
     """Уникальные вакансии Telegram с постом за ``days`` дней (с архивом) — «известные» для дедупа прогона."""
     since = datetime.now(UTC) - timedelta(days=days)
@@ -440,10 +466,15 @@ def _insert_sightings(
     другой канал, перепост в том же канале, прошлый прогон. Повторная вычитка того же
     поста (ретрай, пересечение окон) ничего не меняет — ON CONFLICT по ключу поста.
     """
+    originals = _originals_of_edited_reposts(session, vacancies)
     rows: list[dict] = []
     for v in vacancies:
+        changes = None
         if v.is_duplicate:
             vacancy_id, reason = v.duplicate_of, v.duplicate_reason or "duplicate"
+            original = originals.get(vacancy_id or "")
+            if original is not None and is_edited_repost(reason):
+                changes = vacancy_changes(original, v) or None
         elif v.id in existing_ids:
             vacancy_id, reason = v.id, "seen_before"
         else:
@@ -459,6 +490,7 @@ def _insert_sightings(
                 "parse_run_id": parse_run_id,
                 "is_duplicate": reason is not None,
                 "duplicate_reason": reason[:64] if reason else None,
+                "changes": changes,
                 "seen_at": now,
             }
         )

@@ -907,3 +907,29 @@ export interface ChannelCandidate {
   last_post_date: string | null;
   example_url: string | null;
 }
+
+/** Отличие перепоста от первой публикации (GET /vacancies/{id}/history). */
+export interface VacancyChange {
+  field: "salary" | "work_format" | "city" | "technologies";
+  old: unknown;
+  new: unknown;
+  added: string[];
+  removed: string[];
+}
+
+export interface VacancySighting {
+  source_channel: string;
+  post_date: string | null;
+  post_url: string | null;
+  kind: "original" | "repost" | "edited";
+  duplicate_reason: string | null;
+  changes: VacancyChange[];
+}
+
+export interface VacancyHistory {
+  vacancy_id: string;
+  /** Вакансия скрыта как более поздняя копия этой. */
+  duplicate_of: string | null;
+  sightings: VacancySighting[];
+  edits: number;
+}
