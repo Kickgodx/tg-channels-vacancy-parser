@@ -38,10 +38,11 @@ from backend.db import repository as repo
 from backend.db.llm_job_repository import TERMINAL_LLM_STATUSES
 from backend.db.session import session_scope
 from backend.observability import LLM_JOB_SSE_CONNECTIONS
-from backend.schemas import LlmJobOut
+from backend.schemas import AskMarketResult, LlmJobOut
 from backend.services import import_service, llm_job_service, match_batch_service, reextract_service
 from backend.services.llm_job_events import channel_for
 from backend.services.llm_job_service import (
+    KIND_ASK_MARKET,
     KIND_COVER_LETTER,
     KIND_IMPORT,
     KIND_INTERVIEW_PREP,
@@ -69,7 +70,11 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
     import_out = None
     reextract_out = None
     match_batch_out = None
-    if row.kind == KIND_MATCH_BATCH:
+    ask_out = None
+    if row.kind == KIND_ASK_MARKET:
+        if row.status == "done" and row.result:
+            ask_out = AskMarketResult.model_validate(row.result)
+    elif row.kind == KIND_MATCH_BATCH:
         if row.result:
             match_batch_out = match_batch_service.match_batch_response(row.result)
     elif row.kind == KIND_REEXTRACT:
@@ -111,6 +116,7 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
         import_result=import_out,
         reextract_result=reextract_out,
         match_batch_result=match_batch_out,
+        ask_market_result=ask_out,
         cancel_requested=bool(row.cancel_requested),
         created_at=row.created_at,
         started_at=row.started_at,

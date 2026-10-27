@@ -25,6 +25,7 @@ from backend.api.routes import (
     health,
     hh,
     llm_jobs,
+    market_chat,
     resumes,
     runs,
     vacancies,
@@ -374,6 +375,7 @@ app.include_router(companies.router, prefix="/api/v1")
 app.include_router(filters.router, prefix="/api/v1")
 app.include_router(resumes.resumes_router, prefix="/api/v1")
 app.include_router(llm_jobs.router, prefix="/api/v1")
+app.include_router(market_chat.router, prefix="/api/v1")
 
 # Только сбор HTTP-метрик в REGISTRY; отдаёт их сервер на API_METRICS_PORT (_start_metrics_server).
 Instrumentator(

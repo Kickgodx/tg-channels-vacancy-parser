@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { api, getToken, retryIfRetryable } from "./api/client";
+import AskPage from "./pages/AskPage";
 import CompanyPage from "./pages/CompanyPage";
 import DigestPage from "./pages/DigestPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -65,6 +66,7 @@ export default function App() {
           <NavLink to="/vacancies">Вакансии</NavLink>
           <NavLink to="/resumes">Резюме</NavLink>
           <NavLink to="/digest">Обзор</NavLink>
+          <NavLink to="/ask">Спросить базу</NavLink>
           <UserBadge />
         </nav>
       )}
@@ -107,6 +109,14 @@ export default function App() {
               <RequireAdmin>
                 <HhPage />
               </RequireAdmin>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/ask"
+          element={
+            <RequireAuth>
+              <AskPage />
             </RequireAuth>
           }
         />

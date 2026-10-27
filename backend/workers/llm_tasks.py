@@ -15,6 +15,7 @@ from backend.db import repository as repo
 from backend.db.session import session_scope
 from backend.observability import record_llm_job, record_llm_worker_job
 from backend.services import (
+    ask_market_service,
     cover_letter_service,
     import_service,
     interview_prep_service,
@@ -25,7 +26,7 @@ from backend.services import (
 )
 from backend.services.llm_job_events import publish_llm_job_event
 from backend.services.llm_job_service import (
-    BATCH_KINDS,
+    KIND_ASK_MARKET,
     KIND_COVER_LETTER,
     KIND_IMPORT,
     KIND_INTERVIEW_PREP,
@@ -33,6 +34,7 @@ from backend.services.llm_job_service import (
     KIND_MATCH_BATCH,
     KIND_REEXTRACT,
     KIND_RESUME_TAILOR,
+    PAIRLESS_KINDS,
     LlmJobCancelled,
 )
 from backend.workers import liveness
@@ -81,7 +83,7 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                 job_result = dict(job.result) if job.result else None
                 resume = repo.get_resume(session, job.resume_id) if job.resume_id is not None else None
                 vacancy = repo.get_vacancy_row(session, job.vacancy_id) if job.vacancy_id is not None else None
-                if kind not in BATCH_KINDS and (resume is None or vacancy is None):
+                if kind not in PAIRLESS_KINDS and (resume is None or vacancy is None):
                     if repo.set_llm_job_status(
                         session,
                         jid,
@@ -163,6 +165,11 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                     result=job_result,
                     lease_owner=lease_owner,
                     is_cancelled=is_cancelled,
+                ):
+                    lease_lost.set()
+            elif kind == KIND_ASK_MARKET:
+                if not ask_market_service.run_ask_market_job(
+                    jid, params=params, lease_owner=lease_owner, is_cancelled=is_cancelled
                 ):
                     lease_lost.set()
             elif kind == KIND_MATCH:

@@ -34,6 +34,10 @@ KIND_MATCH_BATCH = "match_batch"
 # Пакетные джобы (импорт текстов, переразбор вакансий, пакетная оценка): без вакансии, не
 # переиспользуются, мимо interactive-бюджета, квота — в воркере по элементам.
 BATCH_KINDS = frozenset({KIND_IMPORT, KIND_REEXTRACT, KIND_MATCH_BATCH})
+# «Спросить базу»: вопрос о рынке — без резюме и вакансии, но квота и бюджет как у мэтча.
+KIND_ASK_MARKET = "ask_market"
+# Без пары резюме–вакансия: активная джоба не переиспользуется (у каждой свои тексты / вопрос).
+PAIRLESS_KINDS = BATCH_KINDS | {KIND_ASK_MARKET}
 
 # Импорт — до 50 текстов, каждый со своим вызовом LLM: базового таймаута RQ на него мало.
 IMPORT_SECONDS_PER_TEXT = 60
@@ -161,7 +165,7 @@ class LlmJobRunner:
             with session_scope() as session:
                 lock_user_llm_enqueue(session, user_id=user_id)
                 existing = None
-                if kind not in BATCH_KINDS:
+                if kind not in PAIRLESS_KINDS:
                     existing = repo.find_active_llm_job(
                         session,
                         user_id=user_id,

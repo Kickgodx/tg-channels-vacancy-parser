@@ -1,4 +1,6 @@
 import type {
+  AskMarketResult,
+  AskMarketTurn,
   AuthUser,
   CompanyStats,
   LifetimeAnalytics,
@@ -851,6 +853,22 @@ export const api = {
   },
 
   /** Отмена своей LLM-задачи; ответ — её текущее состояние (и у уже завершённой). */
+  /** «Спросить базу»: 202 job → ответ по SSE/poll; onAccepted — id задачи для отмены. */
+  askMarket: (
+    question: string,
+    history: AskMarketTurn[],
+    signal?: AbortSignal,
+    onAccepted?: (jobId: string) => void,
+  ) =>
+    postInteractiveLlm<AskMarketResult>(
+      "/market-chat/ask",
+      { method: "POST", body: JSON.stringify({ question, history }) },
+      (job) => job.ask_market_result,
+      undefined,
+      signal,
+      { onAccepted },
+    ),
+
   cancelLlmJob: (jobId: string) => request<LlmJob>(`/llm-jobs/${jobId}/cancel`, { method: "POST" }),
 
   hhStatus: () => request<HhStatus>("/hh/status"),
