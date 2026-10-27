@@ -565,6 +565,22 @@ tr.clickable:hover {
   cursor: wait;
 }
 
+.recruiter-contacts {
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  background: #ebfbee;
+  border-left: 3px solid #40c057;
+  font-size: 0.9rem;
+}
+
+.recruiter-contacts-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
 .cover-letter {
   margin: 0.75rem 0 1rem;
   padding: 0.85rem 1rem;

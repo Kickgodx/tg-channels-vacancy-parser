@@ -389,6 +389,21 @@ class VacancyFlags(BaseModel):
     flags: list[VacancyFlag] = Field(default_factory=list)
 
 
+class RecruiterContactOut(BaseModel):
+    kind: Literal["telegram", "telegram_bot", "email"]
+    value: str = Field(description="Username без «@» или email.")
+    url: str = Field(description="https://t.me/<username> или mailto:<email>; черновик UI добавляет сам.")
+    has_contact_hint: bool = Field(description="Рядом слова отклика («Контакты», «резюме»): кандидат надёжнее.")
+
+
+class RecruiterContacts(BaseModel):
+    """Куда откликнуться: контакты рекрутера из текста без каналов и их подписей."""
+
+    vacancy_id: str
+    contacts: list[RecruiterContactOut] = Field(default_factory=list)
+    application_urls: list[str] = Field(default_factory=list)
+
+
 class MarketSalaryOut(BaseModel):
     """Рыночная вилка для вакансии: квантили рублёвой зарплаты похожих вакансий."""
 

@@ -33,6 +33,7 @@ from backend.schemas import (
     EmbeddingStatus,
     LlmJobAccepted,
     MarketSalaryOut,
+    RecruiterContacts,
     SimilarVacanciesResponse,
     SimilarVacancy,
     TechnologyCount,
@@ -53,6 +54,7 @@ from backend.schemas import (
 from backend.services import export_service, idempotency, import_service, reextract_service
 from backend.services.llm_job_service import KIND_IMPORT, KIND_REEXTRACT, LlmJobUserLimitError, llm_job_runner
 from backend.services.llm_result_freshness import current_ai_config
+from backend.services.recruiter_contacts import recruiter_contacts
 from backend.settings import get_settings
 from tg_jobs_parser.config.loader import load_config
 from tg_jobs_parser.models.metrics import MetricsSummary
@@ -350,6 +352,15 @@ def get_vacancy_flags(vacancy_id: str, db: Session = Depends(get_db)) -> Vacancy
     if row is None:
         raise HTTPException(status_code=404, detail="Vacancy not found")
     return vacancy_flags(db, row)
+
+
+@router.get("/{vacancy_id}/contacts", response_model=RecruiterContacts)
+def get_recruiter_contacts(vacancy_id: str, db: Session = Depends(get_db)) -> RecruiterContacts:
+    """Контакты рекрутера для отклика: Telegram и email из текста, без каналов и их подписей."""
+    row = repo.get_vacancy_row(db, vacancy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+    return recruiter_contacts(db, row)
 
 
 def _resume_vector(db: Session, resume) -> list[float]:
