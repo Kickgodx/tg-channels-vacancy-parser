@@ -15,6 +15,7 @@ import type {
   ProgressEvent,
   Resume,
   SkillGaps,
+  ResumeMarket,
   MatchBatchResponse,
   SemanticStatus,
   SimilarVacanciesResponse,
@@ -908,6 +909,8 @@ export const api = {
     ),
 
   getSkillGaps: (resumeId: number) => request<SkillGaps>(`/resumes/${resumeId}/skill-gaps`),
+
+  getResumeMarket: (resumeId: number) => request<ResumeMarket>(`/resumes/${resumeId}/market`),
 
   getVacancyMatch: (resumeId: number, vacancyId: string) =>
     request<VacancyMatch>(`/resumes/${resumeId}/match/${vacancyId}`),

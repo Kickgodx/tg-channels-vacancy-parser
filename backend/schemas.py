@@ -592,6 +592,42 @@ class SkillGapsOut(BaseModel):
     other: list[SkillGapItem] = Field(default_factory=list)
 
 
+class MarketShare(BaseModel):
+    """Значение и доля ближайших к резюме вакансий, где оно встречается."""
+
+    name: str
+    share: float = Field(description="Доля ближайших вакансий (0–1).")
+
+
+class ResumeMarketTechnology(MarketShare):
+    in_resume: bool = Field(description="Технология названа в тексте резюме.")
+
+
+class ResumeMarketOut(BaseModel):
+    """Резюме против рынка: ближайшие к резюме вакансии по эмбеддингу (без LLM)."""
+
+    resume_id: int
+    window_days: int
+    peers: int = Field(description="Сколько ближайших вакансий за окно взято для профиля и технологий.")
+    grades: list[MarketShare] = Field(default_factory=list, description="Грейды ближайших, частые первыми.")
+    specializations: list[MarketShare] = Field(default_factory=list, description="Роли ближайших.")
+    salary_count: int = Field(default=0, description="Ближайших вакансий с рублёвой зарплатой в квантилях.")
+    p10: float | None = None
+    p25: float | None = None
+    median: float | None = None
+    p75: float | None = None
+    p90: float | None = None
+    technologies: list[ResumeMarketTechnology] = Field(
+        default_factory=list, description="Частые технологии ближайших и есть ли они в резюме."
+    )
+    coverage: float | None = Field(
+        default=None,
+        description="В среднем по ближайшим с технологиями: доля технологий вакансии, названных в резюме.",
+    )
+    resume_technologies: list[str] = Field(default_factory=list, description="Технологии, найденные в резюме.")
+    salary_display: SalaryDisplayMeta | None = None
+
+
 CoverLetterTone = Literal["neutral", "friendly", "formal"]
 
 

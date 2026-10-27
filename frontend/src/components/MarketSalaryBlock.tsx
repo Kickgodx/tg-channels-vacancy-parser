@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { MarketSalary } from "../types/api";
+import { formatThousands } from "../utils/formatSalary";
 
 const LEVEL_LABEL: Record<NonNullable<MarketSalary["level"]>, string> = {
   grade_role_tech: "тот же грейд, роль и хотя бы одна технология",
@@ -9,13 +10,19 @@ const LEVEL_LABEL: Record<NonNullable<MarketSalary["level"]>, string> = {
   role: "та же роль, любой грейд",
 };
 
-function k(v: number | null | undefined): string {
-  if (v == null) return "—";
-  return `${Math.round(v / 1000).toLocaleString("ru-RU")}k`;
+const k = formatThousands;
+
+interface Quantiles {
+  p10: number | null;
+  p25: number | null;
+  median: number | null;
+  p75: number | null;
+  p90: number | null;
 }
 
-function Strip({ m }: { m: MarketSalary }) {
-  const { p10, p25, median, p75, p90, vacancy_salary: own } = m;
+/** Полоса квантилей: усы p10–p90, ящик p25–p75, медиана и (опционально) своя точка. */
+export function SalaryStrip({ q, own = null }: { q: Quantiles; own?: number | null }) {
+  const { p10, p25, median, p75, p90 } = q;
   if (p10 == null || p25 == null || median == null || p75 == null || p90 == null) return null;
   const lo = Math.min(p10, own ?? p10);
   const hi = Math.max(p90, own ?? p90);
@@ -75,7 +82,7 @@ export default function MarketSalaryBlock({ vacancyId }: { vacancyId: string }) 
           (p10–p90: {k(m.p10)} – {k(m.p90)}), ₽ в месяц
         </span>
       </p>
-      <Strip m={m} />
+      <SalaryStrip q={m} own={m.vacancy_salary} />
       {m.vacancy_salary != null && m.percentile != null && (
         <p>
           Эта вакансия: <strong>{k(m.vacancy_salary)}</strong> — не ниже, чем у{" "}
