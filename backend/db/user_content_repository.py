@@ -1,4 +1,4 @@
-"""Репозиторий per-user контента: users, filters, resumes, matches, letters, адаптации резюме."""
+"""Репозиторий per-user контента: users, filters, resumes, matches, letters, адаптации, подготовка."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from backend.db.llm_job_repository import refund_queued_llm_jobs_of_resume
 from backend.db.models import (
     CoverLetterRow,
+    InterviewPrepRow,
     ResumeRow,
     ResumeTailoringRow,
     SavedFilterRow,
@@ -124,7 +125,7 @@ def update_resume(
         row.name = name
     if text is not None and text != row.text:
         row.text = text
-        # Матчи, письма и адаптации — кэш по старому тексту: без сброса POST match вернёт его с cached=true.
+        # Матчи, письма, адаптации и подготовка к собеседованию — кэш по старому тексту: без сброса POST match вернёт его с cached=true.
         _delete_resume_llm_results(session, resume_id)
     session.flush()
     return row
@@ -134,6 +135,7 @@ def _delete_resume_llm_results(session: Session, resume_id: int) -> None:
     session.query(VacancyMatchRow).filter(VacancyMatchRow.resume_id == resume_id).delete()
     session.query(CoverLetterRow).filter(CoverLetterRow.resume_id == resume_id).delete()
     session.query(ResumeTailoringRow).filter(ResumeTailoringRow.resume_id == resume_id).delete()
+    session.query(InterviewPrepRow).filter(InterviewPrepRow.resume_id == resume_id).delete()
 
 
 def delete_resume(session: Session, resume_id: int, user_id: int | None = None) -> bool:
@@ -294,6 +296,49 @@ def upsert_resume_tailoring(
 
 def delete_resume_tailoring(session: Session, *, resume_id: int, vacancy_id: str) -> bool:
     row = session.get(ResumeTailoringRow, (resume_id, vacancy_id))
+    if row is None:
+        return False
+    session.delete(row)
+    session.flush()
+    return True
+
+
+def get_interview_prep(session: Session, *, resume_id: int, vacancy_id: str) -> InterviewPrepRow | None:
+    return session.get(InterviewPrepRow, (resume_id, vacancy_id))
+
+
+def upsert_interview_prep(
+    session: Session,
+    *,
+    resume_id: int,
+    vacancy_id: str,
+    summary: str,
+    questions: list,
+    gaps: list,
+    questions_to_ask: list,
+    model: str,
+    requested_model: str | None = None,
+    prompt_version: str | None = None,
+) -> InterviewPrepRow:
+    """Записать/обновить подготовку пары (resume, vacancy) — кэш генерации по PK."""
+    row = session.get(InterviewPrepRow, (resume_id, vacancy_id))
+    if row is None:
+        row = InterviewPrepRow(resume_id=resume_id, vacancy_id=vacancy_id)
+        session.add(row)
+    row.summary = summary
+    row.questions = questions
+    row.gaps = gaps
+    row.questions_to_ask = questions_to_ask
+    row.model = model
+    row.requested_model = requested_model
+    row.prompt_version = prompt_version
+    row.created_at = datetime.now(UTC)
+    session.flush()
+    return row
+
+
+def delete_interview_prep(session: Session, *, resume_id: int, vacancy_id: str) -> bool:
+    row = session.get(InterviewPrepRow, (resume_id, vacancy_id))
     if row is None:
         return False
     session.delete(row)

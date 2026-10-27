@@ -466,7 +466,22 @@ HNSW по косинусу). Текст для вектора — роль, гр
 сбрасывает. Модель — та же, что у писем (`ai.cover_letter_model` → `match_model` →
 `model`); смена модели или `RESUME_TAILOR_PROMPT_VERSION` делает результат `stale`. Квота
 и отмена — общие для пользовательского LLM. Правка текста резюме сбрасывает его оценки,
-письма и адаптации.
+письма, адаптации и подготовку к собеседованию.
+
+### Подготовка к собеседованию
+
+В карточке вакансии при выбранном резюме — блок «Подготовка к собеседованию» (`POST
+/resumes/{id}/interview-prep/{vacancy_id}`, фоновая джоба `kind=interview_prep`): вопросы,
+которые вероятнее всего зададут на этой вакансии, и что ответить. Ответ: короткий вывод,
+6–10 вопросов — по технологиям вакансии, по опыту из резюме («расскажите о проекте…»),
+поведенческие и по пробелам — у каждого тема, откуда вопрос и до 4 тезисов ответа; до 5
+пробелов с советом, что повторить; до 5 вопросов работодателю. Тезисы строятся только из
+фактов резюме; для вопроса по пробелу — честная стратегия ответа, а не выдуманный опыт.
+Недостающие навыки сохранённой оценки пары модель получает как темы таких вопросов.
+
+Механика — как у адаптации: кэш парой в `interview_preps`, «Пересчитать» — `force=true`,
+`DELETE` сбрасывает; модель писем; смена модели или `INTERVIEW_PREP_PROMPT_VERSION` —
+`stale`; квота и отмена общие.
 
 **Резюме из файла.** В форме резюме — «Загрузить из файла»: `POST /resumes/parse-file`, тело
 запроса — сам файл (PDF или DOCX до 5 МБ, без multipart). Формат определяется по
@@ -630,6 +645,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `GET` | `/resumes/{id}/market` | Резюме и рынок: роли, грейды, вилка и технологии ближайших по смыслу вакансий (без LLM) |
 | `POST` `GET` `DELETE` | `/resumes/{id}/cover-letter/{vacancy_id}` | Письмо: свежее того же тона → 200; иначе 202 `{job_id}` (`force`, `tone`/`extra_notes`) |
 | `POST` `GET` `DELETE` | `/resumes/{id}/tailor/{vacancy_id}` | Адаптация резюме: свежая из БД → 200; иначе 202 `{job_id}` (`force`) |
+| `POST` `GET` `DELETE` | `/resumes/{id}/interview-prep/{vacancy_id}` | Подготовка к собеседованию: свежая из БД → 200; иначе 202 `{job_id}` (`force`) |
 | `POST` | `/resumes/parse-file` | Текст резюме из PDF/DOCX (тело — файл, до 5 МБ); не сохраняется |
 | `POST` | `/resumes/{id}/match-batch` | Пакетная LLM-оценка резюме по вакансиям (до 20): 202 `{job_id}`, итог — `match_batch_result` |
 | `GET` | `/llm-jobs/{job_id}` | Статус LLM-задачи; при `done` — payload match/letter |
@@ -720,8 +736,8 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 
 ### Схема БД
 
-Миграции инкрементальные (`alembic/versions/001…042`, номера 005 нет; head —
-`042_embeddings`). При старте backend применяет `upgrade head`.
+Миграции инкрементальные (`alembic/versions/001…043`, номера 005 нет; head —
+`043_interview_preps`). При старте backend применяет `upgrade head`.
 
 | Таблица | Назначение |
 |---------|------------|
@@ -737,6 +753,7 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 | `llm_jobs` | Фоновые LLM-задачи: мэтчинг, письма, ручной импорт (`queued`/`running`/`done`/`error`/`cancelled`) |
 | `cover_letters` | Сопроводительные письма, PK `(resume_id, vacancy_id)` — он же кэш генерации; `requested_model` + `prompt_version` — для `stale` |
 | `resume_tailorings` | Адаптации резюме под вакансию, PK `(resume_id, vacancy_id)` — как у писем |
+| `interview_preps` | Подготовка к собеседованию, PK `(resume_id, vacancy_id)` — как у адаптаций |
 | `vacancy_embeddings` / `resume_embeddings` | Эмбеддинги (pgvector `vector(1536)`, HNSW по косинусу у вакансий), `model` + `content_hash` — для переиндексации |
 | `users` | Аккаунты: email, argon2-хэш, `is_admin` |
 | `telegram_channel_checkpoints` | Чекпоинт канала для инкрементальной вычитки: `last_message_id`, `covered_from` |
@@ -778,7 +795,7 @@ tg_jobs_parser/
     workers/               — parse/llm/hh_worker (RQ, общий runner), *_tasks, recover*,
                              liveness (heartbeat + watchdog), healthcheck
     queue/                 — RQ Redis connection (очереди parse, llm, hh)
-  alembic/                 — миграции SQL (001…042)
+  alembic/                 — миграции SQL (001…043)
 
   frontend/                — React UI (Vite)
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes

@@ -18,6 +18,7 @@ from backend.db.models import (
     AIExtractionCacheRow,
     CoverLetterRow,
     ExchangeRateRow,
+    InterviewPrepRow,
     LlmJobRow,
     ParseRunRow,
     ParseRunVacancyRow,
@@ -179,11 +180,12 @@ class ReplaceLosses:
     vacancy_matches: int = 0
     cover_letters: int = 0
     resume_tailorings: int = 0
+    interview_preps: int = 0
     llm_jobs: int = 0
 
 
 def count_replace_losses(session: Session) -> ReplaceLosses:
-    """Сколько оценок, писем, адаптаций резюме и LLM-задач с вакансией унесёт очистка ``vacancies``.
+    """Сколько оценок, писем, адаптаций резюме, подготовок к собеседованию и LLM-задач с вакансией унесёт очистка ``vacancies``.
 
     В дамп они не входят: после ``replace`` их не восстановить.
     """
@@ -195,6 +197,7 @@ def count_replace_losses(session: Session) -> ReplaceLosses:
         vacancy_matches=_count(select(func.count()).select_from(VacancyMatchRow)),
         cover_letters=_count(select(func.count()).select_from(CoverLetterRow)),
         resume_tailorings=_count(select(func.count()).select_from(ResumeTailoringRow)),
+        interview_preps=_count(select(func.count()).select_from(InterviewPrepRow)),
         llm_jobs=_count(select(func.count()).select_from(LlmJobRow).where(LlmJobRow.vacancy_id.is_not(None))),
     )
 

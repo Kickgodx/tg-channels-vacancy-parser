@@ -22,7 +22,7 @@ from backend.api.deps import (
     sse_credentials,
     verify_api_key,
 )
-from backend.api.routes.resumes import _letter_to_out, _match_to_out, _tailoring_to_out
+from backend.api.routes.resumes import _interview_prep_to_out, _letter_to_out, _match_to_out, _tailoring_to_out
 from backend.api.sse import (
     DB_POLL_INTERVAL_S,
     HEARTBEAT_INTERVAL_S,
@@ -44,6 +44,7 @@ from backend.services.llm_job_events import channel_for
 from backend.services.llm_job_service import (
     KIND_COVER_LETTER,
     KIND_IMPORT,
+    KIND_INTERVIEW_PREP,
     KIND_MATCH,
     KIND_MATCH_BATCH,
     KIND_REEXTRACT,
@@ -64,6 +65,7 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
     match_out = None
     letter_out = None
     tailoring_out = None
+    interview_prep_out = None
     import_out = None
     reextract_out = None
     match_batch_out = None
@@ -90,6 +92,10 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
             t = repo.get_resume_tailoring(db, resume_id=row.resume_id, vacancy_id=row.vacancy_id)
             if t is not None:
                 tailoring_out = _tailoring_to_out(t, cached=False, ai=current_ai_config())
+        elif row.kind == KIND_INTERVIEW_PREP:
+            p = repo.get_interview_prep(db, resume_id=row.resume_id, vacancy_id=row.vacancy_id)
+            if p is not None:
+                interview_prep_out = _interview_prep_to_out(p, cached=False, ai=current_ai_config())
 
     return LlmJobOut(
         id=row.id,
@@ -101,6 +107,7 @@ def _job_to_out(db: Session, row) -> LlmJobOut:
         match=match_out,
         cover_letter=letter_out,
         resume_tailoring=tailoring_out,
+        interview_prep=interview_prep_out,
         import_result=import_out,
         reextract_result=reextract_out,
         match_batch_result=match_batch_out,

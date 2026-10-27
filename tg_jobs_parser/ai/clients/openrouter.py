@@ -15,6 +15,7 @@ from opentelemetry.trace import SpanKind
 from tg_jobs_parser.ai.models_catalog import LlmModelEntry
 from tg_jobs_parser.ai.prompts import (
     build_cover_letter_messages,
+    build_interview_prep_messages,
     build_match_messages,
     build_messages,
     build_resume_tailor_messages,
@@ -24,7 +25,12 @@ from tg_jobs_parser.ai.rate_limit import (
     OpenRouterRateLimiter,
     extract_rate_limit_headers,
 )
-from tg_jobs_parser.ai.schema import ResumeTailoringExtraction, VacancyAIExtraction, VacancyMatchExtraction
+from tg_jobs_parser.ai.schema import (
+    InterviewPrepExtraction,
+    ResumeTailoringExtraction,
+    VacancyAIExtraction,
+    VacancyMatchExtraction,
+)
 from tg_jobs_parser.ai.search_context import SearchContext
 from tg_jobs_parser.ai.token_cost import cost_usd_for_tokens, rates_for_model
 from tg_jobs_parser.config.schema import AiConfig
@@ -122,11 +128,21 @@ def _parse_tailoring(raw: str) -> ResumeTailoringExtraction:
     return result
 
 
+def _parse_interview_prep(raw: str) -> InterviewPrepExtraction:
+    text = _extract_json_text(raw)
+    data = json.loads(text)
+    result = InterviewPrepExtraction.model_validate(data)
+    if not result.questions:
+        raise ValueError("OpenRouter: подготовка к собеседованию без вопросов")
+    return result
+
+
 _LLM_TASKS = {
     _parse_extraction: "extract",
     _parse_match: "match",
     _parse_cover_letter: "cover_letter",
     _parse_tailoring: "resume_tailor",
+    _parse_interview_prep: "interview_prep",
 }
 
 
@@ -631,6 +647,76 @@ class OpenRouterClient:
                 except Exception as e:
                     last_err = e
                     _LOG.warning("Fallback %s не удался (resume tailor): %s", fb, e)
+            raise RuntimeError(
+                f"OpenRouter: все модели недоступны (основная + {len(fallbacks)} fallback): {last_err}"
+            ) from last_err
+
+    def interview_prep(
+        self,
+        *,
+        resume_text: str,
+        vacancy_text: str,
+        match_summary: dict | None = None,
+        model: str | None = None,
+    ) -> tuple[InterviewPrepExtraction, LLMUsage]:
+        """Подготовка к собеседованию — JSON; модель и reasoning те же, что у писем.
+
+        При невалидном JSON или ответе без вопросов — один controlled retry той же модели.
+        """
+        messages = build_interview_prep_messages(
+            resume_text=resume_text, vacancy_text=vacancy_text, match_summary=match_summary
+        )
+        call = lambda: self._call_llm(  # noqa: E731
+            messages=messages,
+            parse=_parse_interview_prep,
+            model=model or self._ai.resolved_cover_letter_model(),
+            reasoning=self._ai.match_reasoning_enabled,
+            reasoning_effort=self._ai.match_reasoning_effort,
+            json_schema=_strict_json_schema(InterviewPrepExtraction),
+        )
+        try:
+            return call()
+        except LlmQuotaExhausted:
+            raise
+        except (json.JSONDecodeError, ValueError) as e:
+            _LOG.warning("Подготовка к собеседованию: невалидный JSON от LLM (%s), повторный запрос", e)
+            return call()
+
+    def interview_prep_with_fallback(
+        self,
+        *,
+        resume_text: str,
+        vacancy_text: str,
+        match_summary: dict | None = None,
+    ) -> tuple[InterviewPrepExtraction, LLMUsage]:
+        if self._rate_limiter.llm_disabled:
+            raise LlmQuotaExhausted(self._rate_limiter.llm_disabled_reason or "LLM отключён")
+        kwargs = {"resume_text": resume_text, "vacancy_text": vacancy_text, "match_summary": match_summary}
+        try:
+            return self.interview_prep(**kwargs)
+        except LlmQuotaExhausted:
+            raise
+        except Exception as first_err:
+            if _is_rate_limit_error(first_err):
+                raise
+            fallbacks = self._ai.resolved_fallback_models()
+            if not fallbacks:
+                raise
+            last_err: Exception = first_err
+            for fb in fallbacks:
+                try:
+                    _LOG.warning(
+                        "Модель подготовки к собеседованию %s недоступна (%s), пробуем fallback: %s",
+                        self._ai.resolved_cover_letter_model(),
+                        first_err,
+                        fb,
+                    )
+                    return self.interview_prep(**kwargs, model=fb)
+                except LlmQuotaExhausted:
+                    raise
+                except Exception as e:
+                    last_err = e
+                    _LOG.warning("Fallback %s не удался (interview prep): %s", fb, e)
             raise RuntimeError(
                 f"OpenRouter: все модели недоступны (основная + {len(fallbacks)} fallback): {last_err}"
             ) from last_err

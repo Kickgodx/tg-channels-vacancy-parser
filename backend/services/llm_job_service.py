@@ -27,6 +27,7 @@ _TRACER = trace.get_tracer(__name__)
 KIND_MATCH = "match"
 KIND_COVER_LETTER = "cover_letter"
 KIND_RESUME_TAILOR = "resume_tailor"
+KIND_INTERVIEW_PREP = "interview_prep"
 KIND_IMPORT = "import"
 KIND_REEXTRACT = "reextract"
 KIND_MATCH_BATCH = "match_batch"

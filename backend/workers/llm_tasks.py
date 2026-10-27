@@ -17,6 +17,7 @@ from backend.observability import record_llm_job, record_llm_worker_job
 from backend.services import (
     cover_letter_service,
     import_service,
+    interview_prep_service,
     match_batch_service,
     match_service,
     reextract_service,
@@ -27,6 +28,7 @@ from backend.services.llm_job_service import (
     BATCH_KINDS,
     KIND_COVER_LETTER,
     KIND_IMPORT,
+    KIND_INTERVIEW_PREP,
     KIND_MATCH,
     KIND_MATCH_BATCH,
     KIND_REEXTRACT,
@@ -183,6 +185,14 @@ def run_llm_job(job_id: str, traceparent: str | None = None) -> None:
                 )
             elif kind == KIND_RESUME_TAILOR:
                 resume_tailoring_service.generate_single(
+                    resume_id=resume_id,
+                    resume_text=resume_text,
+                    vacancy_id=vacancy_id,
+                    vacancy_text=vacancy_text,
+                    is_cancelled=is_cancelled,
+                )
+            elif kind == KIND_INTERVIEW_PREP:
+                interview_prep_service.generate_single(
                     resume_id=resume_id,
                     resume_text=resume_text,
                     vacancy_id=vacancy_id,

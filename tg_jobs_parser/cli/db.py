@@ -68,8 +68,8 @@ def import_cmd(
         typer.confirm(
             "Режим replace удалит все прогоны, вакансии, курсы и кэш LLM в целевой БД, "
             f"а вместе с вакансиями — оценки соответствия ({losses.vacancy_matches}), "
-            f"сопроводительные письма ({losses.cover_letters}), адаптации резюме ({losses.resume_tailorings}) "
-            f"и LLM-задачи по вакансиям "
+            f"сопроводительные письма ({losses.cover_letters}), адаптации резюме ({losses.resume_tailorings}), "
+            f"подготовку к собеседованию ({losses.interview_preps}) и LLM-задачи по вакансиям "
             f"({losses.llm_jobs}) пользователей: в дамп они не входят. Продолжить?",
             abort=True,
         )

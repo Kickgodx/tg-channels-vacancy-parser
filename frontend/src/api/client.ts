@@ -21,6 +21,7 @@ import type {
   SimilarVacanciesResponse,
   ResumeFileText,
   ResumeTailoring,
+  InterviewPrep,
   CompanyProfile,
   VacancyFlags,
   MarketSalary,
@@ -946,6 +947,19 @@ export const api = {
 
   getResumeTailoring: (resumeId: number, vacancyId: string) =>
     request<ResumeTailoring>(`/resumes/${resumeId}/tailor/${vacancyId}`),
+
+  /** Подготовка к собеседованию: кэш → сразу; иначе 202 job + SSE/poll. */
+  prepareInterview: (resumeId: number, vacancyId: string, force = false, signal?: AbortSignal) =>
+    postInteractiveLlm<InterviewPrep>(
+      `/resumes/${resumeId}/interview-prep/${vacancyId}${force ? "?force=true" : ""}`,
+      { method: "POST" },
+      (job) => job.interview_prep,
+      undefined,
+      signal,
+    ),
+
+  getInterviewPrep: (resumeId: number, vacancyId: string) =>
+    request<InterviewPrep>(`/resumes/${resumeId}/interview-prep/${vacancyId}`),
 
   /** Текст резюме из PDF/DOCX: тело запроса — сам файл (без multipart). */
   parseResumeFile: (file: File) =>

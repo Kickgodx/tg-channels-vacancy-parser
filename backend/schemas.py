@@ -8,7 +8,13 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, model_validator
 
-from tg_jobs_parser.ai.schema import MatchBreakdown, ResumeTailoringSuggestion, SkillMatch
+from tg_jobs_parser.ai.schema import (
+    InterviewGap,
+    InterviewQuestion,
+    MatchBreakdown,
+    ResumeTailoringSuggestion,
+    SkillMatch,
+)
 from tg_jobs_parser.config.schema import split_specializations
 from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
 from tg_jobs_parser.models.vacancy import Vacancy
@@ -557,6 +563,24 @@ class ResumeTailoringOut(BaseModel):
     )
 
 
+class InterviewPrepOut(BaseModel):
+    """Подготовка к собеседованию для пары резюме↔вакансия (LLM)."""
+
+    resume_id: int
+    vacancy_id: str
+    summary: str = ""
+    questions: list[InterviewQuestion] = Field(default_factory=list)
+    gaps: list[InterviewGap] = Field(default_factory=list)
+    questions_to_ask: list[str] = Field(default_factory=list)
+    model: str
+    created_at: datetime
+    cached: bool = False
+    stale: bool = Field(
+        default=False,
+        description="Получено другой моделью (как у писем) или версией промпта; POST без force пересчитает.",
+    )
+
+
 class ResumeFileTextOut(BaseModel):
     """Текст резюме, извлечённый из загруженного файла (в базу не сохраняется)."""
 
@@ -688,6 +712,7 @@ class LlmJobOut(BaseModel):
     match: VacancyMatchOut | None = None
     cover_letter: CoverLetterOut | None = None
     resume_tailoring: ResumeTailoringOut | None = None
+    interview_prep: InterviewPrepOut | None = None
     import_result: VacancyImportResponse | None = None
     reextract_result: VacancyReextractResponse | None = None
     match_batch_result: MatchBatchResponse | None = None
