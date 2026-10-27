@@ -54,6 +54,20 @@ def _role_names(cfg) -> set[str]:
     return out
 
 
+def _matcher(catalog: dict[str, tuple[str, int]]) -> TechnologyMatcher:
+    cfg = load_config(get_settings().config_path)
+    roles = _role_names(cfg)
+    names = cfg.merged_technologies() + [
+        name for key, (name, n) in catalog.items() if n >= CATALOG_TECH_MIN_VACANCIES and key not in roles
+    ]
+    return TechnologyMatcher(names)
+
+
+def technology_matcher(session: Session) -> TechnologyMatcher:
+    """Словарь технологий для поиска в свободном тексте: ``config.yaml`` + частые в каталоге."""
+    return _matcher(_catalog_technologies(session))
+
+
 def skill_gaps(session: Session, *, resume_id: int) -> SkillGapsOut:
     rows = session.execute(
         select(VacancyMatchRow.vacancy_id, VacancyMatchRow.missing_skills)
@@ -64,14 +78,9 @@ def skill_gaps(session: Session, *, resume_id: int) -> SkillGapsOut:
         return SkillGapsOut(resume_id=resume_id, evaluated=0)
 
     catalog = _catalog_technologies(session)
-    cfg = load_config(get_settings().config_path)
-    roles = _role_names(cfg)
-    names = cfg.merged_technologies() + [
-        name for key, (name, n) in catalog.items() if n >= CATALOG_TECH_MIN_VACANCIES and key not in roles
-    ]
     summary = summarize_skill_gaps(
         [MatchSkills(vacancy_id=vid, missing_skills=skills or []) for vid, skills in rows],
-        TechnologyMatcher(names),
+        _matcher(catalog),
     )
     market = {key: n for key, (_, n) in catalog.items()}
     return SkillGapsOut(

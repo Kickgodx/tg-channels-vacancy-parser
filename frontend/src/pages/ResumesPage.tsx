@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
+import ResumeMarketPanel from "../components/ResumeMarketPanel";
 import SkillGapsPanel from "../components/SkillGapsPanel";
 import type { Resume } from "../types/api";
 
@@ -25,6 +26,7 @@ export default function ResumesPage() {
     void queryClient.invalidateQueries({ queryKey: ["cover-letter"] });
     void queryClient.invalidateQueries({ queryKey: ["skill-gaps"] });
     void queryClient.invalidateQueries({ queryKey: ["resume-tailoring"] });
+    void queryClient.invalidateQueries({ queryKey: ["resume-market"] });
   };
 
   const closeForm = () => {
@@ -165,6 +167,7 @@ export default function ResumesPage() {
         </div>
       )}
 
+      {selected && !formOpen && <ResumeMarketPanel resumeId={selected.id} />}
       {selected && !formOpen && <SkillGapsPanel resumeId={selected.id} />}
 
       {formOpen && (

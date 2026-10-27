@@ -20,6 +20,7 @@ from backend.schemas import (
     ResumeCreate,
     ResumeFileTextOut,
     ResumeListResponse,
+    ResumeMarketOut,
     ResumeOut,
     ResumeTailoringOut,
     ResumeUpdate,
@@ -162,6 +163,24 @@ def get_skill_gaps(
     """Сводка недостающих навыков по всем сохранённым оценкам резюме (без вызова LLM)."""
     _get_own_resume(db, resume_id, user)
     return skill_gaps(db, resume_id=resume_id)
+
+
+@resumes_router.get("/{resume_id}/market", response_model=ResumeMarketOut)
+def get_resume_market(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> ResumeMarketOut:
+    """Резюме против рынка: вилка, профиль и технологии ближайших по смыслу вакансий (без LLM)."""
+    from backend.errors import CODE_UPSTREAM_UNAVAILABLE, http_error
+    from backend.services.embedding_service import EmbeddingsUnavailable
+    from backend.services.resume_market_service import resume_market
+
+    resume = _get_own_resume(db, resume_id, user)
+    try:
+        return resume_market(db, resume)
+    except EmbeddingsUnavailable as e:
+        raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, f"Сравнение с рынком недоступно: {e}", retryable=True) from e
 
 
 def _match_to_out(row: VacancyMatchRow, *, cached: bool, ai: AiConfig) -> VacancyMatchOut:

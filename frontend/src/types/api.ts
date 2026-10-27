@@ -375,6 +375,35 @@ export interface SkillGaps {
   other: SkillGapItem[];
 }
 
+export interface MarketShare {
+  name: string;
+  /** Доля ближайших вакансий (0–1). */
+  share: number;
+}
+
+export interface ResumeMarketTechnology extends MarketShare {
+  in_resume: boolean;
+}
+
+/** Резюме против рынка (GET /resumes/{id}/market): ближайшие к резюме вакансии по смыслу. */
+export interface ResumeMarket {
+  resume_id: number;
+  window_days: number;
+  peers: number;
+  grades: MarketShare[];
+  specializations: MarketShare[];
+  salary_count: number;
+  p10: number | null;
+  p25: number | null;
+  median: number | null;
+  p75: number | null;
+  p90: number | null;
+  technologies: ResumeMarketTechnology[];
+  /** Средняя доля технологий вакансии, названных в резюме (0–1). */
+  coverage: number | null;
+  resume_technologies: string[];
+}
+
 export interface MatchBreakdown {
   role_match: number;
   skills_match: number;
