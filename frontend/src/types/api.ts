@@ -845,6 +845,39 @@ export interface VacancyFlag {
   value: number | null;
 }
 
+export interface SkillWhatIfOption {
+  technology: string;
+  demand: number;
+  demand_share: number;
+  new_fit: number;
+  coverage_gain: number;
+  premium: number | null;
+  premium_scope: "grade" | "role" | null;
+  median_with: number | null;
+}
+
+export interface SkillWhatIfPeer {
+  total: number;
+  covered: number;
+  missing: string[];
+}
+
+/** GET /resumes/{id}/what-if — эффект недостающих технологий для сегмента рынка резюме. */
+export interface SkillWhatIf {
+  resume_id: number;
+  window_days: number;
+  peers: number;
+  with_technologies: number;
+  role: string | null;
+  grade: string | null;
+  fit_threshold: number;
+  baseline_fit: number;
+  baseline_coverage: number | null;
+  resume_technologies: string[];
+  options: SkillWhatIfOption[];
+  peer_gaps: SkillWhatIfPeer[];
+}
+
 export interface RecruiterContact {
   kind: "telegram" | "telegram_bot" | "email";
   /** Username без «@» или email. */

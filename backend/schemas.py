@@ -725,6 +725,47 @@ class ResumeMarketOut(BaseModel):
     salary_display: SalaryDisplayMeta | None = None
 
 
+class SkillWhatIfOption(BaseModel):
+    technology: str
+    demand: int = Field(description="Вакансий сегмента, где технология нужна, а в резюме её нет.")
+    demand_share: float = Field(description="Доля от вакансий сегмента с технологиями.")
+    new_fit: int = Field(description="Сколько вакансий станут подходящими, если добавить технологию.")
+    coverage_gain: float = Field(description="Рост среднего покрытия технологий вакансий сегмента (доля, 0–1).")
+    premium: float | None = Field(
+        default=None, description="Зарплатная премия технологии (медиана с / медиана без − 1); null — мало данных."
+    )
+    premium_scope: Literal["grade", "role"] | None = Field(
+        default=None, description="grade — внутри грейда резюме; role — средневзвешенно по грейдам роли."
+    )
+    median_with: float | None = Field(default=None, description="Медиана ₽ вакансий сегмента с технологией.")
+
+
+class SkillWhatIfPeer(BaseModel):
+    """Вакансия сегмента для подсчёта сочетаний в UI: всего технологий, покрыто резюме, недостающие из вариантов."""
+
+    total: int
+    covered: int
+    missing: list[str] = Field(default_factory=list)
+
+
+class SkillWhatIfOut(BaseModel):
+    """«Что если выучить»: эффект недостающих технологий для сегмента рынка резюме (без LLM)."""
+
+    resume_id: int
+    window_days: int
+    peers: int = Field(description="Ближайших к резюме вакансий за окно.")
+    with_technologies: int = Field(default=0, description="Из них с технологиями — по ним считается покрытие.")
+    role: str | None = Field(default=None, description="Самая частая роль сегмента — рынок для премии.")
+    grade: str | None = Field(default=None, description="Самый частый грейд сегмента.")
+    fit_threshold: float
+    baseline_fit: int = 0
+    baseline_coverage: float | None = None
+    resume_technologies: list[str] = Field(default_factory=list)
+    options: list[SkillWhatIfOption] = Field(default_factory=list)
+    peer_gaps: list[SkillWhatIfPeer] = Field(default_factory=list)
+    salary_display: SalaryDisplayMeta | None = None
+
+
 CoverLetterTone = Literal["neutral", "friendly", "formal"]
 
 
