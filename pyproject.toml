@@ -39,6 +39,8 @@ dependencies = [
   "rq (>=2.0.0)",
   # Текст резюме из PDF (загрузка файла); DOCX разбирается stdlib.
   "pypdf (>=5.0.0)",
+  # Карта рынка: PCA + t-SNE + k-means по эмбеддингам вакансий (тянет numpy и scipy).
+  "scikit-learn (>=1.5.0)",
 ]
 
 [project.optional-dependencies]

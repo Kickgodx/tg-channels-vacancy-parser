@@ -19,7 +19,7 @@
 | 5 | `feature/llm-evals-match` | Golden/evals для match + cover letter | нет |
 
 **Про миграции:** цепочка инкрементальная — head сейчас
-`047_sighting_changes`. Новые фичи просто продолжают её
+`048_market_map`. Новые фичи просто продолжают её
 (`alembic revision` → `upgrade head` на старте backend, без `down -v`).
 БД — только Postgres; constraint'ы (FK, индексы) — с явными именами.
 
