@@ -44,7 +44,7 @@ def is_learnable(tech: str) -> bool:
     return not _PRACTICE_RE.match(tech.strip())
 
 
-def _fits(covered: int, total: int) -> bool:
+def fits(covered: int, total: int) -> bool:
     return total > 0 and covered / total >= FIT_THRESHOLD - 1e-9
 
 
@@ -78,7 +78,7 @@ def skill_what_if(session: Session, resume: ResumeRow) -> SkillWhatIfOut:
     role = roles.most_common(1)[0][0] if roles else None
     grade = grades.most_common(1)[0][0] if grades else None
 
-    base_fit = sum(_fits(c, n) for n, c, _, _ in peers)
+    base_fit = sum(fits(c, n) for n, c, _, _ in peers)
     base_cov = sum(c / n for n, c, _, _ in peers) / len(peers)
     demand = Counter(t for _, _, missing, _ in peers for t in missing)
     min_demand = max(MIN_DEMAND, int(MIN_DEMAND_SHARE * len(peers) + 0.999))
@@ -95,7 +95,7 @@ def skill_what_if(session: Session, resume: ResumeRow) -> SkillWhatIfOut:
 
     options: list[SkillWhatIfOption] = []
     for tech in candidates:
-        new_fit = sum(1 for n, c, missing, _ in peers if tech in missing and not _fits(c, n) and _fits(c + 1, n))
+        new_fit = sum(1 for n, c, missing, _ in peers if tech in missing and not fits(c, n) and fits(c + 1, n))
         gain = sum(1 / n for n, _, missing, _ in peers if tech in missing) / len(peers)
         salaries = [float(s) for _, _, missing, s in peers if s is not None and tech in missing]
         premium, scope = None, None

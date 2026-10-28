@@ -7,6 +7,7 @@ import type {
   MarketMap,
   RecruiterContacts,
   SkillWhatIf,
+  CareerPaths,
   ConfigDefaults,
   CoverLetter,
   CoverLetterTone,
@@ -974,6 +975,7 @@ export const api = {
 
   getResumeMarket: (resumeId: number) => request<ResumeMarket>(`/resumes/${resumeId}/market`),
   getSkillWhatIf: (resumeId: number) => request<SkillWhatIf>(`/resumes/${resumeId}/what-if`),
+  getCareerPaths: (resumeId: number) => request<CareerPaths>(`/resumes/${resumeId}/career-paths`),
 
   getVacancyMatch: (resumeId: number, vacancyId: string) =>
     request<VacancyMatch>(`/resumes/${resumeId}/match/${vacancyId}`),

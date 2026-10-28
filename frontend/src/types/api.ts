@@ -922,6 +922,44 @@ export interface SkillWhatIf {
   peer_gaps: SkillWhatIfPeer[];
 }
 
+/** Вакансии роли (в грейде или во всех грейдах, `grade: null`): покрытие резюме и зарплата. */
+export interface CareerSegment {
+  role: string;
+  grade: string | null;
+  vacancies: number;
+  fit_share: number;
+  coverage: number;
+  salary_median: number | null;
+  salary_count: number;
+}
+
+export interface CareerRouteStep {
+  technology: string;
+  demand_share: number;
+  /** Доля подходящих вакансий после шага (вместе с предыдущими). */
+  fit_share: number;
+  coverage: number;
+}
+
+export interface CareerPath extends CareerSegment {
+  kind: "grade" | "role";
+  /** Доля роли среди ближайших к резюме вакансий; null — у шага по грейду. */
+  closeness: number | null;
+  route: CareerRouteStep[];
+  salary_uplift: number | null;
+}
+
+/** GET /resumes/{id}/career-paths — следующий грейд и соседние роли с маршрутом технологий. */
+export interface CareerPaths {
+  resume_id: number;
+  window_days: number;
+  peers: number;
+  fit_threshold: number;
+  resume_technologies: string[];
+  current: CareerSegment | null;
+  paths: CareerPath[];
+}
+
 export interface MarketMapCluster {
   id: number;
   label: string;

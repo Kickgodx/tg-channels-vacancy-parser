@@ -52,23 +52,38 @@ def _shares(counter: Counter, total: int, limit: int) -> list[MarketShare]:
 
 
 def nearest_vacancies(
-    session: Session, vector: list[float], *, model: str, now: datetime, limit: int = CANDIDATES
+    session: Session,
+    vector: list[float],
+    *,
+    model: str,
+    now: datetime,
+    limit: int = CANDIDATES,
+    specialization: str | None = None,
 ) -> list:
-    """Ближайшие к вектору уникальные вакансии за окно: (грейд, роли, технологии, зарплата ₽)."""
+    """Ближайшие к вектору уникальные вакансии за окно: (грейд, роли, технологии, зарплата ₽).
+
+    ``specialization`` — только вакансии этой роли.
+    """
     e = VacancyEmbeddingRow
     v = VacancyRow
     distance = e.embedding.cosine_distance(query_vector(vector))
     # HNSW отдаёт не больше ef_search строк (по умолчанию 40) — поднимаем до числа кандидатов.
     session.execute(text(f"SET LOCAL hnsw.ef_search = {int(limit)}"))
+    conditions = [
+        e.model == model,
+        v.is_duplicate.is_(False),
+        v.post_date >= now - timedelta(days=WINDOW_DAYS),
+    ]
+    if specialization:
+        # Фильтр по роли отсекает большую часть ближайших: без iterative scan (pgvector ≥ 0.8)
+        # HNSW отдал бы ef_search ближайших вообще, и после фильтра осталось бы несколько строк.
+        session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
+        conditions.append(v.detected_specializations.contains([specialization]))
     stmt = (
         select(v.detected_grade, v.detected_specializations, v.technologies, v.detected_salary_avg_rub)
         .select_from(e)
         .join(v, v.id == e.vacancy_id)
-        .where(
-            e.model == model,
-            v.is_duplicate.is_(False),
-            v.post_date >= now - timedelta(days=WINDOW_DAYS),
-        )
+        .where(*conditions)
         .order_by(distance, e.vacancy_id)
         .limit(limit)
     )

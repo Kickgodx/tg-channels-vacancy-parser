@@ -768,6 +768,49 @@ class SkillWhatIfOut(BaseModel):
     salary_display: SalaryDisplayMeta | None = None
 
 
+class CareerSegment(BaseModel):
+    """Вакансии роли (в грейде или во всех грейдах): насколько резюме им подходит и что платят."""
+
+    role: str
+    grade: str | None = Field(default=None, description="Грейд сегмента; null — все грейды роли.")
+    vacancies: int = Field(description="Вакансий сегмента с технологиями — по ним покрытие и доля подходящих.")
+    fit_share: float = Field(description="Доля вакансий сегмента, которым резюме подходит уже сейчас.")
+    coverage: float = Field(description="Сколько технологий вакансии в среднем названо в резюме (доля, 0–1).")
+    salary_median: float | None = Field(default=None, description="Медиана ₽ вакансий сегмента; null — мало данных.")
+    salary_count: int = 0
+
+
+class CareerRouteStep(BaseModel):
+    technology: str
+    demand_share: float = Field(description="Доля вакансий сегмента, где технология нужна, а в резюме её нет.")
+    fit_share: float = Field(description="Доля подходящих вакансий после этого шага (с предыдущими).")
+    coverage: float = Field(description="Среднее покрытие технологий после этого шага (с предыдущими).")
+
+
+class CareerPath(CareerSegment):
+    kind: Literal["grade", "role"] = Field(description="grade — следующий грейд своей роли; role — соседняя роль.")
+    closeness: float | None = Field(
+        default=None, description="Доля роли среди ближайших к резюме вакансий; null — у шага по грейду."
+    )
+    route: list[CareerRouteStep] = Field(default_factory=list)
+    salary_uplift: float | None = Field(
+        default=None, description="Медиана цели / медиана текущей позиции − 1; null — мало данных."
+    )
+
+
+class CareerPathsOut(BaseModel):
+    """Карьерная траектория: следующий грейд и соседние роли с маршрутом технологий (без LLM)."""
+
+    resume_id: int
+    window_days: int
+    peers: int = Field(description="Ближайших к резюме вакансий, по которым определены позиция и соседние роли.")
+    fit_threshold: float
+    resume_technologies: list[str] = Field(default_factory=list)
+    current: CareerSegment | None = None
+    paths: list[CareerPath] = Field(default_factory=list)
+    salary_display: SalaryDisplayMeta | None = None
+
+
 class MarketMapCluster(BaseModel):
     """Ниша на карте рынка: подпись без LLM, состав, зарплата и рост за 30 дней."""
 
