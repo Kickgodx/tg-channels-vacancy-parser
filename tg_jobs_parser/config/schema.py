@@ -404,6 +404,12 @@ class AiEmbeddingsConfig(BaseModel):
         default=2000, ge=0, le=100_000, description="Вакансий за один проход индексации; 0 — не индексировать."
     )
     max_input_chars: int = Field(default=8000, ge=500, le=30_000, description="Символов текста на эмбеддинг.")
+    map_interval_hours: int = Field(
+        default=24, ge=0, le=720, description="Как часто лидер API пересчитывает карту рынка; 0 — только вручную."
+    )
+    map_max_points: int = Field(
+        default=8000, ge=100, le=30_000, description="Вакансий на карте рынка (самые свежие за год)."
+    )
 
 
 class AiConfig(BaseModel):

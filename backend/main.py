@@ -26,6 +26,7 @@ from backend.api.routes import (
     hh,
     llm_jobs,
     market_chat,
+    market_map,
     resumes,
     runs,
     vacancies,
@@ -121,6 +122,25 @@ def _ensure_digest() -> None:
 _DIGEST_CHECK_INTERVAL_S = 60 * 60
 
 
+def _maybe_build_market_map() -> None:
+    """Карта рынка, если её нет или она старше ``ai.embeddings.map_interval_hours``; ошибки — в лог."""
+    try:
+        from backend.services import market_map_service
+
+        cfg = load_config(get_settings().config_path)
+        if not cfg.ai.embeddings.enabled:
+            return
+        with session_scope() as session:
+            due = market_map_service.map_is_due(session, cfg.ai.embeddings.map_interval_hours)
+        if due:
+            market_map_service.build_market_map()
+    except Exception as e:
+        logging.getLogger(__name__).warning("Карта рынка не пересчитана: %s", e)
+
+
+_MAP_CHECK_INTERVAL_S = 10 * 60
+
+
 class _LeaderDuties:
     """Общая для процессов API работа: её выполняет только лидер (``backend.leader``).
 
@@ -136,6 +156,20 @@ class _LeaderDuties:
         self._embedding_thread: threading.Thread | None = None
         self._last_digest_check = 0.0
         self._digest_thread: threading.Thread | None = None
+        self._last_map_check = 0.0
+        self._map_thread: threading.Thread | None = None
+
+    def _maybe_build_map(self) -> None:
+        """Раз в 10 минут — не пора ли пересчитать карту рынка (расчёт — в своём потоке)."""
+        import time
+
+        if self._map_thread is not None and self._map_thread.is_alive():
+            return
+        if self._last_map_check and time.monotonic() - self._last_map_check < _MAP_CHECK_INTERVAL_S:
+            return
+        self._last_map_check = time.monotonic()
+        self._map_thread = threading.Thread(target=_maybe_build_market_map, name="market-map", daemon=True)
+        self._map_thread.start()
 
     def _maybe_ensure_digest(self) -> None:
         """Раз в час — обзор за прошедшую неделю (LLM-вызов — в своём потоке, не в тике лидера)."""
@@ -174,6 +208,7 @@ class _LeaderDuties:
         self._metrics_server = _start_metrics_server()
         self._maybe_sweep_embeddings()
         self._maybe_ensure_digest()
+        self._maybe_build_map()
 
     def on_tick(self) -> None:
         import time
@@ -186,6 +221,7 @@ class _LeaderDuties:
             _periodic_cleanup()
         self._maybe_sweep_embeddings()
         self._maybe_ensure_digest()
+        self._maybe_build_map()
 
     def on_lose(self) -> None:
         server, self._metrics_server = self._metrics_server, None
@@ -376,6 +412,7 @@ app.include_router(filters.router, prefix="/api/v1")
 app.include_router(resumes.resumes_router, prefix="/api/v1")
 app.include_router(llm_jobs.router, prefix="/api/v1")
 app.include_router(market_chat.router, prefix="/api/v1")
+app.include_router(market_map.router, prefix="/api/v1")
 
 # Только сбор HTTP-метрик в REGISTRY; отдаёт их сервер на API_METRICS_PORT (_start_metrics_server).
 Instrumentator(

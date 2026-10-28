@@ -4,6 +4,7 @@ import type {
   AuthUser,
   CompanyStats,
   LifetimeAnalytics,
+  MarketMap,
   RecruiterContacts,
   SkillWhatIf,
   ConfigDefaults,
@@ -937,6 +938,9 @@ export const api = {
     };
   },
 
+  getMarketMap: (resumeId?: number | null) =>
+    request<MarketMap>(`/market-map${resumeId != null ? `?resume_id=${resumeId}` : ""}`),
+  rebuildMarketMap: () => request<MarketMap>("/market-map/rebuild", { method: "POST" }),
   listResumes: () => request<{ items: Resume[] }>("/resumes"),
 
   createResume: (name: string, text: string) =>

@@ -766,6 +766,53 @@ class SkillWhatIfOut(BaseModel):
     salary_display: SalaryDisplayMeta | None = None
 
 
+class MarketMapCluster(BaseModel):
+    """Ниша на карте рынка: подпись без LLM, состав, зарплата и рост за 30 дней."""
+
+    id: int
+    label: str
+    size: int
+    x: float
+    y: float
+    roles: list[MarketShare] = Field(default_factory=list)
+    technologies: list[MarketShare] = Field(default_factory=list)
+    salary_median: float | None = None
+    salary_count: int = 0
+    recent: int = Field(default=0, description="Вакансий ниши за последние 30 дней карты.")
+    previous: int = Field(default=0, description="За 30 дней до них.")
+    delta_pp: float | None = Field(default=None, description="Изменение доли ниши среди вакансий окна, п.п.")
+
+
+class MarketMapResume(BaseModel):
+    resume_id: int
+    x: float
+    y: float
+    cluster: int
+    nearest: list[str] = Field(default_factory=list, description="Ближайшие к резюме вакансии карты.")
+
+
+class MarketMapOut(BaseModel):
+    """Карта рынка: точки колонками (id, x, y, ниша, роль, грейд, зарплата, компания, архив) и ниши."""
+
+    available: bool
+    created_at: datetime | None = None
+    model: str | None = None
+    points: int = 0
+    window_days: int | None = None
+    clusters: list[MarketMapCluster] = Field(default_factory=list)
+    ids: list[str] = Field(default_factory=list)
+    x: list[float] = Field(default_factory=list)
+    y: list[float] = Field(default_factory=list)
+    cluster: list[int] = Field(default_factory=list)
+    role: list[str | None] = Field(default_factory=list)
+    grade: list[str | None] = Field(default_factory=list)
+    salary: list[float | None] = Field(default_factory=list)
+    company: list[str | None] = Field(default_factory=list)
+    archived: list[bool] = Field(default_factory=list)
+    resume: MarketMapResume | None = None
+    resume_error: str | None = None
+
+
 CoverLetterTone = Literal["neutral", "friendly", "formal"]
 
 

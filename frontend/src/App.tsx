@@ -8,6 +8,7 @@ import DashboardPage from "./pages/DashboardPage";
 import HhPage from "./pages/HhPage";
 import ImportPage from "./pages/ImportPage";
 import LoginPage from "./pages/LoginPage";
+import MarketMapPage from "./pages/MarketMapPage";
 import ResumesPage from "./pages/ResumesPage";
 import VacanciesPage from "./pages/VacanciesPage";
 import RunPage from "./pages/RunPage";
@@ -66,6 +67,7 @@ export default function App() {
           <NavLink to="/vacancies">Вакансии</NavLink>
           <NavLink to="/resumes">Резюме</NavLink>
           <NavLink to="/digest">Обзор</NavLink>
+          <NavLink to="/map">Карта рынка</NavLink>
           <NavLink to="/ask">Спросить базу</NavLink>
           <UserBadge />
         </nav>
@@ -109,6 +111,14 @@ export default function App() {
               <RequireAdmin>
                 <HhPage />
               </RequireAdmin>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/map"
+          element={
+            <RequireAuth>
+              <MarketMapPage />
             </RequireAuth>
           }
         />

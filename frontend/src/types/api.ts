@@ -922,6 +922,43 @@ export interface SkillWhatIf {
   peer_gaps: SkillWhatIfPeer[];
 }
 
+export interface MarketMapCluster {
+  id: number;
+  label: string;
+  size: number;
+  x: number;
+  y: number;
+  roles: MarketShare[];
+  technologies: MarketShare[];
+  salary_median: number | null;
+  salary_count: number;
+  recent: number;
+  previous: number;
+  /** Изменение доли ниши за последние 30 дней против предыдущих 30, п.п. */
+  delta_pp: number | null;
+}
+
+/** GET /market-map — точки колонками (индекс i — одна вакансия) и ниши. */
+export interface MarketMap {
+  available: boolean;
+  created_at: string | null;
+  model: string | null;
+  points: number;
+  window_days: number | null;
+  clusters: MarketMapCluster[];
+  ids: string[];
+  x: number[];
+  y: number[];
+  cluster: number[];
+  role: (string | null)[];
+  grade: (string | null)[];
+  salary: (number | null)[];
+  company: (string | null)[];
+  archived: boolean[];
+  resume: { resume_id: number; x: number; y: number; cluster: number; nearest: string[] } | null;
+  resume_error: string | null;
+}
+
 export interface RecruiterContact {
   kind: "telegram" | "telegram_bot" | "email";
   /** Username без «@» или email. */

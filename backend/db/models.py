@@ -450,6 +450,38 @@ class MarketDigestRow(Base):
     __table_args__ = (UniqueConstraint("period_start", name="uq_market_digests_period_start"),)
 
 
+class MarketMapRow(Base):
+    """Расчёт карты рынка (миграция 048): параметры и кластеры; хранится только последний."""
+
+    __tablename__ = "market_maps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    points: Mapped[int] = mapped_column(Integer, nullable=False)
+    params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    clusters: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class MarketMapPointRow(Base):
+    """Вакансия на карте рынка: 2D-координаты (0–1) и номер кластера."""
+
+    __tablename__ = "market_map_points"
+
+    map_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("market_maps.id", ondelete="CASCADE", name="fk_market_map_points_map_id"), primary_key=True
+    )
+    vacancy_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("vacancies.id", ondelete="CASCADE", name="fk_market_map_points_vacancy_id"),
+        primary_key=True,
+        index=True,
+    )
+    x: Mapped[float] = mapped_column(Float, nullable=False)
+    y: Mapped[float] = mapped_column(Float, nullable=False)
+    cluster: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class HhListingRow(Base):
     """Кэш короткой выдачи HH: last_seen + флаг detail_fetched для anti-DDOS."""
 
