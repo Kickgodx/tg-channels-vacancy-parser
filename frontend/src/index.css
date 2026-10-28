@@ -1188,6 +1188,10 @@ tr.clickable:hover {
 .ask-form textarea {
   flex: 1;
   resize: vertical;
+  font: inherit;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
 }
 
 .market-map-wrap {
@@ -1240,4 +1244,18 @@ tr.clickable:hover {
 
 tr.selected-row td {
   background: #e7f5ff;
+}
+
+.market-map-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+
+.market-map-controls label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
 }

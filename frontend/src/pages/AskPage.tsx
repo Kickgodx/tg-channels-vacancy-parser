@@ -148,11 +148,14 @@ export default function AskPage() {
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => saveDialog(messages), [messages]);
-  useEffect(
-    () => bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }),
-    [messages, pending],
-  );
+  // Тела эффектов — в фигурных скобках: в новых Chromium scrollIntoView возвращает Promise,
+  // и React принял бы его за функцию очистки («destroy is not a function»).
+  useEffect(() => {
+    saveDialog(messages);
+  }, [messages]);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, pending]);
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const ask = async (text: string) => {
