@@ -206,11 +206,18 @@ def latest_map(session: Session) -> MarketMapRow | None:
 
 
 def map_is_due(session: Session, interval_hours: int) -> bool:
-    """Пора пересчитать: карты нет или она старше интервала (0 — только вручную)."""
+    """Пора пересчитать: карты нет, она старше интервала (0 — только вручную) или посчитана
+    прежней моделью эмбеддингов, а каталог уже переиндексирован целиком.
+    """
     if interval_hours <= 0:
         return False
     m = latest_map(session)
-    return m is None or datetime.now(UTC) - m.created_at >= timedelta(hours=interval_hours)
+    if m is None or datetime.now(UTC) - m.created_at >= timedelta(hours=interval_hours):
+        return True
+    if m.model != embedding_service.current_model():
+        cov = embedding_service.coverage(session)
+        return cov.embedded >= cov.vacancies
+    return False
 
 
 def map_points(session: Session, map_id: int) -> list:
@@ -237,8 +244,10 @@ def map_points(session: Session, map_id: int) -> list:
 def resume_position(session: Session, resume: ResumeRow, m: MarketMapRow) -> dict[str, Any] | None:
     """Резюме на карте: взвешенная средняя ближайших по эмбеддингу вакансий карты.
 
-    ``EmbeddingsUnavailable`` — эмбеддинги выключены или недоступны.
+    ``EmbeddingsUnavailable`` — эмбеддинги выключены, недоступны или карта посчитана другой моделью.
     """
+    if m.model != embedding_service.current_model():
+        raise embedding_service.EmbeddingsUnavailable("карта посчитана прежней моделью эмбеддингов, ждёт пересчёта")
     vector = embedding_service.resume_embedding(session, resume)
     p, e = MarketMapPointRow, VacancyEmbeddingRow
     distance = e.embedding.cosine_distance(query_vector(vector))

@@ -49,7 +49,10 @@ def _semantic_ids(query: VacancyQuery, *, include_duplicates: bool):
     v = VacancyRow.__table__.alias("semantic_window")
     rest = query.model_copy(update={"q": None, "semantic_vector": None})
     return semantic_window_ids(
-        v, query.semantic_vector, vacancy_filter_conditions(rest, table=v, include_duplicates=include_duplicates)
+        v,
+        query.semantic_vector,
+        vacancy_filter_conditions(rest, table=v, include_duplicates=include_duplicates),
+        model=query.embedding_model or "",
     )
 
 

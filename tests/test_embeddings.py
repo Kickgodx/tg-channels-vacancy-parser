@@ -72,6 +72,10 @@ def _add(*rows) -> list[str]:
     return ids
 
 
+def _resume_text(text: str) -> str:
+    return embedding_service.instructed(embedding_service._ai().embeddings.resume_instruction, text)
+
+
 def _embedded_ids() -> set[str]:
     with session_scope() as s:
         return set(s.scalars(select(VacancyEmbeddingRow.vacancy_id)))
@@ -242,7 +246,7 @@ def test_resume_fit_sort(api_client, fake_embed):
     url = f"/api/v1/vacancies?resume_id={rid}&sort_by=resume_fit"
     ids = [it["id"] for it in api_client.get(url, headers=_h(token)).json()["items"]]
     assert ids == [qa, py, fresh]
-    assert fake_embed == [["QA тестировщик"]]  # вектор резюме посчитан один раз
+    assert fake_embed == [[_resume_text("QA тестировщик")]]  # вектор резюме посчитан один раз, с инструкцией
 
     api_client.get(url, headers=_h(token))
     assert len(fake_embed) == 1  # из БД
@@ -317,3 +321,87 @@ def test_match_batch_scores_skips_fresh_and_reports(api_client, monkeypatch):
         f"/api/v1/resumes/{rid}/match-batch", headers=_h(token), json={"vacancy_ids": [f"x{i}" for i in range(21)]}
     )
     assert too_many.status_code == 422
+
+
+# --- инструкции и смена модели ---------------------------------------------------------------
+
+
+def test_query_and_resume_use_instructions(pg_db, fake_embed, monkeypatch, tmp_path):
+    from backend.db.models import ResumeRow
+
+    ai = embedding_service._ai().embeddings
+    assert ai.query_instruction and ai.resume_instruction  # Qwen3 по умолчанию — с инструкцией
+    embedding_service.query_embedding("  Python   FastAPI ")
+    assert fake_embed[-1] == [f"Instruct: {ai.query_instruction}\nQuery:python fastapi"]
+
+    with session_scope() as s:
+        resume = ResumeRow(name="CV", text="QA тестировщик")
+        s.add(resume)
+        s.flush()
+        embedding_service.resume_embedding(s, resume)
+        assert fake_embed[-1] == [f"Instruct: {ai.resume_instruction}\nQuery:QA тестировщик"]
+        embedding_service.resume_embedding(s, resume)
+        assert len(fake_embed) == 2  # тот же текст и инструкция — из БД
+
+        # Сменили инструкцию резюме — вектор пересчитывается; пустая инструкция — текст как есть.
+        use_ai_config(monkeypatch, tmp_path, embeddings={"enabled": True, "resume_instruction": ""})
+        embedding_service.resume_embedding(s, resume)
+        assert fake_embed[-1] == ["QA тестировщик"]
+
+    # Вакансии — без инструкции.
+    _add(_vac("Python backend"))
+    embedding_service.sweep_vacancies()
+    assert not fake_embed[-1][0].startswith("Instruct:")
+
+
+def test_other_model_vectors_are_ignored(api_client, fake_embed, monkeypatch, tmp_path):
+    """Пока каталог переиндексируется новой моделью, векторы прежней — как отсутствующие."""
+    token = _token(api_client)
+    rid = api_client.post("/api/v1/resumes", headers=_h(token), json={"name": "CV", "text": "QA тестировщик"}).json()[
+        "id"
+    ]
+    py, qa = _add(_vac("Python backend", days_ago=0), _vac("QA тестировщик ручное", days_ago=5))
+    embedding_service.sweep_vacancies()  # векторы модели по умолчанию
+
+    use_ai_config(monkeypatch, tmp_path, embeddings={"enabled": True, "model": "openai/text-embedding-3-large"})
+    embedding_service.reset_embedding_client()
+
+    r = api_client.get("/api/v1/vacancies?q=qa&search_mode=semantic", headers=_h(token))
+    assert r.status_code == 200 and r.json()["items"] == []
+    assert api_client.get(f"/api/v1/vacancies/{qa}/similar", headers=_h(token)).json()["pending"] is True
+    # resume_fit: без векторов текущей модели — просто свежие первыми, а не по старым векторам.
+    ids = [
+        it["id"]
+        for it in api_client.get(f"/api/v1/vacancies?resume_id={rid}&sort_by=resume_fit", headers=_h(token)).json()[
+            "items"
+        ]
+    ]
+    assert ids == [py, qa]
+
+    embedding_service.sweep_vacancies()  # переиндексировали — всё снова работает
+    r = api_client.get("/api/v1/vacancies?q=qa&search_mode=semantic", headers=_h(token))
+    assert r.json()["items"][0]["id"] == qa
+
+
+def test_embed_sends_provider_order(monkeypatch):
+    """Порядок провайдеров уходит в OpenRouter как provider.order с запасными; пустой — без него."""
+    from types import SimpleNamespace
+
+    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
+    from tg_jobs_parser.config.schema import AiConfig
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = OpenRouterClient(AiConfig(enabled=True))
+    sent: list[dict] = []
+
+    def create(**kwargs):
+        sent.append(kwargs)
+        data = [SimpleNamespace(index=i, embedding=[0.1, 0.2]) for i in range(len(kwargs["input"]))]
+        return SimpleNamespace(data=data, usage=SimpleNamespace(prompt_tokens=3))
+
+    client._sdk = SimpleNamespace(embeddings=SimpleNamespace(create=create))
+    vectors, usage = client.embed(["a"], model="qwen/qwen3-embedding-8b", dimensions=2, providers=["DeepInfra"])
+    assert vectors == [[0.1, 0.2]] and usage.prompt_tokens == 3
+    assert sent[0]["extra_body"] == {"provider": {"order": ["DeepInfra"], "allow_fallbacks": True}}
+    client.embed(["a"], model="m", dimensions=2)
+    assert sent[1]["extra_body"] is None

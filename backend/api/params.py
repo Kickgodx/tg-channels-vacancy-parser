@@ -70,9 +70,9 @@ def vacancy_filters(
     ``search_mode=semantic`` с ``q`` — вектор запроса считается здесь (провайдер эмбеддингов);
     недоступен — 503, а не тихий откат к полнотекстовому поиску.
     """
-    semantic_vector = None
+    semantic_vector = embedding_model = None
     if q and q.strip() and search_mode == "semantic":
-        semantic_vector = _semantic_vector(q)
+        semantic_vector, embedding_model = _semantic_vector(q)
     return VacancyQuery(
         source_channel=source_channel,
         grade=grade,
@@ -86,14 +86,15 @@ def vacancy_filters(
         include_archived=include_archived,
         search_mode=search_mode,
         semantic_vector=semantic_vector,
+        embedding_model=embedding_model,
     )
 
 
-def _semantic_vector(q: str) -> list[float]:
+def _semantic_vector(q: str) -> tuple[list[float], str]:
     from backend.errors import CODE_UPSTREAM_UNAVAILABLE
-    from backend.services.embedding_service import EmbeddingsUnavailable, query_embedding
+    from backend.services.embedding_service import EmbeddingsUnavailable, current_model, query_embedding
 
     try:
-        return query_embedding(q)
+        return query_embedding(q), current_model()
     except EmbeddingsUnavailable as e:
         raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, f"Смысловой поиск недоступен: {e}", retryable=True) from e

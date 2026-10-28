@@ -390,10 +390,37 @@ class AiEmbeddingsConfig(BaseModel):
         description="Фоновая индексация вакансий и смысловые функции. Без OPENROUTER_API_KEY — пропуск.",
     )
     model: str = Field(
-        default="openai/text-embedding-3-small",
+        default="qwen/qwen3-embedding-8b",
         description=(
             "Модель эмбеддингов (размерность 1536 — колонка vector(1536)). Смена модели — "
-            "переиндексация каталога фоновой задачей."
+            "переиндексация каталога фоновой задачей; сравнить модели — evals.embeddings."
+        ),
+    )
+    providers: list[str] = Field(
+        default_factory=lambda: ["DeepInfra", "Nebius"],
+        description=(
+            "Порядок провайдеров OpenRouter для модели (provider.order, остальные — запасные); пусто — "
+            "выбирает OpenRouter. Qwen3 у Nebius упирается в квоту токенов (429), поэтому первым DeepInfra."
+        ),
+    )
+    query_instruction: str = Field(
+        default="Given a job seeker's search query, retrieve job postings that match it",
+        description=(
+            "Инструкция к тексту смыслового запроса (формат Qwen3: «Instruct: …\\nQuery:…»); "
+            "пусто — текст как есть (OpenAI, Gemini и др. без инструкций)."
+        ),
+    )
+    resume_instruction: str = Field(
+        default="Given a candidate's resume, retrieve job postings that suit this candidate",
+        description="Инструкция к тексту резюме (подбор, карта, рынок под резюме); пусто — текст как есть.",
+    )
+    near_duplicate_distance: float = Field(
+        default=0.013,
+        ge=0,
+        le=0.5,
+        description=(
+            "«Похожие»: ближе этого косинусного расстояния — тот же текст, не показываем. Зависит "
+            "от модели (0.02 для text-embedding-3-small); пересчёт — scale.dup_threshold_equiv в eval."
         ),
     )
     sweep_interval_seconds: int = Field(
