@@ -230,6 +230,8 @@ class VacancyQuery(BaseModel):
     # Векторы считает роут (запрос к провайдеру), в фильтры и ключ кэша агрегатов они не входят.
     semantic_vector: list[float] | None = Field(default=None, exclude=True, repr=False)
     resume_vector: list[float] | None = Field(default=None, exclude=True, repr=False)
+    # Модель, которой посчитаны векторы: сравниваются только векторы вакансий той же модели.
+    embedding_model: str | None = Field(default=None, exclude=True, repr=False)
 
     @model_validator(mode="after")
     def _check_sort_pair(self) -> VacancyQuery:

@@ -259,13 +259,13 @@ def list_vacancies(
     check_list_depth(page, page_size)
     check_sort_needs_resume(sort_by, resume_id)
     check_sort_pair(sort_by, then_by)
-    resume_vector = None
+    resume_vector = embedding_model = None
     if resume_id is not None:
         resume = repo.get_resume(db, resume_id)
         if resume is None or resume.user_id != user.id:
             raise HTTPException(status_code=404, detail="Resume not found")
         if sort_by == "resume_fit":
-            resume_vector = _resume_vector(db, resume)
+            resume_vector, embedding_model = _resume_vector(db, resume)
     query = filters.model_copy(
         update={
             "page": page,
@@ -276,6 +276,8 @@ def list_vacancies(
             "then_order": then_order,
             "resume_id": resume_id,
             "resume_vector": resume_vector,
+            # Модель вектора смыслового запроса (из фильтров) не затираем, если резюме не участвует.
+            "embedding_model": embedding_model or filters.embedding_model,
         }
     )
     match_ai = current_ai_config() if resume_id is not None else None
@@ -363,12 +365,12 @@ def get_recruiter_contacts(vacancy_id: str, db: Session = Depends(get_db)) -> Re
     return recruiter_contacts(db, row)
 
 
-def _resume_vector(db: Session, resume) -> list[float]:
+def _resume_vector(db: Session, resume) -> tuple[list[float], str]:
     from backend.errors import CODE_UPSTREAM_UNAVAILABLE, http_error
-    from backend.services.embedding_service import EmbeddingsUnavailable, resume_embedding
+    from backend.services.embedding_service import EmbeddingsUnavailable, current_model, resume_embedding
 
     try:
-        return resume_embedding(db, resume)
+        return resume_embedding(db, resume), current_model()
     except EmbeddingsUnavailable as e:
         raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, f"Подбор под резюме недоступен: {e}", retryable=True) from e
 

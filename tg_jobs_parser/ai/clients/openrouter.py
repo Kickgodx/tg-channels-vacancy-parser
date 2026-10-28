@@ -494,12 +494,16 @@ class OpenRouterClient:
         )
         return total
 
-    def embed(self, texts: list[str], *, model: str, dimensions: int) -> tuple[list[list[float]], LLMUsage]:
+    def embed(
+        self, texts: list[str], *, model: str, dimensions: int, providers: list[str] | None = None
+    ) -> tuple[list[list[float]], LLMUsage]:
         """Эмбеддинги текстов одним запросом (OpenRouter /embeddings, формат OpenAI).
 
         Порядок векторов — как у ``texts``. Вектор другой длины, чем ``dimensions`` — ошибка:
-        колонка ``vector(N)`` фиксированной размерности.
+        колонка ``vector(N)`` фиксированной размерности. ``providers`` — предпочтительный порядок
+        провайдеров OpenRouter (остальные — запасные).
         """
+        extra_body = {"provider": {"order": providers, "allow_fallbacks": True}} if providers else None
         if not texts:
             return [], LLMUsage(model=model)
         with _TRACER.start_as_current_span(
@@ -517,7 +521,9 @@ class OpenRouterClient:
             outcome = "error"
             try:
                 response = self._request(
-                    lambda: self._get_sdk().embeddings.create(model=model, input=texts, dimensions=dimensions),
+                    lambda: self._get_sdk().embeddings.create(
+                        model=model, input=texts, dimensions=dimensions, extra_body=extra_body
+                    ),
                     model=model,
                 )
                 data = sorted(response.data or [], key=lambda d: d.index)

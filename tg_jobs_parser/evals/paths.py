@@ -6,6 +6,7 @@ from pathlib import Path
 
 _PKG_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _PKG_DIR.parents[1]
+REPO_ROOT = _REPO_ROOT
 
 
 def golden_extraction_path() -> Path:

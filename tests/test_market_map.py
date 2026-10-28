@@ -92,9 +92,32 @@ def test_rebuild_keeps_only_latest_and_needs_enough_points(api_client, fake_embe
 
 
 def test_map_is_due(db_session):
+    from backend.services.embedding_service import current_model
+
     assert map_is_due(db_session, 24) is True
     assert map_is_due(db_session, 0) is False
-    db_session.add(MarketMapRow(model="m", points=0, created_at=datetime.now(UTC) - timedelta(hours=2)))
+    db_session.add(MarketMapRow(model=current_model(), points=0, created_at=datetime.now(UTC) - timedelta(hours=2)))
     db_session.commit()
     assert map_is_due(db_session, 24) is False
     assert map_is_due(db_session, 1) is True
+
+
+def test_map_due_on_model_change(api_client, fake_embed):  # noqa: F811
+    """Карта прежней модели: пересчёт, как только каталог переиндексирован; резюме на ней — ошибка."""
+    from backend.services import embedding_service
+
+    token = _token(api_client)
+    rid = _resume(api_client, token, "qa qa")
+    _catalog(per_topic=15)  # _add индексирует сразу
+    with session_scope() as s:
+        s.add(MarketMapRow(model="old/model", points=0, created_at=datetime.now(UTC) - timedelta(hours=1)))
+        s.add(_vac("qa qa ещё без вектора"))
+    with session_scope() as s:
+        assert map_is_due(s, 24) is False  # не все вакансии с вектором текущей модели
+    embedding_service.sweep_vacancies()
+    with session_scope() as s:
+        assert map_is_due(s, 24) is True
+        assert map_is_due(s, 0) is False  # 0 — только вручную
+
+    body = api_client.get(f"/api/v1/market-map?resume_id={rid}", headers=_h(token)).json()
+    assert body["resume"] is None and "прежней моделью" in body["resume_error"]

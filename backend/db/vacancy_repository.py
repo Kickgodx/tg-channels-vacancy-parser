@@ -180,7 +180,8 @@ def _selected_order(query: VacancyQuery, *, vacancy=None, match=None) -> list:
         # Ближе по смыслу к резюме — выше; вакансии без вектора — в конце, новые первыми.
         vid = vacancy.c.id if vacancy is not None else VacancyRow.id
         post = vacancy.c.post_date if vacancy is not None else VacancyRow.post_date
-        return [vacancy_distance(vid, query.resume_vector).asc().nulls_last(), post.desc().nulls_last()]
+        distance = vacancy_distance(vid, query.resume_vector, model=query.embedding_model or "")
+        return [distance.asc().nulls_last(), post.desc().nulls_last()]
 
     def col(field: str):
         name = _SORT_COLUMNS.get(field, VacancyRow.post_date).key
@@ -230,7 +231,8 @@ def _semantic_relevance_first(query: VacancyQuery) -> bool:
 def _vacancy_order_by(query: VacancyQuery) -> list:
     order = _selected_order(query)
     if _semantic_relevance_first(query):
-        return [vacancy_distance(VacancyRow.id, query.semantic_vector).asc().nulls_last(), *order]
+        distance = vacancy_distance(VacancyRow.id, query.semantic_vector, model=query.embedding_model or "")
+        return [distance.asc().nulls_last(), *order]
     if not query.q or query.search_mode == "semantic":
         return order
     # CASE вычисляется лениво: ts_rank считается только для строк окна.

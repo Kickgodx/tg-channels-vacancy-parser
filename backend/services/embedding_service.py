@@ -28,8 +28,6 @@ from tg_jobs_parser.config.schema import AiConfig
 _LOG = logging.getLogger(__name__)
 
 _QUERY_CACHE_SIZE = 256
-# Косинусное расстояние, ближе которого вакансия считается тем же текстом, а не похожей.
-NEAR_DUPLICATE_DISTANCE = 0.02
 # «Похожие»: не больше стольких вакансий одной компании; кандидатов берётся limit × factor.
 SIMILAR_PER_COMPANY = 2
 SIMILAR_CANDIDATES_FACTOR = 5
@@ -41,6 +39,16 @@ class EmbeddingsUnavailable(RuntimeError):
 
 def _ai() -> AiConfig:
     return load_config(get_settings().config_path).ai
+
+
+def current_model() -> str:
+    """Модель, чьи векторы сейчас используются: векторы других моделей — как отсутствующие."""
+    return _ai().embeddings.model
+
+
+def instructed(instruction: str, text: str) -> str:
+    """Текст запроса/резюме с инструкцией instruction-aware модели (формат Qwen3); вакансии — без неё."""
+    return f"Instruct: {instruction}\nQuery:{text}" if instruction.strip() else text
 
 
 def content_hash(text: str, model: str) -> str:
@@ -106,7 +114,9 @@ def embed_texts(texts: list[str], *, ai: AiConfig | None = None) -> list[list[fl
     if not ai.embeddings.enabled:
         raise EmbeddingsUnavailable("Эмбеддинги выключены (ai.embeddings.enabled: false)")
     try:
-        vectors, _usage = _get_client(ai).embed(texts, model=ai.embeddings.model, dimensions=EMBEDDING_DIMENSIONS)
+        vectors, _usage = _get_client(ai).embed(
+            texts, model=ai.embeddings.model, dimensions=EMBEDDING_DIMENSIONS, providers=ai.embeddings.providers
+        )
     except EmbeddingsUnavailable:
         raise
     except Exception as e:
@@ -225,7 +235,7 @@ _query_lock = threading.Lock()
 def query_embedding(text: str) -> list[float]:
     """Вектор текста смыслового поиска; последние ``_QUERY_CACHE_SIZE`` запросов — из памяти."""
     ai = _ai()
-    key = (ai.embeddings.model, " ".join(text.split()).lower())
+    key = (ai.embeddings.model, instructed(ai.embeddings.query_instruction, " ".join(text.split()).lower()))
     with _query_lock:
         hit = _query_cache.get(key)
         if hit is not None:
@@ -240,9 +250,9 @@ def query_embedding(text: str) -> list[float]:
 
 
 def resume_embedding(session: Session, resume: ResumeRow) -> list[float]:
-    """Вектор резюме: из БД, если текст и модель не менялись, иначе — запрос к API и upsert."""
+    """Вектор резюме: из БД, если текст, инструкция и модель не менялись, иначе — запрос к API и upsert."""
     ai = _ai()
-    text = resume.text[: ai.embeddings.max_input_chars]
+    text = instructed(ai.embeddings.resume_instruction, resume.text[: ai.embeddings.max_input_chars])
     h = content_hash(text, ai.embeddings.model)
     row = session.get(ResumeEmbeddingRow, resume.id)
     if row is not None and row.content_hash == h and row.model == ai.embeddings.model:
@@ -269,9 +279,10 @@ def resume_embedding(session: Session, resume: ResumeRow) -> list[float]:
 
 
 def similar_vacancies(session: Session, vacancy: VacancyRow, *, limit: int) -> list[tuple[str, float]] | None:
-    """Ближайшие активные уникальные вакансии; ``None`` — у вакансии ещё нет вектора."""
+    """Ближайшие активные уникальные вакансии; ``None`` — у вакансии ещё нет вектора текущей модели."""
+    cfg = _ai().embeddings
     own = session.get(VacancyEmbeddingRow, vacancy.id)
-    if own is None:
+    if own is None or own.model != cfg.model:
         return None
     e = VacancyEmbeddingRow
     distance = e.embedding.cosine_distance(query_vector(own.embedding))
@@ -280,10 +291,11 @@ def similar_vacancies(session: Session, vacancy: VacancyRow, *, limit: int) -> l
         .join(VacancyRow, VacancyRow.id == e.vacancy_id)
         .where(
             e.vacancy_id != vacancy.id,
+            e.model == cfg.model,
             VacancyRow.is_duplicate.is_(False),
             VacancyRow.archived_at.is_(None),
             # Почти тот же текст (перепост с правками) — не «похожая», а та же вакансия.
-            distance >= NEAR_DUPLICATE_DISTANCE,
+            distance >= cfg.near_duplicate_distance,
         )
         .order_by(distance, e.vacancy_id)
         .limit(limit * SIMILAR_CANDIDATES_FACTOR)
