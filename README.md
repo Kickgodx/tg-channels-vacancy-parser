@@ -1099,6 +1099,29 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 
 В UI и в `run_params` доступен блок **`ai_stats`**: вызовы, кэш, токены, **стоимость USD** (input / output / total).
 
+#### Eval моделей эмбеддингов
+
+Сравнивает модели `ai.embeddings.model` на своих вакансиях в размерности 1536 (как колонка
+`vector(1536)`); основную БД только читает. Задачи и метрики:
+
+| Задача | Разметка | Метрики |
+|---|---|---|
+| Смысловой поиск | LLM пишет по вакансии запрос соискателя (keywords + natural) | MRR@10, Recall@1/10/50 исходной вакансии, доля той же роли в top-10 |
+| Поиск с судьёй | ручные запросы `evals/golden/embedding_queries.jsonl` + выборка синтетических; пул top-10 всех моделей оценивает LLM (0/1/2) | nDCG@10, Precision@10 |
+| «Похожие» | роли и грейды из разбора | совпадение роли/грейда у 10 соседей, тройки с трудным негативом (тот же стек, другая роль), силуэт по ролям |
+| Дубли | скрытые копии → оригинал | Recall@1; пересчёт порога `NEAR_DUPLICATE_DISTANCE` под модель |
+| Подбор под резюме | LLM-оценки матчей (`overall_score`) | Spearman косинуса и оценки |
+
+```powershell
+.venv\Scripts\python.exe scripts\build_embedding_eval.py                      # выгрузка (READ ONLY)
+.venv\Scripts\python.exe -m tg_jobs_parser.evals.embeddings queries --n 150   # синтетические запросы (LLM)
+.venv\Scripts\python.exe -m tg_jobs_parser.evals.embeddings run               # векторы + судья + отчёт
+```
+
+Варианты моделей — `VARIANTS` в `tg_jobs_parser/evals/embeddings/embedder.py` (в т.ч. с инструкцией
+для запроса у Qwen3). Векторы и оценки судьи кэшируются в `evals/embeddings/` (в `.gitignore`: тексты
+вакансий и резюме), отчёт — `evals/reports/embeddings_<ts>.md`.
+
 > **Приватность:** текст постов уходит на серверы OpenRouter/провайдера модели.
 
 ### `work_formats` в фильтрах
