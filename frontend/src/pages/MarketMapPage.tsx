@@ -27,9 +27,18 @@ interface Hover {
   top: number;
 }
 
+// Меньше 1 п.п. — шум недельных колебаний, не рост и не падение.
+const DELTA_NOISE_PP = 1;
+
 function fmtDelta(d: number | null): string {
   if (d == null) return "—";
-  return `${d > 0 ? "▲ +" : d < 0 ? "▼ " : ""}${d.toFixed(1)} п.п.`;
+  if (Math.abs(d) < DELTA_NOISE_PP) return `${d > 0 ? "+" : ""}${d.toFixed(1)} п.п.`;
+  return `${d > 0 ? "▲ +" : "▼ "}${d.toFixed(1)} п.п.`;
+}
+
+function deltaClass(d: number | null): string | undefined {
+  if (d == null || Math.abs(d) < DELTA_NOISE_PP) return undefined;
+  return d > 0 ? "delta-up" : "delta-down";
 }
 
 function MapCanvas({
@@ -49,7 +58,21 @@ function MapCanvas({
   const [view, setView] = useState<View>({ k: 1, tx: 0, ty: 0 });
   const [hover, setHover] = useState<Hover | null>(null);
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
-  const height = Math.min(width, 640);
+  const height = Math.round(Math.min(720, Math.max(420, width * 0.62)));
+  // Границы облака: t-SNE редко заполняет квадрат 0–1, вписываем по фактическим границам.
+  const bounds = useMemo(() => {
+    let x0 = Infinity,
+      x1 = -Infinity,
+      y0 = Infinity,
+      y1 = -Infinity;
+    for (let i = 0; i < map.x.length; i++) {
+      x0 = Math.min(x0, map.x[i]);
+      x1 = Math.max(x1, map.x[i]);
+      y0 = Math.min(y0, map.y[i]);
+      y1 = Math.max(y1, map.y[i]);
+    }
+    return { x0, y0, dx: Math.max(x1 - x0, 1e-6), dy: Math.max(y1 - y0, 1e-6) };
+  }, [map.x, map.y]);
   const near = useMemo(() => new Set(map.resume?.nearest ?? []), [map.resume]);
   const labelById = useMemo(
     () => new Map(map.clusters.map((c) => [c.id, c.label])),
@@ -76,12 +99,19 @@ function MapCanvas({
   // Координаты карты 0–1 → пиксели холста с учётом зума и сдвига.
   const project = useCallback(
     (x: number, y: number): [number, number] => {
-      const size = Math.min(width, height) - 2 * PAD;
-      const ox = (width - size) / 2;
-      const oy = (height - size) / 2;
-      return [(ox + x * size) * view.k + view.tx, (oy + y * size) * view.k + view.ty];
+      // Оси смысла не имеют: растягиваем облако по холсту, но не больше чем в 1.5 раза по одной оси.
+      const sx = (width - 2 * PAD) / bounds.dx;
+      const sy = (height - 2 * PAD) / bounds.dy;
+      const s = Math.min(sx, sy);
+      const kx = Math.min(sx, s * 1.5);
+      const ky = Math.min(sy, s * 1.5);
+      const ox = (width - bounds.dx * kx) / 2;
+      const oy = (height - bounds.dy * ky) / 2;
+      const px = ox + (x - bounds.x0) * kx;
+      const py = oy + (y - bounds.y0) * ky;
+      return [px * view.k + view.tx, py * view.k + view.ty];
     },
-    [width, height, view],
+    [width, height, view, bounds],
   );
 
   useEffect(() => {
@@ -119,19 +149,23 @@ function MapCanvas({
       if (near.has(map.ids[i])) draw(i, NEAR_RESUME, r + 1.4, 1);
     }
     ctx.globalAlpha = 1;
-    // Подписи ниш — прямо на карте: ниша узнаётся по тексту, а не по цвету.
+    // Подписи ниш — прямо на карте: ниша узнаётся по тексту, а не по цвету. Раскладка жадная:
+    // выбранная и крупные ниши первыми, подпись сдвигается вверх-вниз, не влезла — не рисуется
+    // (она есть в таблице ниш).
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
-    for (const c of map.clusters) {
-      const [px, py] = project(c.x, c.y);
-      ctx.font = `${c.id === selected ? "600 " : ""}12px system-ui, sans-serif`;
+    type Box = { x0: number; y0: number; x1: number; y1: number };
+    const placed: Box[] = [];
+    const hits = (b: Box) =>
+      placed.some((o) => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0);
+    const halo = (text: string, x: number, y: number) => {
       ctx.lineWidth = 4;
       ctx.strokeStyle = HALO;
-      ctx.strokeText(c.label, px, py);
+      ctx.strokeText(text, x, y);
       ctx.fillStyle = INK;
-      ctx.fillText(c.label, px, py);
-    }
+      ctx.fillText(text, x, y);
+    };
     if (map.resume) {
       const [px, py] = project(map.resume.x, map.resume.y);
       ctx.fillStyle = INK;
@@ -142,9 +176,34 @@ function MapCanvas({
       ctx.stroke();
       ctx.fill();
       ctx.font = "600 13px system-ui, sans-serif";
-      ctx.lineWidth = 4;
-      ctx.strokeText("Ваше резюме", px, py - 18);
-      ctx.fillText("Ваше резюме", px, py - 18);
+      const w = ctx.measureText("Ваше резюме").width;
+      placed.push({ x0: px - 10, y0: py - 10, x1: px + 10, y1: py + 10 });
+      for (const dy of [-20, 22, -36, 38]) {
+        const b = { x0: px - w / 2 - 3, y0: py + dy - 9, x1: px + w / 2 + 3, y1: py + dy + 9 };
+        if (!hits(b) || dy === 38) {
+          halo("Ваше резюме", px, py + dy);
+          placed.push(b);
+          break;
+        }
+      }
+    }
+    const order = [...map.clusters].sort(
+      (a, b) => Number(b.id === selected) - Number(a.id === selected) || b.size - a.size,
+    );
+    for (const c of order) {
+      const [cx, py] = project(c.x, c.y);
+      ctx.font = `${c.id === selected ? "600 " : ""}12px system-ui, sans-serif`;
+      const w = ctx.measureText(c.label).width;
+      // У края холста подпись сдвигается внутрь, а не обрезается рамкой.
+      const px = Math.min(Math.max(cx, w / 2 + 6), width - w / 2 - 6);
+      for (const dy of [0, -14, 14, -28, 28]) {
+        const b = { x0: px - w / 2 - 3, y0: py + dy - 8, x1: px + w / 2 + 3, y1: py + dy + 8 };
+        if (!hits(b) || (c.id === selected && dy === 28)) {
+          halo(c.label, px, py + dy);
+          placed.push(b);
+          break;
+        }
+      }
     }
   }, [map, width, height, project, selected, near, view.k]);
 
@@ -316,19 +375,7 @@ function ClusterTable({
               </td>
               <td>{c.size}</td>
               <td>{c.salary_median != null ? k(c.salary_median) : "—"}</td>
-              <td
-                className={
-                  c.delta_pp == null
-                    ? undefined
-                    : c.delta_pp > 0
-                      ? "delta-up"
-                      : c.delta_pp < 0
-                        ? "delta-down"
-                        : undefined
-                }
-              >
-                {fmtDelta(c.delta_pp)}
-              </td>
+              <td className={deltaClass(c.delta_pp)}>{fmtDelta(c.delta_pp)}</td>
               <td className="muted">
                 {c.technologies
                   .slice(0, 4)
@@ -394,7 +441,7 @@ export default function MarketMapPage() {
       )}
       {map?.available && (
         <>
-          <div className="filters" style={{ alignItems: "center" }}>
+          <div className="market-map-controls">
             <label>
               Резюме на карте
               <select
