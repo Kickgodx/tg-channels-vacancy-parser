@@ -95,3 +95,20 @@ def test_endpoint(admin_client, db_session):
         {"kind": "telegram", "value": "masha_hr", "url": "https://t.me/masha_hr", "has_contact_hint": True}
     ]
     assert admin_client.get("/api/v1/vacancies/nope/contacts").status_code == 404
+
+
+def test_application_links_skip_vacancy_page_telegram_and_repeats(db_session):
+    from backend.services.recruiter_contacts import application_links
+
+    hh = _row("Python developer", channel="hh")
+    hh.post_url = "https://hh.ru/vacancy/1?tech_source=api"
+    hh.application_urls = [
+        "https://hh.ru/applicant/vacancy_response?vacancyId=1&tech_source=api",
+        "https://hh.ru/vacancy/1?tech_source=api",
+    ]
+    assert application_links(hh) == ["https://hh.ru/applicant/vacancy_response?vacancyId=1&tech_source=api"]
+
+    tg = _row("Вакансия")
+    tg.post_url = "https://t.me/jobs_ch/5"
+    tg.application_urls = ["https://t.me/hr_anna", "https://forms.gle/abc", "http://www.forms.gle/abc/"]
+    assert application_links(tg) == ["https://forms.gle/abc"]

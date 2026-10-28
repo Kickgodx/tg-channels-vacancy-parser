@@ -16,6 +16,7 @@ from tg_jobs_parser.hh.mapper import HH_CHANNEL
 SIGNATURE_MIN_SHARE = 0.3
 # ... и не меньше стольких вакансий — иначе в маленьком канале любой рекрутер выглядел бы подписью.
 SIGNATURE_MIN_POSTS = 5
+MAX_APPLICATION_LINKS = 3
 
 
 def known_channel_usernames(session: Session) -> set[str]:
@@ -44,6 +45,30 @@ def _is_signature(session: Session, channel: str, handle: str) -> bool:
     return bool(total) and mentioned >= SIGNATURE_MIN_POSTS and mentioned / total >= SIGNATURE_MIN_SHARE
 
 
+def _norm_url(url: str) -> str:
+    u = url.strip().lower()
+    for prefix in ("https://", "http://", "www."):
+        u = u.removeprefix(prefix)
+    return u.rstrip("/")
+
+
+def application_links(vacancy: VacancyRow) -> list[str]:
+    """Ссылки на отклик без страницы самой вакансии (она — «Открыть пост»), повторов и t.me.
+
+    У HH две ссылки: форма отклика и страница вакансии — вторая совпадает с ``post_url``.
+    Ссылки t.me — это контакты и каналы: их показывают кнопки «Написать».
+    """
+    skip = {_norm_url(vacancy.post_url)} if vacancy.post_url else set()
+    out: list[str] = []
+    for url in vacancy.application_urls or []:
+        key = _norm_url(str(url))
+        if not key or key in skip or key.startswith(("t.me/", "telegram.me/")):
+            continue
+        skip.add(key)
+        out.append(str(url).strip())
+    return out[:MAX_APPLICATION_LINKS]
+
+
 def recruiter_contacts(session: Session, vacancy: VacancyRow) -> RecruiterContacts:
     # ``contact`` у Telegram — строка из того же текста (часто подпись канала); у HH — контакты из API.
     extra = vacancy.contact if vacancy.source_channel == HH_CHANNEL else None
@@ -54,4 +79,4 @@ def recruiter_contacts(session: Session, vacancy: VacancyRow) -> RecruiterContac
             continue
         url = f"mailto:{c.value}" if c.kind == "email" else f"https://t.me/{c.value}"
         out.append(RecruiterContactOut(kind=c.kind, value=c.value, url=url, has_contact_hint=c.has_contact_hint))
-    return RecruiterContacts(vacancy_id=vacancy.id, contacts=out, application_urls=list(vacancy.application_urls or []))
+    return RecruiterContacts(vacancy_id=vacancy.id, contacts=out, application_urls=application_links(vacancy))
