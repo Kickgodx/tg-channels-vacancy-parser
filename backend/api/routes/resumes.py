@@ -13,6 +13,7 @@ from backend.db.models import CoverLetterRow, InterviewPrepRow, ResumeRow, Resum
 from backend.observability import record_cover_letter, record_match
 from backend.schemas import (
     RESUME_TEXT_MAX_LENGTH,
+    CareerPathsOut,
     CoverLetterOut,
     CoverLetterRequest,
     InterviewPrepOut,
@@ -207,6 +208,24 @@ def get_skill_what_if(
     resume = _get_own_resume(db, resume_id, user)
     try:
         return skill_what_if(db, resume)
+    except EmbeddingsUnavailable as e:
+        raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, f"Расчёт недоступен: {e}", retryable=True) from e
+
+
+@resumes_router.get("/{resume_id}/career-paths", response_model=CareerPathsOut)
+def get_career_paths(
+    resume_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+) -> CareerPathsOut:
+    """Карьерная траектория: следующий грейд и соседние роли с маршрутом технологий (без LLM)."""
+    from backend.errors import CODE_UPSTREAM_UNAVAILABLE, http_error
+    from backend.services.career_paths_service import career_paths
+    from backend.services.embedding_service import EmbeddingsUnavailable
+
+    resume = _get_own_resume(db, resume_id, user)
+    try:
+        return career_paths(db, resume)
     except EmbeddingsUnavailable as e:
         raise http_error(503, CODE_UPSTREAM_UNAVAILABLE, f"Расчёт недоступен: {e}", retryable=True) from e
 

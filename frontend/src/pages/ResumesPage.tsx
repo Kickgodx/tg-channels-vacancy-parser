@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
+import CareerPathsPanel from "../components/CareerPathsPanel";
 import ResumeMarketPanel from "../components/ResumeMarketPanel";
 import SkillGapsPanel from "../components/SkillGapsPanel";
 import SkillWhatIfPanel from "../components/SkillWhatIfPanel";
@@ -171,6 +172,7 @@ export default function ResumesPage() {
 
       {selected && !formOpen && <ResumeMarketPanel resumeId={selected.id} />}
       {selected && !formOpen && <SkillWhatIfPanel resumeId={selected.id} />}
+      {selected && !formOpen && <CareerPathsPanel resumeId={selected.id} />}
       {selected && !formOpen && <SkillGapsPanel resumeId={selected.id} />}
 
       {formOpen && (
