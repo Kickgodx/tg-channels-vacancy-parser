@@ -41,6 +41,17 @@ function label(c: RecruiterContact): string {
   return `Написать @${c.value}`;
 }
 
+/** Подпись ссылки на отклик по сайту: «Откликнуться на hh.ru», иначе «Откликнуться · сайт». */
+function formLabel(url: string): string {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    if (host === "hh.ru" || host.endsWith(".hh.ru")) return "Откликнуться на hh.ru";
+    return `Откликнуться · ${host}`;
+  } catch {
+    return "Откликнуться";
+  }
+}
+
 /** «Связаться с рекрутером»: Telegram или почта с подставленным текстом отклика. */
 export default function RecruiterContactBlock({
   vacancyId,
@@ -56,7 +67,7 @@ export default function RecruiterContactBlock({
   });
   const [copied, setCopied] = useState(false);
   const contacts = q.data?.contacts ?? [];
-  const forms = (q.data?.application_urls ?? []).slice(0, 3);
+  const forms = q.data?.application_urls ?? [];
   if (contacts.length === 0 && forms.length === 0) return null;
 
   const hasLetter = letterDraft.trim().length > 0;
@@ -101,7 +112,7 @@ export default function RecruiterContactBlock({
         ))}
         {forms.map((u) => (
           <a key={u} href={u} target="_blank" rel="noreferrer" className="btn-link secondary">
-            Форма отклика
+            {formLabel(u)}
           </a>
         ))}
       </div>
