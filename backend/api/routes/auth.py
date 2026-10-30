@@ -9,10 +9,20 @@ from sqlalchemy.orm import Session
 
 from backend.api.deps import CurrentUser, get_current_user, get_db, verify_api_key
 from backend.db import user_content_repository as users_repo
-from backend.db.models import UserRow
-from backend.errors import CODE_EMAIL_TAKEN, CODE_NOT_AUTHENTICATED, CODE_VALIDATION, http_error
+from backend.db.models import ApiTokenRow, UserRow
+from backend.errors import (
+    CODE_EMAIL_TAKEN,
+    CODE_FORBIDDEN,
+    CODE_NOT_AUTHENTICATED,
+    CODE_NOT_FOUND,
+    CODE_VALIDATION,
+    http_error,
+)
 from backend.observability import record_auth_event
 from backend.schemas import (
+    ApiTokenCreate,
+    ApiTokenCreated,
+    ApiTokenOut,
     AuthCredentials,
     ChangePasswordRequest,
     RegisterRequest,
@@ -20,7 +30,7 @@ from backend.schemas import (
     TokenResponse,
     UserOut,
 )
-from backend.services import auth_rate_limit, auth_service
+from backend.services import api_tokens, auth_rate_limit, auth_service
 from backend.settings import get_settings
 
 _LOG = logging.getLogger(__name__)
@@ -273,3 +283,67 @@ def logout_all(current: CurrentUser = Depends(get_current_user), db: Session = D
     response = Response(status_code=204)
     _clear_refresh_cookie(response)
     return response
+
+
+def _token_out(row: ApiTokenRow) -> ApiTokenOut:
+    return ApiTokenOut(
+        id=row.id,
+        name=row.name,
+        prefix=row.prefix,
+        scopes=list(row.scopes or []),
+        created_at=row.created_at,
+        expires_at=row.expires_at,
+        last_used_at=row.last_used_at,
+    )
+
+
+def _require_session(user: CurrentUser) -> None:
+    """Управлять токенами можно только из сессии UI: утёкший PAT не выпускает новые."""
+    if user.auth_kind != "jwt":
+        raise http_error(403, CODE_FORBIDDEN, "Токенами управляют только из сессии входа")
+
+
+@router.get("/tokens", response_model=list[ApiTokenOut], dependencies=[Depends(verify_api_key)])
+def list_api_tokens(user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> list[ApiTokenOut]:
+    """Персональные токены доступа пользователя (без значений; отозванные не показываются)."""
+    return [_token_out(row) for row in api_tokens.list_tokens(db, user.id)]
+
+
+@router.post("/tokens", response_model=ApiTokenCreated, status_code=201, dependencies=[Depends(verify_api_key)])
+def create_api_token(
+    body: ApiTokenCreate,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ApiTokenCreated:
+    """Новый токен для скриптов и MCP-сервера; значение — только в этом ответе."""
+    _require_session(user)
+    try:
+        row, raw = api_tokens.create_token(
+            db,
+            user_id=user.id,
+            token_version=user.token_version,
+            name=body.name,
+            scopes=list(body.scopes),
+            expires_days=body.expires_days,
+        )
+    except api_tokens.TooManyTokens as e:
+        raise http_error(
+            409, CODE_VALIDATION, f"Не больше {api_tokens.MAX_ACTIVE_TOKENS} действующих токенов — отзовите лишние"
+        ) from e
+    record_auth_event("token_create", "success")
+    _LOG.info("Выпущен токен доступа id=%s пользователю id=%s (scopes=%s)", row.id, user.id, row.scopes)
+    return ApiTokenCreated(**_token_out(row).model_dump(), token=raw)
+
+
+@router.delete("/tokens/{token_id}", status_code=204, dependencies=[Depends(verify_api_key)])
+def revoke_api_token(
+    token_id: int,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Отозвать токен: действует сразу."""
+    _require_session(user)
+    if not api_tokens.revoke_token(db, user.id, token_id):
+        raise http_error(404, CODE_NOT_FOUND, "Токен не найден")
+    record_auth_event("token_revoke", "success")
+    return Response(status_code=204)

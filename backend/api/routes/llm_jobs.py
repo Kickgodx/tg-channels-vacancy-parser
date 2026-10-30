@@ -19,6 +19,7 @@ from backend.api.deps import (
     authenticate_sse,
     get_current_user,
     get_db,
+    pat_scope,
     sse_credentials,
     verify_api_key,
 )
@@ -137,6 +138,7 @@ def get_llm_job(
 
 
 @router.post("/{job_id}/cancel", response_model=LlmJobOut, dependencies=[Depends(verify_api_key)])
+@pat_scope("llm")
 def cancel_llm_job(
     job_id: uuid.UUID,
     db: Session = Depends(get_db),

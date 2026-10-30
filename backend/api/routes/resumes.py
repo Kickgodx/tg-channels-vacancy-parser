@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from backend.api.deps import CurrentUser, get_current_user, get_db, verify_api_key
+from backend.api.deps import CurrentUser, get_current_user, get_db, pat_scope, verify_api_key
 from backend.db import repository as repo
 from backend.db.models import CoverLetterRow, InterviewPrepRow, ResumeRow, ResumeTailoringRow, VacancyMatchRow
 from backend.observability import record_cover_letter, record_match
@@ -272,6 +272,7 @@ def get_vacancy_match(
         202: {"model": LlmJobAccepted},
     },
 )
+@pat_scope("llm")
 def match_single_vacancy(
     resume_id: int,
     vacancy_id: str,
@@ -346,6 +347,7 @@ def get_cover_letter(
         202: {"model": LlmJobAccepted},
     },
 )
+@pat_scope("llm")
 def generate_cover_letter(
     resume_id: int,
     vacancy_id: str,
@@ -436,6 +438,7 @@ def get_resume_tailoring(
     response_model=None,
     responses={200: {"model": ResumeTailoringOut}, 202: {"model": LlmJobAccepted}},
 )
+@pat_scope("llm")
 def tailor_resume(
     resume_id: int,
     vacancy_id: str,
@@ -520,6 +523,7 @@ def get_interview_prep(
     response_model=None,
     responses={200: {"model": InterviewPrepOut}, 202: {"model": LlmJobAccepted}},
 )
+@pat_scope("llm")
 def prepare_interview(
     resume_id: int,
     vacancy_id: str,
@@ -570,6 +574,7 @@ def delete_interview_prep(
 
 
 @resumes_router.post("/{resume_id}/match-batch", status_code=202, response_model=LlmJobAccepted)
+@pat_scope("llm")
 def match_batch(
     resume_id: int,
     body: MatchBatchRequest,

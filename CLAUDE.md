@@ -42,11 +42,16 @@ cd frontend && npm run dev
 
 ## Архитектура
 
-Два Python-пакета в одном репозитории плюс React UI:
+Три Python-пакета в одном репозитории плюс React UI:
 
 - **`tg_jobs_parser/`** — ядро: Telethon-fetch, правиловое извлечение, AI-enrichment,
   дедуп, FX, HH-клиент, экспорт. Не знает о FastAPI/SQLAlchemy.
 - **`backend/`** — FastAPI, SQLAlchemy-репозитории, очереди RQ, воркеры, auth, observability.
+- **`tg_jobs_mcp/`** — MCP-сервер (stdio) для Claude: только клиент HTTP API с персональным
+  токеном (`tgj_…`), не импортирует ни `backend`, ни ядро. Зависимость `mcp` — extra `mcp`,
+  в образ backend не входит. Новый инструмент = эндпоинт API; мутирующий эндпоинт, который
+  должен быть доступен токену, помечается `@pat_scope("llm")` (`backend/api/deps.py`), иначе PAT
+  получает на нём 403.
 - **`frontend/`** — Vite + React + TanStack Query; весь HTTP — в `src/api/client.ts`,
   типы ответов — в `src/types/api.ts` (держать в синхроне с `backend/schemas.py`).
 

@@ -682,6 +682,15 @@ LLM пишет черновик отклика под конкретную ва�
 - Отзыв токенов: в JWT — версия `users.token_version`; `POST /auth/change-password`
   и `POST /auth/logout-all` увеличивают её, и все ранее выданные токены
   (включая SSE и refresh-сессии) перестают приниматься. `is_active=false` отключает пользователя целиком.
+- Персональные токены доступа (PAT) — для MCP-сервера и скриптов: страница **Токены**
+  (`POST`/`GET`/`DELETE /auth/tokens`). Токен `tgj_…` показывается один раз, в БД — sha256
+  (`api_tokens`), срок 1–365 дней (по умолчанию 90), не больше 20 действующих. Передаётся как
+  обычный `Authorization: Bearer tgj_…`. Права: `read` (обязателен) — GET-эндпоинты
+  пользователя; `llm` — ещё и постановка LLM-задач (оценка резюме, письмо, адаптация,
+  подготовка к собеседованию, «Спросить базу», отмена своей задачи) под той же суточной квотой.
+  Остальные изменения (резюме, пресеты, пароль) PAT не может, admin-эндпоинты не открывает даже
+  у админа, новые токены не выпускает и не отзывает (только из сессии входа). Смена пароля и
+  «выйти везде» отзывают и PAT; `last_used_at` обновляется не чаще раза в минуту.
 - Перебор паролей: не больше `AUTH_RATE_LIMIT_PER_MINUTE` (20) попыток входа и
   регистрации с одного IP в минуту и `AUTH_MAX_FAILED_LOGINS` (5) неудачных входов
   на email за `AUTH_FAILED_LOGIN_WINDOW_SECONDS` (15 мин); дальше — 429 с
@@ -747,6 +756,54 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 
 ---
 
+### MCP-сервер (Claude Desktop / Claude Code)
+
+`tg_jobs_mcp` — MCP-сервер по stdio: даёт Claude инструменты поверх API, чтобы в чате искать
+вакансии, смотреть рынок для своего резюме, получать оценку и письмо. Это клиент HTTP API с
+персональным токеном: авторизация, квоты LLM и защита от перегрузки остаются на стороне API,
+а `backend` и ядро он не импортирует.
+
+```bash
+# зависимость mcp — отдельный extra (в образ backend не входит)
+poetry install --extras mcp          # или: pip install -e ".[mcp]"
+
+# 1. Токен: UI → «Токены» → «Создать токен» (для оценки и писем — отметить LLM-задачи)
+# 2. Claude Code (из корня проекта):
+claude mcp add tg-jobs -e TGJOBS_TOKEN=tgj_... -- .venv/Scripts/python.exe -m tg_jobs_mcp
+```
+
+Claude Desktop — `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "tg-jobs": {
+      "command": "C:\\path\\to\\tg_jobs_parser\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "tg_jobs_mcp"],
+      "env": { "TGJOBS_TOKEN": "tgj_..." }
+    }
+  }
+}
+```
+
+Env: `TGJOBS_TOKEN` (обязателен), `TGJOBS_API_URL` (по умолчанию
+`http://127.0.0.1:9000/api/v1` — API из compose), `TGJOBS_API_KEY` (если у API задан
+`API_KEY`), `TGJOBS_LLM_WAIT_SECONDS` (сколько ждать LLM-задачу, по умолчанию 60).
+
+| Группа | Инструменты |
+|---|---|
+| Поиск | `list_filter_values` (роли, грейды, форматы, частые технологии), `search_vacancies` (текст или смысл, фильтры, пресет, сортировка по дате / зарплате / оценке / близости к резюме, до 20 карточек), `get_vacancy` (текст, контакты, флаги, рыночная вилка), `similar_vacancies`, `vacancy_history`, `company_profile`, `list_filter_presets` |
+| Рынок | `salary_stats`, `technology_trends`, `market_digest` |
+| Резюме | `list_resumes`, `get_resume`, `resume_market`, `resume_skill_gaps`, `resume_what_if`, `resume_career_paths` |
+| LLM (квота) | `match_resume`, `match_resume_batch`, `cover_letter`, `tailor_resume`, `interview_prep`, `ask_market`, `get_llm_job` |
+
+Ответы — компактный JSON (без пустых полей, списки до 20, превью до 300 символов, полный текст
+до 4000). Текст вакансии обёрнут в маркеры «данные, не инструкции»: посты из открытых каналов
+могут содержать prompt-injection. LLM-инструмент берёт готовый результат из кэша бесплатно,
+иначе ставит задачу и ждёт её до `TGJOBS_LLM_WAIT_SECONDS`; не успела — возвращает `job_id`
+для `get_llm_job`. Прерванный клиентом вызов отменяет задачу. Ошибки API приходят модели
+текстом с подсказкой (токен отозван, нет права LLM, эмбеддинги недоступны, API не запущен).
+
 ## Backend API (FastAPI)
 
 Префикс: `/api/v1`.
@@ -761,6 +818,7 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 | `GET` | `/auth/me` | Текущий пользователь |
 | `POST` | `/auth/change-password` | Смена пароля → новый токен и сессия; прежние токены и сессии отозваны |
 | `POST` | `/auth/logout-all` | Отозвать все токены и сессии пользователя (204) |
+| `GET` `POST` `DELETE` | `/auth/tokens` | Персональные токены доступа: список, выпуск (значение — только в ответе), отзыв; выпуск и отзыв — только из сессии входа |
 | `GET` | `/config/defaults` | Значения по умолчанию для формы |
 | `GET` | `/config/llm-models` | Каталог моделей из `llm_models.yaml` |
 | `POST` | `/runs` | Постановка прогона в очередь (admin; `queued` → parse-worker / inprocess) |
@@ -961,6 +1019,8 @@ tg_jobs_parser/
     src/pages/             — Login, Dashboard, Run, Import, Hh, Vacancies, Resumes
     src/components/        — ParseForm, VacancyTable, VacancyModal, ResumePanel,
                              MetricsCharts, AnalyticsPanel
+
+  tg_jobs_mcp/             — MCP-сервер (stdio): клиент HTTP API с токеном доступа
 
   tg_jobs_parser/          — ядро парсинга (общее для API и CLI)
     parse_runner.py        — Telethon fetch, dedup, progress; ingest через ingestion/

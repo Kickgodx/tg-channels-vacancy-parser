@@ -12,6 +12,7 @@ import MarketMapPage from "./pages/MarketMapPage";
 import ResumesPage from "./pages/ResumesPage";
 import VacanciesPage from "./pages/VacanciesPage";
 import RunPage from "./pages/RunPage";
+import TokensPage from "./pages/TokensPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const location = useLocation();
@@ -69,6 +70,7 @@ export default function App() {
           <NavLink to="/digest">Обзор</NavLink>
           <NavLink to="/map">Карта рынка</NavLink>
           <NavLink to="/ask">Спросить базу</NavLink>
+          <NavLink to="/tokens">Токены</NavLink>
           <UserBadge />
         </nav>
       )}
@@ -159,6 +161,14 @@ export default function App() {
           element={
             <RequireAuth>
               <ResumesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/tokens"
+          element={
+            <RequireAuth>
+              <TokensPage />
             </RequireAuth>
           }
         />
