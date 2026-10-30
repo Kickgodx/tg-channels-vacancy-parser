@@ -105,3 +105,30 @@ def merge_duplicates_cmd(
             return
         merged, passes = merge_all(session, config)
     typer.echo(typer.style(f"Склеено копий: {merged} за {passes} проход(а)", fg=typer.colors.GREEN))
+
+
+@db_app.command("clean-vacancies")
+def clean_vacancies_cmd(
+    apply: bool = typer.Option(False, "--apply", help="Применить; без флага — только показать план"),
+    limit: int = typer.Option(40, "--show", help="Сколько удаляемых постов и технологий показать"),
+) -> None:
+    """Удалить посты соискателей и подборки вакансий, почистить технологии (разово)."""
+    try_load_dotenv()
+    from backend.services.vacancy_cleanup import apply_cleanup, plan_cleanup
+
+    with session_scope() as session:
+        plan = plan_cleanup(session)
+        typer.echo(f"Не вакансии (соискатели, подборки) — удалить: {len(plan.delete_ids)}")
+        for preview in plan.delete_previews[:limit]:
+            typer.echo(f"  - {preview}")
+        typer.echo(
+            f"Технологии — переписать у {len(plan.technology_updates)} вакансий: "
+            f"убрать {sum(plan.removed.values())}, добавить {sum(plan.added.values())} упоминаний"
+        )
+        typer.echo("  убираются: " + ", ".join(f"{t} ({n})" for t, n in plan.removed.most_common(limit)))
+        typer.echo("  добавляются: " + ", ".join(f"{t} ({n})" for t, n in plan.added.most_common(limit)))
+        if not apply:
+            typer.echo("Применить: --apply")
+            return
+        deleted, updated = apply_cleanup(session, plan)
+    typer.echo(typer.style(f"Удалено: {deleted}, технологии переписаны: {updated}", fg=typer.colors.GREEN))

@@ -8,7 +8,7 @@ import re
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from tg_jobs_parser.config.schema import canonical_technologies, split_specializations
+from tg_jobs_parser.config.schema import canonical_technologies, clean_technology_names, split_specializations
 from tg_jobs_parser.hh.grades import grade_from_experience
 from tg_jobs_parser.hh.models import (
     Contacts,
@@ -136,9 +136,11 @@ def _roles_and_technologies(detail: VacancyDetail | VacancyShort, key_skills: li
     # Роль HH сразу каноническая: «Тестировщик» → QA, «Программист, разработчик» →
     # Software Engineer (SPECIALIZATION_ALIASES); прочие роли — как есть.
     # Без ролей — пусто: выдуманные специализации пускали бы вакансию под чужие фильтры.
-    # key_skills — технологии в каноническом написании (Golang → Go).
+    # key_skills — свободный текст работодателя: технологии вперемешку с практиками («Функциональное
+    # тестирование»), навыками («Английский язык») и фразами — оставляются только технологии
+    # в каноническом написании (Golang → Go).
     roles = [role.name for role in detail.professional_roles or [] if role.name]
-    specs, techs = split_specializations(roles, key_skills)
+    specs, techs = split_specializations(roles, clean_technology_names(key_skills))
     return specs, canonical_technologies(techs)
 
 
