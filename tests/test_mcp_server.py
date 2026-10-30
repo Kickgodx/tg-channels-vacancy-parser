@@ -291,3 +291,37 @@ def test_format_helpers():
     assert "grade" not in compact(brief)
     assert brief["salary"] == "5 000 USD, ≈450 000 ₽ (среднее)"
     assert brief["technologies"][-1] == "+3"
+
+
+def test_analytics_summaries_drop_bulky_breakdowns():
+    from tg_jobs_mcp.server import _salary_summary, _technology_summary
+
+    row = {
+        "group": "senior",
+        "count": 9,
+        "mean": 1,
+        "min": 1,
+        "max": 9,
+        "p10": 2,
+        "q1": 3,
+        "median": 5,
+        "q3": 7,
+        "p90": 8,
+    }
+    salaries = _salary_summary(
+        {"by_grade": [row], "by_grade_monthly": [row], "distribution": [{"range": "0-100k", "count": 3}]}
+    )
+    assert salaries["by_grade"] == [{k: row[k] for k in ("group", "count", "p10", "q1", "median", "q3", "p90")}]
+    assert "by_grade_monthly" not in salaries
+    assert salaries["distribution"] == [{"range": "0-100k", "count": 3}]
+    techs = _technology_summary({"premium": [{"technology": "Go", "premium": 0.1, "by_grade": [row]}], "trend": {}})
+    assert techs["premium"] == [{"technology": "Go", "premium": 0.1}]
+
+
+@pytest.mark.anyio
+async def test_filter_values_skip_form_only_formats(api_client):
+    token = _pat(api_client, _register(api_client))
+    err, out = await _call(_server(api_client, token), "list_filter_values")
+    assert not err
+    assert "remote" in out["work_formats"]
+    assert not {"any", "exclude_office"} & set(out["work_formats"])

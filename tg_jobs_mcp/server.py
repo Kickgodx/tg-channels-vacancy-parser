@@ -136,6 +136,29 @@ def _filters(
     }
 
 
+# Опции формы UI, а не значения вакансий: фильтр списка по ним ничего не находит.
+_FORM_ONLY_FORMATS = frozenset({"any", "exclude_office"})
+# Квантили группы, которых модели хватает; mean/min/max только раздувают ответ.
+_STAT_KEYS = ("group", "period", "count", "p10", "q1", "median", "q3", "p90")
+# Разбивки зарплат, которые идут в ответ; помесячные и погодовые внутри групп — нет.
+_SALARY_SECTIONS = ("by_grade", "by_work_format", "by_specialization", "monthly", "yearly", "distribution")
+
+
+def _salary_summary(data: dict) -> dict:
+    out: dict[str, Any] = {}
+    for key in _SALARY_SECTIONS:
+        rows = data.get(key) or []
+        out[key] = [{k: r[k] for k in _STAT_KEYS if k in r} if "count" in r and "group" in r else r for r in rows]
+    out["salary_display"] = data.get("salary_display")
+    return out
+
+
+def _technology_summary(data: dict) -> dict:
+    """Премия без разбивки по грейдам у каждой технологии (она — 9/10 ответа)."""
+    premium = [{k: v for k, v in p.items() if k != "by_grade"} for p in data.get("premium") or []]
+    return {**data, "premium": premium}
+
+
 def _llm_payload(job: dict) -> tuple[str | None, Any]:
     for key in _LLM_PAYLOADS:
         if job.get(key) is not None:
@@ -210,7 +233,7 @@ def build_server(client: ApiClient) -> MCPServer:
             {
                 "roles": defaults.get("specialization_options"),
                 "grades": [g for g in defaults.get("grade_options") or [] if g != "unknown"],
-                "work_formats": defaults.get("work_format_options"),
+                "work_formats": [f for f in defaults.get("work_format_options") or [] if f not in _FORM_ONLY_FORMATS],
                 "top_technologies": [f"{t['name']} ({t['count']})" for t in techs.get("items", [])],
             }
         )
@@ -353,7 +376,7 @@ def build_server(client: ApiClient) -> MCPServer:
             query, mode, roles, technologies, grade, work_format, None, date_from, date_to, include_archived
         )
         with _api_errors():
-            return dumps(await client.get("analytics/salaries", **params))
+            return dumps(_salary_summary(await client.get("analytics/salaries", **params)))
 
     @mcp.tool(annotations=_READ, structured_output=False)
     async def technology_trends(
@@ -368,7 +391,7 @@ def build_server(client: ApiClient) -> MCPServer:
         что растёт и что падает за последние 30 дней."""
         params = _filters(None, "text", roles, [], grade, work_format, None, date_from, date_to, include_archived)
         with _api_errors():
-            return dumps(await client.get("analytics/technologies", **params))
+            return dumps(_technology_summary(await client.get("analytics/technologies", **params)))
 
     @mcp.tool(annotations=_READ, structured_output=False)
     async def market_digest(
