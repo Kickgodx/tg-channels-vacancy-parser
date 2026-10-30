@@ -25,8 +25,6 @@ from backend.schemas import (
     VacancyQuery,
 )
 
-PeriodGrain = str  # "year" | "month" — первый аргумент date_trunc
-
 _TOP_COMPANIES = 20
 _TOP_SALARY_SPECS = 15
 

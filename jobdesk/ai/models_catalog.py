@@ -21,18 +21,6 @@ class LlmModelEntry(BaseModel):
         return f"{self.name} ({self.id})"
 
 
-def dedupe_model_ids(model_ids: list[str]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for mid in model_ids:
-        m = (mid or "").strip()
-        if not m or m in seen:
-            continue
-        seen.add(m)
-        out.append(m)
-    return out
-
-
 def catalog_model_ids(catalog: list[LlmModelEntry]) -> list[str]:
     return [e.id for e in catalog]
 

@@ -11,8 +11,6 @@ from sqlalchemy.orm import Session
 from backend.db.models import ChannelCandidateRow, TelegramChannelCheckpointRow, TelegramForwardRow
 from jobdesk.parsers.base import ForwardedPost
 
-CANDIDATE_STATUSES = ("new", "ignored")
-
 
 def save_forwards(session: Session, forwards: list[ForwardedPost]) -> int:
     """Записать пересылки прогона; вернуть, сколько постов пересылок было новыми.

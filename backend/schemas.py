@@ -8,6 +8,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator, model_validator
 
+from backend.services.api_tokens import DEFAULT_TTL_DAYS, MAX_TTL_DAYS
 from jobdesk.ai.schema import (
     InterviewGap,
     InterviewQuestion,
@@ -1190,7 +1191,7 @@ class ApiTokenCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=100)
     scopes: list[ApiTokenScope] = Field(default_factory=lambda: ["read"], min_length=1)
-    expires_days: int = Field(default=90, ge=1, le=365)
+    expires_days: int = Field(default=DEFAULT_TTL_DAYS, ge=1, le=MAX_TTL_DAYS)
 
     @field_validator("name")
     @classmethod
