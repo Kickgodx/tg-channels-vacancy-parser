@@ -12,23 +12,23 @@ const ROLE_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#00
 const OTHER_COLOR = "#adb5bd";
 const W = 860;
 const H = 540;
-// Рёбер на узел: самые сильные по lift, иначе граф превращается в клубок.
-const EDGES_PER_NODE = 3;
+// Рёбер на узел: самые сильные по lift; больше пяти — граф превращается в клубок.
+const EDGES_PER_NODE_OPTIONS = [3, 4, 5];
 
 interface Point {
   x: number;
   y: number;
 }
 
-/** Рёбра для рисования: у каждого узла — до EDGES_PER_NODE самых сильных с lift не ниже порога. */
-function visibleEdges(edges: TechnologyGraphEdge[], minLift: number): TechnologyGraphEdge[] {
+/** Рёбра для рисования: у каждого узла — до perNode самых сильных с lift не ниже порога. */
+function visibleEdges(edges: TechnologyGraphEdge[], minLift: number, perNode: number): TechnologyGraphEdge[] {
   const used = new Map<string, number>();
   const out: TechnologyGraphEdge[] = [];
   for (const e of edges) {
     if (e.lift < minLift) continue;
     const a = used.get(e.source) ?? 0;
     const b = used.get(e.target) ?? 0;
-    if (a >= EDGES_PER_NODE && b >= EDGES_PER_NODE) continue;
+    if (a >= perNode && b >= perNode) continue;
     used.set(e.source, a + 1);
     used.set(e.target, b + 1);
     out.push(e);
@@ -162,6 +162,7 @@ function companions(graph: TechnologyGraph, name: string) {
 export default function TechnologyGraphSection({ params }: Props) {
   const [nodes, setNodes] = useState(40);
   const [minLift, setMinLift] = useState(1.5);
+  const [perNode, setPerNode] = useState(5);
   const [selected, setSelected] = useState<string | null>(null);
   const q = useQuery({
     queryKey: ["technology-graph", params, nodes],
@@ -170,7 +171,10 @@ export default function TechnologyGraphSection({ params }: Props) {
     staleTime: 60_000,
   });
   const graph = q.data;
-  const edges = useMemo(() => (graph ? visibleEdges(graph.edges, minLift) : []), [graph, minLift]);
+  const edges = useMemo(
+    () => (graph ? visibleEdges(graph.edges, minLift, perNode) : []),
+    [graph, minLift, perNode],
+  );
   const pos = useMemo(() => {
     if (!graph) return new Map<string, Point>();
     const maxCount = Math.max(...graph.nodes.map((nd) => nd.count), 1);
@@ -207,7 +211,7 @@ export default function TechnologyGraphSection({ params }: Props) {
       <p className="caption">
         {graph.nodes.length} самых частых технологий из {graph.total.toLocaleString("ru-RU")} вакансий под
         фильтрами. Линия — пару просят в одной вакансии заметно чаще, чем случайно (lift); у каждой технологии —
-        до {EDGES_PER_NODE} самых сильных связей. Размер — число вакансий, цвет — роль, с которой технология
+        до {perNode} самых сильных связей. Размер — число вакансий, цвет — роль, с которой технология
         встречается чаще всего. Клик по технологии — с чем её просят.
       </p>
       <div className="tech-graph-controls">
@@ -227,6 +231,16 @@ export default function TechnologyGraphSection({ params }: Props) {
             {[1.2, 1.5, 2, 3, 5].map((v) => (
               <option key={v} value={v}>
                 ×{v}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Связей у технологии{" "}
+          <select value={perNode} onChange={(e) => setPerNode(Number(e.target.value))}>
+            {EDGES_PER_NODE_OPTIONS.map((v) => (
+              <option key={v} value={v}>
+                до {v}
               </option>
             ))}
           </select>
