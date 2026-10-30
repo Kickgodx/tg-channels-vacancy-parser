@@ -8,6 +8,9 @@ import type {
   RecruiterContacts,
   SkillWhatIf,
   CareerPaths,
+  ApiToken,
+  ApiTokenCreated,
+  ApiTokenScope,
   ConfigDefaults,
   CoverLetter,
   CoverLetterTone,
@@ -551,6 +554,19 @@ export const api = {
     }),
 
   me: () => request<AuthUser>("/auth/me"),
+
+  listApiTokens: () => request<ApiToken[]>("/auth/tokens"),
+
+  createApiToken: (name: string, scopes: ApiTokenScope[], expiresDays: number) =>
+    request<ApiTokenCreated>("/auth/tokens", {
+      method: "POST",
+      body: JSON.stringify({ name, scopes, expires_days: expiresDays }),
+    }),
+
+  revokeApiToken: async (id: number) => {
+    const res = await authFetch(`/auth/tokens/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Отзыв токена: ${res.status} ${res.statusText}`);
+  },
 
   /** Отозвать refresh-сессию на сервере (cookie стирается) и уйти на /login. */
   logout: async () => {

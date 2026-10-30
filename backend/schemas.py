@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator, model_validator
 
 from tg_jobs_parser.ai.schema import (
     InterviewGap,
@@ -1121,6 +1121,48 @@ class TokenResponse(BaseModel):
 class SseTicketResponse(BaseModel):
     ticket: str = Field(description="Одноразовый тикет для ?ticket= SSE-эндпоинта")
     expires_in: int = Field(description="Сколько секунд тикет можно предъявить")
+
+
+ApiTokenScope = Literal["read", "llm"]
+
+
+class ApiTokenCreate(BaseModel):
+    """Новый персональный токен доступа: ``read`` обязателен, ``llm`` — разрешить LLM-задачи."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    scopes: list[ApiTokenScope] = Field(default_factory=lambda: ["read"], min_length=1)
+    expires_days: int = Field(default=90, ge=1, le=365)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Имя токена не может быть пустым")
+        return v
+
+    @field_validator("scopes")
+    @classmethod
+    def _needs_read(cls, v: list[str]) -> list[str]:
+        if "read" not in v:
+            raise ValueError("Scope read обязателен: без него токен ничего не может прочитать")
+        return v
+
+
+class ApiTokenOut(BaseModel):
+    id: int
+    name: str
+    prefix: str = Field(description="Начало токена — чтобы узнать его в списке.")
+    scopes: list[str]
+    created_at: datetime
+    expires_at: datetime
+    last_used_at: datetime | None = None
+
+
+class ApiTokenCreated(ApiTokenOut):
+    token: str = Field(description="Значение токена — показывается только в этом ответе.")
 
 
 class DigestCount(BaseModel):

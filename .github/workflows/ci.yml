@@ -66,7 +66,7 @@ jobs:
           "$RUNNER_TEMP/poetry/bin/pip" install -q "poetry==$POETRY_VERSION" "poetry-plugin-export==$POETRY_EXPORT_VERSION"
           poetry="$RUNNER_TEMP/poetry/bin/poetry"
           "$poetry" check --lock
-          "$poetry" export --extras dev --format requirements.txt --output "$RUNNER_TEMP/requirements.txt"
+          "$poetry" export --extras dev --extras mcp --format requirements.txt --output "$RUNNER_TEMP/requirements.txt"
           python -m pip install -q --require-hashes -r "$RUNNER_TEMP/requirements.txt"
           python -m pip install -q --no-deps -e .
           python -m pip check

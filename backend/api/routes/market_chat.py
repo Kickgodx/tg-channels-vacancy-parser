@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from backend.api.deps import CurrentUser, get_current_user, verify_api_key
+from backend.api.deps import CurrentUser, get_current_user, pat_scope, verify_api_key
 from backend.errors import CODE_LLM_QUOTA_EXCEEDED, CODE_RATE_LIMITED, http_error
 from backend.schemas import AskMarketRequest, LlmJobAccepted
 from backend.services.llm_job_service import (
@@ -19,6 +19,7 @@ router = APIRouter(prefix="/market-chat", tags=["market-chat"], dependencies=[De
 
 
 @router.post("/ask", status_code=202, response_model=LlmJobAccepted)
+@pat_scope("llm")
 def ask_market(body: AskMarketRequest, user: CurrentUser = Depends(get_current_user)):
     """Вопрос о рынке: план по каталогу → цифры → ответ модели только по ним. Итог — в ``/llm-jobs/{id}``.
 

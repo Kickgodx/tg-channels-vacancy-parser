@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import TypeVar
 
-from fastapi import Depends, Query, Security
+from fastapi import Depends, Query, Request, Security
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer, OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,7 +14,7 @@ from sqlalchemy.orm import Session
 from backend.db.models import UserRow
 from backend.db.session import get_db
 from backend.errors import CODE_FORBIDDEN, CODE_NOT_AUTHENTICATED, http_error
-from backend.services import auth_service, sse_tickets
+from backend.services import api_tokens, auth_service, sse_tickets
 from backend.settings import get_settings
 
 __all__ = [
@@ -22,6 +24,7 @@ __all__ = [
     "bearer_token",
     "get_current_user",
     "get_db",
+    "pat_scope",
     "require_admin",
     "sse_credentials",
     "verify_api_key",
@@ -86,6 +89,9 @@ class CurrentUser:
     is_active: bool
     token_version: int
     created_at: datetime
+    # jwt — сессия UI (access-токен); pat — персональный токен доступа со scope'ами.
+    auth_kind: str = "jwt"
+    scopes: tuple[str, ...] = ()
 
 
 _USER_COLUMNS = (
@@ -115,11 +121,55 @@ def _user_from_token(db: Session, token: str | None) -> CurrentUser | None:
     return _active_user(db, *claims)
 
 
+_F = TypeVar("_F", bound=Callable)
+_PAT_SCOPE_ATTR = "__pat_scope__"
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def pat_scope(scope: str) -> Callable[[_F], _F]:
+    """Разрешить мутирующий эндпоинт персональному токену с этим scope (ставится под ``@router.*``).
+
+    Без пометки PAT получает только чтение (GET с scope ``read``).
+    """
+
+    def mark(fn: _F) -> _F:
+        setattr(fn, _PAT_SCOPE_ATTR, scope)
+        return fn
+
+    return mark
+
+
+def _user_from_pat(db: Session, token: str) -> CurrentUser | None:
+    claims = api_tokens.authenticate(db, token)
+    if claims is None:
+        return None
+    user = _active_user(db, claims.user_id, claims.token_version)
+    if user is None:
+        return None
+    return replace(user, auth_kind="pat", scopes=claims.scopes)
+
+
+def _check_pat_scope(request: Request, user: CurrentUser) -> None:
+    if request.method in _SAFE_METHODS:
+        needed = api_tokens.SCOPE_READ
+    else:
+        needed = getattr(request.scope.get("endpoint"), _PAT_SCOPE_ATTR, None)
+    if needed is None or needed not in user.scopes:
+        raise http_error(403, CODE_FORBIDDEN, "Токен доступа не разрешает это действие")
+
+
 def get_current_user(
+    request: Request,
     authorization: str | None = Depends(bearer_token),
     db: Session = Depends(get_db),
 ) -> CurrentUser:
-    """JWT только из ``Authorization: Bearer`` (не из query)."""
+    """JWT или персональный токен (``tgj_…``) только из ``Authorization: Bearer`` (не из query)."""
+    if api_tokens.is_pat(authorization):
+        user = _user_from_pat(db, authorization)
+        if user is None:
+            raise http_error(401, CODE_NOT_AUTHENTICATED, "Not authenticated")
+        _check_pat_scope(request, user)
+        return user
     user = _user_from_token(db, authorization)
     if user is None:
         raise http_error(401, CODE_NOT_AUTHENTICATED, "Not authenticated")
@@ -166,7 +216,7 @@ def authenticate_sse(db: Session, creds: SseCredentials) -> CurrentUser:
 
 
 async def require_admin(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    """JWT + ``users.is_admin``; иначе 403."""
-    if not user.is_admin:
+    """JWT + ``users.is_admin``; иначе 403. Персональный токен admin-функции не открывает."""
+    if not user.is_admin or user.auth_kind != "jwt":
         raise http_error(403, CODE_FORBIDDEN, "Admin only")
     return user

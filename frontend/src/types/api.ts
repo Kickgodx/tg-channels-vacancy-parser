@@ -251,6 +251,23 @@ export interface AuthUser {
   created_at: string;
 }
 
+export type ApiTokenScope = "read" | "llm";
+
+/** Персональный токен доступа (для MCP-сервера и скриптов); значение — только в ответе создания. */
+export interface ApiToken {
+  id: number;
+  name: string;
+  prefix: string;
+  scopes: ApiTokenScope[];
+  created_at: string;
+  expires_at: string;
+  last_used_at: string | null;
+}
+
+export interface ApiTokenCreated extends ApiToken {
+  token: string;
+}
+
 export interface HhStatus {
   enabled: boolean;
   token_configured: boolean;
