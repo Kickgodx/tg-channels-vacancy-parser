@@ -777,6 +777,30 @@ export interface TechnologyMomentum {
   delta_pp: number;
 }
 
+/** GET /analytics/technology-graph: какие технологии просят вместе. */
+export interface TechnologyGraphNode {
+  name: string;
+  count: number;
+  share: number;
+  role: string | null;
+  role_share: number;
+}
+
+export interface TechnologyGraphEdge {
+  source: string;
+  target: string;
+  count: number;
+  /** Во сколько раз пара встречается чаще, чем случайно. */
+  lift: number;
+}
+
+export interface TechnologyGraph {
+  total: number;
+  nodes: TechnologyGraphNode[];
+  edges: TechnologyGraphEdge[];
+  min_pair_count: number;
+}
+
 export interface TechnologyAnalytics {
   premium: TechnologyPremium[];
   trend: TechnologyTrend;
