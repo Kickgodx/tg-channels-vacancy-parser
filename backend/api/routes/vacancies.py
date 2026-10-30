@@ -9,6 +9,7 @@ from backend.api.deps import CurrentUser, get_current_user, get_db, require_admi
 from backend.api.params import (
     Page,
     PageSize,
+    analytics_filters,
     check_list_depth,
     check_sort_needs_resume,
     check_sort_pair,
@@ -19,6 +20,7 @@ from backend.db.aggregate_cache import cached_aggregate
 from backend.db.company_profile import vacancy_flags
 from backend.db.market_salary import market_salary
 from backend.db.models import LlmJobRow
+from backend.db.vacancy_filters import analytics_query
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics, technology_counts
 from backend.db.vacancy_repository import counted_vacancies
 from backend.errors import (
@@ -34,6 +36,7 @@ from backend.schemas import (
     LlmJobAccepted,
     MarketSalaryOut,
     RecruiterContacts,
+    SalaryEstimateOut,
     SimilarVacanciesResponse,
     SimilarVacancy,
     TechnologyCount,
@@ -224,7 +227,7 @@ def export_vacancies_xlsx(
     )
     limit = export_service.export_row_limit()
     total = counted_vacancies(db, query)
-    metrics = aggregate_vacancy_metrics(db, query)
+    metrics = aggregate_vacancy_metrics(db, analytics_query(query))
     return export_service.xlsx_response(
         repo.iter_export_vacancies(db, query, limit=limit),
         total=total,
@@ -236,7 +239,7 @@ def export_vacancies_xlsx(
 
 @router.get("/metrics", response_model=MetricsSummary)
 def vacancy_metrics(
-    query: VacancyQuery = Depends(vacancy_filters),
+    query: VacancyQuery = Depends(analytics_filters),
     db: Session = Depends(get_db),
 ) -> MetricsSummary:
     """Агрегаты для графиков (SQL GROUP BY, без загрузки всех вакансий)."""
@@ -310,6 +313,50 @@ def vacancy_market_salary(vacancy_id: str, db: Session = Depends(get_db)) -> Mar
     if row is None:
         raise HTTPException(status_code=404, detail="Vacancy not found")
     return market_salary(db, row)
+
+
+@router.get("/{vacancy_id}/salary-estimate", response_model=SalaryEstimateOut)
+def vacancy_salary_estimate(vacancy_id: str, db: Session = Depends(get_db)) -> SalaryEstimateOut:
+    """Ориентировочная зарплата вакансии без вилки: медиана и p25–p75 ближайших по смыслу с зарплатой."""
+    from backend.db.models import VacancyRow
+    from backend.db.vacancy_mapper import row_to_list_item, vacancy_preview_expr
+    from backend.db.vacancy_metrics import _prepare_fx
+    from backend.db.vacancy_repository import _list_columns
+    from backend.services import embedding_service
+    from backend.services import salary_estimate_service as est
+
+    row = repo.get_vacancy_row(db, vacancy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Vacancy not found")
+    out = SalaryEstimateOut(
+        vacancy_id=vacancy_id, status="has_salary", min_neighbours=est.MIN_NEIGHBOURS, window_days=est.WINDOW_DAYS
+    )
+    if row.detected_salary_avg_rub is not None:
+        return out
+    ai = embedding_service._ai()
+    if not ai.embeddings.enabled:
+        return out.model_copy(update={"status": "unavailable"})
+    found = est.current_estimate(db, row, model=ai.embeddings.model)
+    if found is None:
+        return out.model_copy(update={"status": "pending"})
+    ids = found.neighbour_ids[: est.EXAMPLES]
+    rows = (
+        {r.id: r for r in db.execute(select(*_list_columns(), vacancy_preview_expr()).where(VacancyRow.id.in_(ids)))}
+        if ids
+        else {}
+    )
+    return out.model_copy(
+        update={
+            "status": "ready" if found.median is not None else "insufficient",
+            "grade": found.grade,
+            "neighbours": found.neighbours,
+            "p25": found.p25,
+            "median": found.median,
+            "p75": found.p75,
+            "examples": [row_to_list_item(rows[i], rows[i].preview or "") for i in ids if i in rows],
+            "salary_display": _prepare_fx(db),
+        }
+    )
 
 
 def _post_url(channel: str, source_post_key: str) -> str | None:

@@ -416,6 +416,32 @@ class VacancyEmbeddingRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
 
 
+class VacancySalaryEstimateRow(Base):
+    """Ориентировочная зарплата вакансии без вилки (миграция 050): квантили ближайших по смыслу.
+
+    Пересчитывает лидер API (``salary_estimate_service.sweep_estimates``); в аналитику не входит.
+    ``median`` NULL — похожих с зарплатой не набралось.
+    """
+
+    __tablename__ = "vacancy_salary_estimates"
+
+    vacancy_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("vacancies.id", ondelete="CASCADE", name="fk_vacancy_salary_estimates_vacancy_id"),
+        primary_key=True,
+    )
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Грейд, внутри которого искали похожих; NULL — грейд вакансии неизвестен, искали среди всех.
+    grade: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    neighbours: Mapped[int] = mapped_column(Integer, nullable=False)
+    p25: Mapped[float | None] = mapped_column(Float, nullable=True)
+    median: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p75: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Похожие вакансии, ближайшие первыми.
+    neighbour_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+
+
 class ResumeEmbeddingRow(Base):
     """Эмбеддинг резюме для подбора вакансий; пересчитывается при смене текста или модели."""
 

@@ -33,6 +33,7 @@ function vacancyFilterParams(
   dateFrom: string,
   dateTo: string,
   hasSalaryOnly: boolean,
+  salaryEstimates: boolean,
   searchMode: SearchMode,
 ): VacancyQueryParams {
   const params: VacancyQueryParams = {};
@@ -46,6 +47,7 @@ function vacancyFilterParams(
   if (dateFrom) params.date_from = dateFrom;
   if (dateTo) params.date_to = dateTo;
   if (hasSalaryOnly) params.has_salary = true;
+  if (hasSalaryOnly && salaryEstimates) params.salary_estimates = true;
   return params;
 }
 
@@ -94,6 +96,7 @@ export default function VacanciesPage() {
   const dateFrom = searchParams.get("date_from") ?? "";
   const dateTo = searchParams.get("date_to") ?? "";
   const hasSalaryOnly = searchParams.get("has_salary") === "true";
+  const salaryEstimates = searchParams.get("salary_estimates") === "true";
   const rawSortBy = searchParams.get("sort_by");
   const sortBy: VacancySortField = SORTABLE_COLUMNS.includes(rawSortBy as VacancySortField)
     ? (rawSortBy as VacancySortField)
@@ -154,9 +157,22 @@ export default function VacanciesPage() {
         dateFrom,
         dateTo,
         hasSalaryOnly,
+        salaryEstimates,
         searchMode,
       ),
-    [q, sourceChannel, grade, specializations, technologies, workFormat, dateFrom, dateTo, hasSalaryOnly, searchMode],
+    [
+      q,
+      sourceChannel,
+      grade,
+      specializations,
+      technologies,
+      workFormat,
+      dateFrom,
+      dateTo,
+      hasSalaryOnly,
+      salaryEstimates,
+      searchMode,
+    ],
   );
 
   const semanticStatusQ = useQuery({
@@ -241,6 +257,7 @@ export default function VacanciesPage() {
     date_from: dateFrom || null,
     date_to: dateTo || null,
     has_salary: hasSalaryOnly || null,
+    salary_estimates: hasSalaryOnly && salaryEstimates,
     search_mode: searchMode,
     sort_by: sortBy,
     sort_order: sortOrder,
@@ -264,6 +281,7 @@ export default function VacanciesPage() {
       date_from: p.date_from ?? null,
       date_to: p.date_to ?? null,
       has_salary: p.has_salary ? "true" : null,
+      salary_estimates: p.has_salary && p.salary_estimates ? "true" : null,
       search_mode: p.search_mode === "semantic" ? "semantic" : null,
       sort_by: presetSortBy,
       sort_order: p.sort_order === "asc" || p.sort_order === "desc" ? p.sort_order : null,
@@ -442,10 +460,25 @@ export default function VacanciesPage() {
           <input
             type="checkbox"
             checked={hasSalaryOnly}
-            onChange={(e) => updateParams({ has_salary: e.target.checked ? "true" : null })}
+            onChange={(e) =>
+              updateParams({ has_salary: e.target.checked ? "true" : null, salary_estimates: null })
+            }
           />
           Только с указанной зарплатой
         </label>
+        {hasSalaryOnly && (
+          <label
+            className="checkbox-row filters-salary-only"
+            title="Добавить вакансии без зарплаты, для которых есть оценка по похожим вакансиям. Саму оценку видно в карточке вакансии; в аналитику оценки не входят."
+          >
+            <input
+              type="checkbox"
+              checked={salaryEstimates}
+              onChange={(e) => updateParams({ salary_estimates: e.target.checked ? "true" : null })}
+            />
+            …и с оценкой по похожим
+          </label>
+        )}
       </div>
 
       <p className="field-label">Специализации (пусто — любые)</p>

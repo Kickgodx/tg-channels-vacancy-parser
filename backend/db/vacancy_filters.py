@@ -15,7 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.sql import Select
 
-from backend.db.models import VacancyRow, VacancySightingRow
+from backend.db.models import VacancyRow, VacancySalaryEstimateRow, VacancySightingRow
 from backend.schemas import VacancyQuery
 from tg_jobs_parser.config.schema import canonical_specializations, canonical_technologies
 
@@ -93,11 +93,23 @@ def vacancy_filter_conditions(
         conditions.append(document.op("@@")(ts_query))
     # «С зарплатой» — есть рублёвая сумма, как в метриках и аналитике: иначе список
     # и цифры над ним расходятся (зарплата в валюте без курса суммы не получает).
-    if query.has_salary is True:
-        conditions.append(c.detected_salary_avg_rub.isnot(None))
-    elif query.has_salary is False:
-        conditions.append(c.detected_salary_avg_rub.is_(None))
+    if query.has_salary is not None:
+        has_salary = c.detected_salary_avg_rub.isnot(None)
+        if query.salary_estimates:
+            # Оценка по похожим — только для списка: аналитика сбрасывает флаг (analytics_query).
+            has_salary = or_(has_salary, _has_estimate(c))
+        conditions.append(has_salary if query.has_salary else ~has_salary)
     return conditions
+
+
+def _has_estimate(c) -> ColumnElement[bool]:
+    e = VacancySalaryEstimateRow
+    return select(e.vacancy_id).where(e.vacancy_id == c.id, e.median.isnot(None)).exists()
+
+
+def analytics_query(query: VacancyQuery) -> VacancyQuery:
+    """Запрос агрегатов: оценки зарплаты в аналитику не входят — только указанные зарплаты."""
+    return query.model_copy(update={"salary_estimates": False}) if query.salary_estimates else query
 
 
 def sighting_filter_conditions(query: VacancyQuery) -> list[ColumnElement[bool]]:

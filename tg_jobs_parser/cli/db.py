@@ -107,6 +107,32 @@ def merge_duplicates_cmd(
     typer.echo(typer.style(f"Склеено копий: {merged} за {passes} проход(а)", fg=typer.colors.GREEN))
 
 
+@db_app.command("salary-estimate-eval")
+def salary_estimate_eval_cmd(
+    limit: int = typer.Option(0, "--limit", help="Проверить столько самых свежих вакансий; 0 — все"),
+) -> None:
+    """Точность оценки зарплаты: вакансии с зарплатой оцениваются так, будто её нет (только чтение)."""
+    try_load_dotenv()
+    from backend.services.embedding_service import current_model
+    from backend.services.salary_estimate_service import evaluate
+
+    with session_scope() as session:
+        r = evaluate(session, model=current_model(), limit=limit or None)
+        session.rollback()
+    typer.echo(f"Вакансий с зарплатой и эмбеддингом: {r.checked}, получили оценку: {r.estimated}")
+    if not r.estimated:
+        return
+    typer.echo(
+        f"Медианная ошибка: {r.median_ape:.1%}; зарплата внутри p25–p75: {r.within_iqr:.1%}; "
+        f"ошибка до 20%: {r.within_20pct:.1%}"
+    )
+    for grade, s in r.by_grade.items():
+        typer.echo(
+            f"  {grade:<10} n={s['n']:<5} медианная ошибка {s['median_ape']:.1%}, "
+            f"внутри p25–p75 {s['within_iqr']:.1%}, до 20% {s['within_20pct']:.1%}"
+        )
+
+
 @db_app.command("clean-vacancies")
 def clean_vacancies_cmd(
     apply: bool = typer.Option(False, "--apply", help="Применить; без флага — только показать план"),

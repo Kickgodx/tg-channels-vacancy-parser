@@ -100,13 +100,22 @@ _CLEANUP_INTERVAL_S = 60 * 60
 
 
 def _sweep_embeddings() -> None:
-    """Проход индексации эмбеддингов; ошибки — в лог, следующий проход через интервал."""
+    """Проход индексации эмбеддингов и оценок зарплаты по ним; ошибки — в лог, повтор через интервал."""
     try:
-        from backend.services.embedding_service import sweep_vacancies
+        from backend.services.embedding_service import _ai, sweep_vacancies
 
         sweep_vacancies()
     except Exception as e:
         logging.getLogger(__name__).warning("Индексация эмбеддингов не выполнена: %s", e)
+        return
+    try:
+        from backend.services.salary_estimate_service import sweep_estimates
+
+        cfg = _ai().embeddings
+        if cfg.enabled:
+            sweep_estimates(model=cfg.model)
+    except Exception as e:
+        logging.getLogger(__name__).warning("Оценки зарплаты не пересчитаны: %s", e)
 
 
 def _ensure_digest() -> None:

@@ -6,6 +6,7 @@ import MarketSalaryBlock from "./MarketSalaryBlock";
 import RecruiterContactBlock from "./RecruiterContactBlock";
 import InterviewPrepPanel from "./InterviewPrepPanel";
 import ResumeTailoringPanel from "./ResumeTailoringPanel";
+import SalaryEstimateBlock from "./SalaryEstimateBlock";
 import SimilarVacanciesBlock from "./SimilarVacanciesBlock";
 import VacancyFlagsBlock from "./VacancyFlagsBlock";
 import VacancyHistoryBlock from "./VacancyHistoryBlock";
@@ -458,6 +459,7 @@ export default function VacancyModal({ vacancy: incoming, index, onClose, resume
             void api.getVacancy(id).then((full) => setNested(toVacancyListItem(full)));
           }}
         />
+        {v.detected_salary_avg_rub == null && <SalaryEstimateBlock vacancyId={listItem.id} onOpen={setNested} />}
         <MarketSalaryBlock vacancyId={listItem.id} />
         <SimilarVacanciesBlock vacancyId={listItem.id} onOpen={setNested} />
         <hr />
