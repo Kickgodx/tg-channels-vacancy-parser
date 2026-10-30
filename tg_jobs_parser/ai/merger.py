@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.config.schema import AppConfig, canonical_technologies
+from tg_jobs_parser.config.schema import AppConfig, canonical_technologies, clean_technology_names
 from tg_jobs_parser.extraction.salary_period import (
     apply_hourly_currency_from_text,
     normalize_annual_salary_to_monthly,
@@ -120,7 +120,8 @@ def merge_rules_and_ai(
         updates["application_urls"] = rules_urls or ai_urls
 
     if ai.technologies:
-        updates["technologies"] = canonical_technologies(vacancy.technologies + ai.technologies)
+        # Словарь LLM открытый: практики («автоматизированное тестирование») и фразы — не технологии.
+        updates["technologies"] = canonical_technologies(vacancy.technologies + clean_technology_names(ai.technologies))
 
     if ai.required_experience and (_use_ai("required_experience") or not vacancy.required_experience):
         updates["required_experience"] = ai.required_experience

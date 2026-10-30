@@ -297,6 +297,120 @@ def canonical_technologies(names: list[str]) -> list[str]:
     return out
 
 
+# Чистка технологий из открытых источников (key_skills HH, ответ LLM) — при записи вакансии,
+# не в ``canonical_technologies``: та применяется и к фильтрам пользователя.
+# Русские слова без латиницы и цифр («Функциональное тестирование», «Английский язык»,
+# «Коммуникабельность») — практики и навыки, а не технологии; аббревиатуры (ООП, СКД, ЗУП) — оставляем.
+_CYRILLIC_ONLY_RE = re.compile(r"^[а-яё\-]+(?:\s+[а-яё\-]+)*$", re.IGNORECASE)
+# Требование фразой: «Опыт работы с …», «Знание …», «Навык написания …».
+_SENTENCE_RE = re.compile(
+    r"^(?:опыт|знани|навык|умени|понимани|владени|готовност|желательно|участи|"
+    r"experience|knowledge|understanding|ability)",
+    re.IGNORECASE,
+)
+# Список в одном навыке: «Python, FastAPI; Kafka», «UWP / Avalonia / Qt», «C# или C++»,
+# «pytest (или unittest)». C#/.NET без пробелов — одно имя.
+# Английское «and» не делит: «Identity and Access Management» — один термин.
+_LIST_SPLIT_RE = re.compile(r"\s*[,;()]\s*|\s+/\s+|\s+(?:или|либо|or|и)\s+", re.IGNORECASE)
+# Союз в начале части после скобки: «pytest (или unittest)» → «или unittest».
+_LEADING_CONJUNCTION_RE = re.compile(r"^(?:или|либо|or|и)\s+", re.IGNORECASE)
+# Подпись категории: «Monitoring: Sentry», «САПР — Altium» — разбирается то, что после неё.
+_LABEL_RE = re.compile(r"^[^:—–]{1,30}?(?::|\s[—–]\s)\s*")
+_PARENS_RE = re.compile(r"\(([^()]*)\)")
+# Версия в конце: «Python 3.13+», «Vue 3», «Angular v17» — отрезается, только если остаётся
+# известная технология: в «ISO 27001», «OWASP Top 10», «SOC 2» число — часть названия.
+_VERSION_TAIL_RE = re.compile(r"\s+v?\d+(?:\.\d+)*\+?$", re.IGNORECASE)
+_CYRILLIC_RE = re.compile(r"[а-яё]", re.IGNORECASE)
+# Поиск технологий каталога внутри фразы: длинные имена раньше («Spring Boot» до «Spring»);
+# однобуквенные (C, R) в тексте неотличимы от букв.
+_CATALOG_SCAN: list[tuple[str, str]] = sorted(
+    ((k, v) for k, v in {**_TECHNOLOGY_CATALOG, **TECHNOLOGY_ALIASES}.items() if len(k) > 1),
+    key=lambda kv: -len(kv[0]),
+)
+_MAX_TECH_WORDS = 4
+_MAX_TECH_CHARS = 40
+
+
+def _is_practice(name: str) -> bool:
+    if not _CYRILLIC_ONLY_RE.match(name):
+        return False
+    return " " in name or not name.isupper()
+
+
+def _known_technology(name: str) -> str | None:
+    return technology_name(name) or _technology_family(name)
+
+
+def _catalog_mentions(text: str) -> list[str]:
+    """Технологии каталога, названные в тексте фразы целым словом («…на Python/Java с Kafka»)."""
+    found: list[tuple[int, str]] = []
+    for key, canon in _CATALOG_SCAN:
+        m = re.search(rf"(?<![\w.+#]){re.escape(key)}(?![\w+#])", text, re.IGNORECASE)
+        if m:
+            found.append((m.start(), canon))
+    return [canon for _, canon in sorted(found)]
+
+
+def _tool_names(part: str) -> list[str]:
+    """Часть навыка → имя технологии; из фразы — технологии каталога в ней; практика — ничего."""
+    # Точка слева — часть имени (.NET), справа — конец фразы («Kafka.»).
+    part = _LEADING_CONJUNCTION_RE.sub("", part.strip(" :;,-—–\"'«»").rstrip("."))
+    if not part:
+        return []
+    known = _known_technology(part)
+    if known:
+        return [known]
+    version = _VERSION_TAIL_RE.search(part)
+    if version:
+        known = _known_technology(part[: version.start()])
+        if known:
+            return [known]
+    if _is_practice(part):
+        return []
+    # Русская фраза с латиницей («Тестировании бэкенда на C++») или слишком длинное имя —
+    # не название технологии, но технологии каталога в ней есть.
+    words = len(part.split())
+    if (_CYRILLIC_RE.search(part) and words > 1) or words > _MAX_TECH_WORDS or len(part) > _MAX_TECH_CHARS:
+        return _catalog_mentions(part)
+    return [part]
+
+
+def clean_technology_names(names: list[str]) -> list[str]:
+    """Технологии из открытого словаря без практик, требований-фраз и склеенных списков.
+
+    «Python 3.13+, FastAPI» → Python, FastAPI; «Опыт работы с мониторингом (Grafana, Kibana)» →
+    Grafana, Kibana; «Функциональное тестирование», «Английский язык» → ничего. Результат —
+    в каноническом написании (``canonical_technologies``).
+    """
+    out: list[str] = []
+    for raw in names:
+        name = " ".join(str(raw).split())
+        if not name:
+            continue
+        known = _known_technology(name)
+        if known:
+            out.append(known)
+            continue
+        label = None if _SENTENCE_RE.match(name) else _LABEL_RE.match(name)
+        if label and len(name) > label.end():
+            name = name[label.end() :]
+            known = _known_technology(name)
+            if known:
+                out.append(known)
+                continue
+        parts = _LIST_SPLIT_RE.split(name)
+        if _SENTENCE_RE.match(name) or ":" in name or (len(parts) == 1 and len(name) > _MAX_TECH_CHARS):
+            # Из фразы — только перечисленное в скобках и технологии каталога.
+            for group in _PARENS_RE.findall(name):
+                for p in _LIST_SPLIT_RE.split(group):
+                    out.extend(_tool_names(p))
+            out.extend(_catalog_mentions(name))
+            continue
+        for p in parts:
+            out.extend(_tool_names(p))
+    return canonical_technologies(out)
+
+
 def _technologies_in_spec(name: str) -> tuple[list[str], bool]:
     """Технологии в имени специализации и признак «роль разработчика» (Python Developer)."""
     if "/" in name:

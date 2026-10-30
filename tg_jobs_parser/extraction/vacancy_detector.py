@@ -21,12 +21,40 @@ _DEV_WORDS = re.compile(
     re.I,
 )
 
-_EXCLUDE = re.compile(
-    r"\b("
-    r"ищу\s+работу|ищу\s+вакансию|резюме|resume\s+cv|cv\s+attached|"
-    r"курс|обучение|школа|bootcamp|ментор|подборк|репост|"
-    r"#резюме|#ищуработу"
-    r")\b",
+# Не вакансия, что бы ни было в тексте: пост соискателя (хэштеги, «ищу работу») или подборка
+# чужих вакансий (одна строка на десяток ролей). Текст — после ``normalize_for_match`` (ё → е).
+_HARD_EXCLUDE = re.compile(
+    r"\bищу\s+(?:работу|вакансию|удаленную\s+работу|проект)\b"
+    r"|\bresume\s+cv\b|\bcv\s+attached\b"
+    r"|\bподборк[аиуе]\s+(?:\S+\s+)?вакансий\b|\bвакансий\s+дня\b|\bдайджест\s+вакансий\b"
+    r"|\bеще\s+\d+\s+ваканси"
+    r"|(?<![\w#])#(?:дайджест|digest|подборка)\w*",
+    re.I,
+)
+
+# Хэштеги соискателя. ``#cv`` бывает и «computer vision» в вакансии — поэтому хэштеги не
+# исключают пост, где есть хэштег вакансии (``#вакансия``, ``#vacancy``, ``#hiring``…).
+_SEEKER_TAGS = re.compile(
+    r"(?<![\w#])#(?:resume|cv|резюме|ищуработу\w*|ищу_работу|opentowork|lookingforjob|lookingforwork)(?!\w)",
+    re.I,
+)
+_VACANCY_TAGS = re.compile(r"(?<![\w#])#(?:вакансия|вакансии|vacancy|vacancies|hiring|job|jobs|работа)(?!\w)", re.I)
+
+# Курсы, школы, менторство — обычно реклама обучения. Но «присылайте резюме» и «оплачиваем
+# обучение» есть примерно в каждой пятой настоящей вакансии, поэтому эти слова исключают пост,
+# только если в нём нет ни признаков найма (``_STRONG_VACANCY``), ни названия роли (``_ROLE_WORDS``):
+# реклама курса, дошедшая до LLM, стоит дешевле потерянной вакансии.
+_SOFT_EXCLUDE = re.compile(
+    r"\b(?:курс\w*|обучени\w*|школ\w*|bootcamp\w*|ментор\w*|подборк\w*|репост\w*|резюме)\b",
+    re.I,
+)
+# Роль в тексте — только для обхода ``_SOFT_EXCLUDE`` (в баллы не входит): у тестировщиков и
+# аналитиков нет слов developer / engineer.
+_ROLE_WORDS = re.compile(
+    r"\b(?:developer|engineer|разработчик\w*|инженер\w*|программист\w*|тестировщик\w*|тестировани\w*|"
+    r"qa|aqa|sdet|tester|analyst|аналитик\w*|devops|sre|architect|архитектор\w*|designer|дизайнер\w*|"
+    r"team\s*lead|тимлид\w*|руководител\w*|специалист\w*|backend|frontend|fullstack|full-stack|"
+    r"data\s+scientist|product\s+manager|project\s+manager)\b",
     re.I,
 )
 
@@ -56,6 +84,18 @@ _COMPANY_HINT = re.compile(
 )
 
 
+def is_not_vacancy_post(raw_text: str) -> bool:
+    """Пост соискателя или подборка вакансий — не вакансия независимо от остального текста."""
+    return _not_vacancy(normalize_for_match(raw_text))
+
+
+def _not_vacancy(t: str) -> bool:
+    """``t`` — текст после ``normalize_for_match``."""
+    if _HARD_EXCLUDE.search(t):
+        return True
+    return bool(_SEEKER_TAGS.search(t)) and not _VACANCY_TAGS.search(t)
+
+
 def compute_vacancy_score(raw_text: str) -> tuple[int, str, int]:
     """
     Возвращает ``(score, reason_human, substantive_score)``.
@@ -70,15 +110,20 @@ def compute_vacancy_score(raw_text: str) -> tuple[int, str, int]:
     substantive = 0
     hints: list[str] = []
 
-    if _EXCLUDE.search(t):
+    if _not_vacancy(t):
         return 0, "exclude_keywords", 0
 
-    if _STRONG_VACANCY.search(raw_text.lower()):
+    strong = bool(_STRONG_VACANCY.search(raw_text.lower()))
+    dev_role = bool(_DEV_WORDS.search(raw_text.lower()))
+    if not strong and not _ROLE_WORDS.search(t) and _SOFT_EXCLUDE.search(t):
+        return 0, "exclude_keywords", 0
+
+    if strong:
         score += 3
         substantive += 3
         hints.append("vacancy_markers")
 
-    if _DEV_WORDS.search(raw_text.lower()):
+    if dev_role:
         score += 2
         substantive += 2
         hints.append("dev_role_words")
