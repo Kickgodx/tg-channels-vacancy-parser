@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
+import { Link } from "react-router-dom";
 import CareerPathsPanel from "../components/CareerPathsPanel";
 import ResumeMarketPanel from "../components/ResumeMarketPanel";
 import SkillGapsPanel from "../components/SkillGapsPanel";
@@ -166,6 +167,9 @@ export default function ResumesPage() {
             <button type="button" className="secondary" onClick={() => openEdit(selected)}>
               Редактировать
             </button>
+            <Link className="btn-link" to={`/resumes/${selected.id}/report`}>
+              Карьерный отчёт (PDF)
+            </Link>
           </div>
         </div>
       )}

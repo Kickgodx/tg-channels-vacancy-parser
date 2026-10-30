@@ -1344,3 +1344,141 @@ tr.selected-row td {
   gap: 0.5rem;
   align-items: center;
 }
+
+/* Карьерный отчёт (/resumes/:id/report): экран и печать / «Сохранить как PDF». */
+.career-report {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.report-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.report-header h2 {
+  margin: 0 0 0.25rem;
+}
+
+.report-section {
+  margin: 1.25rem 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.report-section h3 {
+  margin: 0 0 0.5rem;
+}
+
+.report-section table {
+  width: 100%;
+  font-size: 0.9rem;
+}
+
+.report-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.4fr;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.report-list {
+  margin: 0.25rem 0;
+  padding-left: 1.1rem;
+}
+
+.report-bullets {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.report-bullets li {
+  margin: 0.25rem 0;
+}
+
+.report-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.report-chip {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #f1f3f5;
+  font-size: 0.85rem;
+}
+
+.report-chip.have {
+  background: #d3f9d8;
+}
+
+@media (max-width: 700px) {
+  .report-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  :root,
+  body,
+  .app-shell {
+    background: #fff;
+    margin: 0;
+    padding: 0;
+  }
+
+  .career-report {
+    max-width: none;
+  }
+
+  .report-section {
+    border: 0;
+    border-top: 1px solid #ced4da;
+    border-radius: 0;
+    padding: 0.5rem 0;
+  }
+
+  .report-section h3,
+  .report-section > .caption {
+    break-after: avoid;
+  }
+
+  .stat-tiles,
+  .report-columns,
+  .report-bullets {
+    break-inside: avoid;
+  }
+
+  .report-section table {
+    break-inside: auto;
+  }
+
+  .report-section tr {
+    break-inside: avoid;
+  }
+
+  .career-report a {
+    color: inherit;
+  }
+
+  .stat-tile,
+  .report-chip,
+  .market-strip * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
+
+@page {
+  size: A4;
+  margin: 14mm 12mm;
+}
