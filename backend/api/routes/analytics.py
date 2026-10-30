@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db, verify_api_key
 from backend.api.params import analytics_filters
-from backend.db import analytics, technology_analytics, vacancy_lifetime
+from backend.db import analytics, technology_analytics, technology_graph, vacancy_lifetime
 from backend.db.aggregate_cache import cached_aggregate
 from backend.schemas import (
     CompanyAnalytics,
@@ -13,6 +13,7 @@ from backend.schemas import (
     SalaryAnalytics,
     SourceAnalytics,
     TechnologyAnalytics,
+    TechnologyGraph,
     VacancyQuery,
 )
 
@@ -66,6 +67,18 @@ def technology_stats(
     Фильтр по технологии не применяется — премия под ним не имеет смысла.
     """
     return cached_aggregate("technologies", query, lambda: technology_analytics.technology_analytics(db, query))
+
+
+@router.get("/technology-graph", response_model=TechnologyGraph)
+def technology_graph_stats(
+    query: VacancyQuery = Depends(analytics_filters),
+    nodes: int = Query(default=technology_graph.DEFAULT_NODES, ge=5, le=technology_graph.MAX_NODES),
+    db: Session = Depends(get_db),
+) -> TechnologyGraph:
+    """Какие технологии просят вместе: частые технологии и пары с lift (свой фильтр по технологии не применяется)."""
+    return cached_aggregate(
+        "technology_graph", query, lambda: technology_graph.technology_graph(db, query, nodes=nodes), nodes=nodes
+    )
 
 
 @router.get("/lifetime", response_model=LifetimeAnalytics)

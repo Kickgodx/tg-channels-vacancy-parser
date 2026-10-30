@@ -271,6 +271,85 @@ button:disabled {
   grid-column: 1 / -1;
 }
 
+.tech-graph-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  align-items: center;
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.tech-graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  color: #495057;
+}
+
+.tech-graph-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.tech-graph {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 1rem;
+  align-items: start;
+}
+
+.tech-graph svg {
+  width: 100%;
+  height: auto;
+  grid-column: 1;
+  background: #fbfcfd;
+  border-radius: 8px;
+}
+
+.tech-graph:not(:has(.tech-graph-side)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tech-graph-edge {
+  stroke: #868e96;
+}
+
+.tech-graph-edge.on {
+  stroke: #1a1a2e;
+}
+
+.tech-graph-node {
+  cursor: pointer;
+}
+
+.tech-graph-node text {
+  font-size: 11px;
+  fill: #1a1a2e;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+  pointer-events: none;
+}
+
+.tech-graph-side {
+  font-size: 0.9rem;
+}
+
+.tech-graph-side ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+}
+
+@media (max-width: 800px) {
+  .tech-graph {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 800px) {
   .charts-grid {
     grid-template-columns: 1fr;

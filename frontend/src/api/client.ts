@@ -41,6 +41,7 @@ import type {
   MarketSalary,
   SalaryEstimate,
   TechnologyAnalytics,
+  TechnologyGraph,
   RunCreateBody,
   RunDetail,
   RunStatus,
@@ -763,6 +764,12 @@ export const api = {
     appendSearchParams(q, params);
     const qs = q.toString();
     return request<TechnologyAnalytics>(`/analytics/technologies${qs ? `?${qs}` : ""}`);
+  },
+  getTechnologyGraph: (params?: VacancyQueryParams, nodes = 40) => {
+    const q = new URLSearchParams();
+    appendSearchParams(q, params);
+    q.set("nodes", String(nodes));
+    return request<TechnologyGraph>(`/analytics/technology-graph?${q.toString()}`);
   },
   getLifetimeAnalytics: (params?: VacancyQueryParams) => {
     const q = new URLSearchParams();

@@ -515,6 +515,32 @@ class TechnologyAnalytics(BaseModel):
     salary_display: SalaryDisplayMeta | None = None
 
 
+class TechnologyGraphNode(BaseModel):
+    name: str
+    count: int = Field(description="Вакансий с технологией под фильтрами.")
+    share: float = Field(description="Доля вакансий под фильтрами (0–1).")
+    role: str | None = Field(default=None, description="Специализация, с которой технология встречается чаще всего.")
+    role_share: float = Field(default=0.0, description="Доля вакансий технологии с этой специализацией.")
+
+
+class TechnologyGraphEdge(BaseModel):
+    source: str
+    target: str
+    count: int = Field(description="Вакансий, где есть обе технологии.")
+    lift: float = Field(description="Во сколько раз пара встречается чаще, чем при независимости (1 — как случайно).")
+
+
+class TechnologyGraph(BaseModel):
+    """Какие технологии просят вместе: узлы — частые технологии, рёбра — пары с lift."""
+
+    total: int = Field(description="Вакансий под фильтрами.")
+    nodes: list[TechnologyGraphNode] = Field(default_factory=list)
+    edges: list[TechnologyGraphEdge] = Field(
+        default_factory=list, description="Пары не реже min_pair_count, по убыванию lift."
+    )
+    min_pair_count: int
+
+
 class LifetimeBucket(BaseModel):
     label: str
     min_days: int
