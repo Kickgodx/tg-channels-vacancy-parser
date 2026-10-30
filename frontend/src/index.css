@@ -739,6 +739,12 @@ tr.clickable:hover {
   margin: 0.35rem 0;
 }
 
+.salary-estimate-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+}
+
 .market-strip {
   position: relative;
   height: 22px;

@@ -201,6 +201,13 @@ class VacancyQuery(BaseModel):
         default=None,
         description="True — только вакансии с рублёвой суммой зарплаты (как в аналитике), False — только без неё.",
     )
+    salary_estimates: bool = Field(
+        default=False,
+        description=(
+            "Вместе с has_salary: оценка зарплаты (vacancy_salary_estimates) считается зарплатой — "
+            "true добавляет вакансии с оценкой, false убирает их. Аналитика флаг игнорирует."
+        ),
+    )
     q: str | None = Field(default=None, description="Поиск по cleaned_text (ILIKE)")
     include_archived: bool = Field(
         default=False,
@@ -427,6 +434,30 @@ class MarketSalaryOut(BaseModel):
         default=None, description="Доля похожих с зарплатой не выше, чем у вакансии (0–1)."
     )
     window_days: int
+    salary_display: SalaryDisplayMeta | None = None
+
+
+class SalaryEstimateOut(BaseModel):
+    """Ориентировочная зарплата вакансии без вилки — по ближайшим по смыслу вакансиям с зарплатой."""
+
+    vacancy_id: str
+    status: Literal["ready", "insufficient", "pending", "has_salary", "unavailable"] = Field(
+        description=(
+            "ready — оценка есть; insufficient — похожих с зарплатой меньше min_neighbours; pending — у "
+            "вакансии ещё нет эмбеддинга; has_salary — зарплата указана, оценка не нужна; unavailable — "
+            "эмбеддинги выключены."
+        )
+    )
+    grade: str | None = Field(default=None, description="Грейд, среди которого искали; null — среди всех.")
+    neighbours: int = 0
+    min_neighbours: int
+    p25: float | None = None
+    median: float | None = None
+    p75: float | None = None
+    window_days: int
+    examples: list[VacancyListItem] = Field(
+        default_factory=list, description="Ближайшие из похожих (до 5), по которым считали."
+    )
     salary_display: SalaryDisplayMeta | None = None
 
 

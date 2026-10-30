@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_current_user, get_db, verify_api_key
-from backend.api.params import vacancy_filters
+from backend.api.params import analytics_filters
 from backend.db import analytics, technology_analytics, vacancy_lifetime
 from backend.db.aggregate_cache import cached_aggregate
 from backend.schemas import (
@@ -25,7 +25,7 @@ router = APIRouter(
 
 @router.get("/salaries", response_model=SalaryAnalytics)
 def salary_analytics(
-    query: VacancyQuery = Depends(vacancy_filters),
+    query: VacancyQuery = Depends(analytics_filters),
     db: Session = Depends(get_db),
 ) -> SalaryAnalytics:
     """Квантили зарплат по грейдам/формату/специализациям, месячная динамика, распределение."""
@@ -34,7 +34,7 @@ def salary_analytics(
 
 @router.get("/sources", response_model=SourceAnalytics)
 def source_stats(
-    query: VacancyQuery = Depends(vacancy_filters),
+    query: VacancyQuery = Depends(analytics_filters),
     db: Session = Depends(get_db),
 ) -> SourceAnalytics:
     """Качество каналов: уникальные вакансии, дубли, средний score, покрытие зарплатой."""
@@ -43,7 +43,7 @@ def source_stats(
 
 @router.get("/companies", response_model=CompanyAnalytics)
 def company_stats(
-    query: VacancyQuery = Depends(vacancy_filters),
+    query: VacancyQuery = Depends(analytics_filters),
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> CompanyAnalytics:
@@ -58,7 +58,7 @@ def company_stats(
 
 @router.get("/technologies", response_model=TechnologyAnalytics)
 def technology_stats(
-    query: VacancyQuery = Depends(vacancy_filters),
+    query: VacancyQuery = Depends(analytics_filters),
     db: Session = Depends(get_db),
 ) -> TechnologyAnalytics:
     """Технологии: зарплатная премия с поправкой на грейд, спрос по месяцам, рост и падение.
@@ -70,7 +70,7 @@ def technology_stats(
 
 @router.get("/lifetime", response_model=LifetimeAnalytics)
 def lifetime_stats(
-    query: VacancyQuery = Depends(vacancy_filters),
+    query: VacancyQuery = Depends(analytics_filters),
     db: Session = Depends(get_db),
 ) -> LifetimeAnalytics:
     """Жизнь вакансии по публикациям в Telegram: повторные публикации, срок, роли, компании, долгожители."""

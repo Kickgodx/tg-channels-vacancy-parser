@@ -10,9 +10,10 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated, Literal
 
-from fastapi import Query
+from fastapi import Depends, Query
 from pydantic import BeforeValidator
 
+from backend.db.vacancy_filters import analytics_query
 from backend.errors import CODE_VALIDATION, http_error
 from backend.schemas import VacancyQuery, sort_pair_error
 
@@ -61,6 +62,7 @@ def vacancy_filters(
     date_from: Annotated[date | None, _EmptyAsNone, Query(description="YYYY-MM-DD")] = None,
     date_to: Annotated[date | None, _EmptyAsNone, Query(description="YYYY-MM-DD")] = None,
     has_salary: bool | None = None,
+    salary_estimates: bool = False,
     q: Annotated[str | None, Query(max_length=500)] = None,
     include_archived: bool = False,
     search_mode: Literal["text", "semantic"] = "text",
@@ -82,12 +84,18 @@ def vacancy_filters(
         date_from=date_from,
         date_to=date_to,
         has_salary=has_salary,
+        salary_estimates=salary_estimates,
         q=q,
         include_archived=include_archived,
         search_mode=search_mode,
         semantic_vector=semantic_vector,
         embedding_model=embedding_model,
     )
+
+
+def analytics_filters(query: Annotated[VacancyQuery, Depends(vacancy_filters)]) -> VacancyQuery:
+    """Фильтры агрегатов (метрики, аналитика): оценки зарплаты в них не входят, флаг ``salary_estimates`` сброшен."""
+    return analytics_query(query)
 
 
 def _semantic_vector(q: str) -> tuple[list[float], str]:

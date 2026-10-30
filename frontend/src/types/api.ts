@@ -222,6 +222,8 @@ export interface SavedFilterParams {
   date_from?: string | null;
   date_to?: string | null;
   has_salary?: boolean | null;
+  /** Вместе с has_salary: вакансии с оценкой зарплаты по похожим считаются «с зарплатой». */
+  salary_estimates?: boolean;
   include_archived?: boolean;
   search_mode?: "text" | "semantic";
   sort_by?: string;
@@ -858,6 +860,21 @@ export interface MarketSalary {
   /** Доля похожих с зарплатой не выше, чем у вакансии (0–1). */
   percentile: number | null;
   window_days: number;
+}
+
+/** Оценка зарплаты вакансии без вилки (GET /vacancies/{id}/salary-estimate). */
+export interface SalaryEstimate {
+  vacancy_id: string;
+  status: "ready" | "insufficient" | "pending" | "has_salary" | "unavailable";
+  /** Грейд, среди которого искали похожих; null — среди всех. */
+  grade: string | null;
+  neighbours: number;
+  min_neighbours: number;
+  p25: number | null;
+  median: number | null;
+  p75: number | null;
+  window_days: number;
+  examples: VacancyListItem[];
 }
 
 export interface NamedCount {

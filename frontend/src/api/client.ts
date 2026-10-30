@@ -39,6 +39,7 @@ import type {
   VacancyFlags,
   VacancyHistory,
   MarketSalary,
+  SalaryEstimate,
   TechnologyAnalytics,
   RunCreateBody,
   RunDetail,
@@ -667,6 +668,8 @@ export const api = {
   },
   getMarketSalary: (id: string) =>
     request<MarketSalary>(`/vacancies/${encodeURIComponent(id)}/market-salary`),
+  getSalaryEstimate: (id: string) =>
+    request<SalaryEstimate>(`/vacancies/${encodeURIComponent(id)}/salary-estimate`),
 
   /** Технологии по числу вакансий под фильтрами (собственный выбор технологий не учитывается). */
   getTechnologyFacets: (params?: VacancyQueryParams) => {
