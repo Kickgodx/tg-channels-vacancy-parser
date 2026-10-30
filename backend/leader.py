@@ -38,10 +38,6 @@ class LeaderLock:
         self._engine: Engine | None = None
         self._conn: Connection | None = None
 
-    @property
-    def held(self) -> bool:
-        return self._conn is not None
-
     def _get_engine(self) -> Engine:
         if self._engine is None:
             # Через модуль: OTel-инструментация подменяет sqlalchemy.create_engine после импорта.

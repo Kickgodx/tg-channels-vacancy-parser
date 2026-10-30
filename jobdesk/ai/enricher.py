@@ -351,10 +351,3 @@ class AIEnrichmentService:
         )
         if cost_line:
             _LOG.info(cost_line)
-
-
-def enrich_vacancy_with_ai(
-    vacancy: Vacancy,
-    service: AIEnrichmentService,
-) -> Vacancy | None:
-    return service.enrich(vacancy)
