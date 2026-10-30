@@ -4,19 +4,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import tg_jobs_parser.parse_runner as parse_runner
-from tg_jobs_parser.config.schema import (
+import jobdesk.parse_runner as parse_runner
+from jobdesk.config.schema import (
     AppConfig,
     FxConfig,
     ParserConfig,
     SourcesConfig,
 )
-from tg_jobs_parser.deduplication.deduplicator import (
+from jobdesk.deduplication.deduplicator import (
     VacancyDeduplicator,
     deduplicate_vacancies,
 )
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.parsers.base import RawPost
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.parsers.base import RawPost
 
 
 def _v(text: str, vid: str) -> Vacancy:
@@ -187,7 +187,7 @@ def test_no_sink_still_returns_full_result(monkeypatch):
 
 def test_progress_snapshot_carries_only_preview_tail(monkeypatch):
     """Снимок прогресса несёт хвост уникальных, а не копию всех (без partial-батчей)."""
-    from tg_jobs_parser.parse_progress import PROGRESS_PREVIEW_LIMIT
+    from jobdesk.parse_progress import PROGRESS_PREVIEW_LIMIT
 
     posts = [_post(i) for i in range(PROGRESS_PREVIEW_LIMIT + 15)]
     snaps = []

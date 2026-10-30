@@ -1,6 +1,6 @@
 """Prometheus-метрики доменных событий backend.
 
-Дополняет ``tg_jobs_parser.observability.llm_metrics`` (LLM-вызовы) и
+Дополняет ``jobdesk.observability.llm_metrics`` (LLM-вызовы) и
 Instrumentator (HTTP): прогоны парсинга, UPSERT вакансий, TTL-архивация,
 ручной импорт, матчинг резюме↔вакансия, auth, загрузки курсов ЦБ.
 
@@ -100,7 +100,7 @@ VACANCY_ARCHIVED = Counter(
 
 
 # Нули для известных лейблов: иначе первый прирост серии не виден increase()/rate()
-# (см. tg_jobs_parser/observability/parse_metrics.py).
+# (см. jobdesk/observability/parse_metrics.py).
 for _status in ("completed", "partial", "failed", "cancelled"):
     PARSE_RUNS.labels(status=_status)
 for _result in ("inserted", "updated"):
@@ -114,8 +114,8 @@ def init_llm_model_series() -> None:
     заведённые им серии не успевают попасть в scrape до первого инкремента.
     """
     from backend.settings import get_settings
-    from tg_jobs_parser.config.loader import load_config
-    from tg_jobs_parser.observability.llm_metrics import init_model_series
+    from jobdesk.config.loader import load_config
+    from jobdesk.observability.llm_metrics import init_model_series
 
     try:
         init_model_series(load_config(get_settings().config_path).ai.resolved_models())

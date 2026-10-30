@@ -10,8 +10,8 @@ from backend.db.models import VacancyRow
 from backend.db.vacancy_filters import apply_vacancy_filters
 from backend.schemas import VacancyQuery
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.models.metrics import (
+from jobdesk.config.loader import load_config
+from jobdesk.models.metrics import (
     MetricsSummary,
     SalaryDisplayMeta,
     SalaryStats,

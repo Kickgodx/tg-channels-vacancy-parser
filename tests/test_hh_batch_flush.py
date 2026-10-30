@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 from backend.services import hh_sync_service
 from backend.settings import Settings
-from tg_jobs_parser.config.schema import AppConfig, HhConfig, HhSearchConfig
-from tg_jobs_parser.hh.models import VacancyShort
+from jobdesk.config.schema import AppConfig, HhConfig, HhSearchConfig
+from jobdesk.hh.models import VacancyShort
 
 
 def test_hh_sync_flushes_in_batches(monkeypatch):
@@ -42,7 +42,7 @@ def test_hh_sync_flushes_in_batches(monkeypatch):
             yield page
 
         def get_vacancy(self, vacancy_id: str):
-            from tg_jobs_parser.hh.models import VacancyDetail
+            from jobdesk.hh.models import VacancyDetail
 
             return VacancyDetail.model_validate(
                 {

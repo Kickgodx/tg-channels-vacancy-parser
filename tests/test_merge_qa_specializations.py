@@ -7,8 +7,8 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 
 from backend.db.migrate import alembic_ini_path
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.config.schema import AppConfig, FiltersConfig, canonical_specializations
+from jobdesk.ai.schema import VacancyAIExtraction
+from jobdesk.config.schema import AppConfig, FiltersConfig, canonical_specializations
 
 
 def test_canonical_specializations_dedupes_in_order():

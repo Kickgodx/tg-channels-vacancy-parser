@@ -1,8 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
-from tg_jobs_parser.config.schema import AppConfig, ParserConfig
-from tg_jobs_parser.deduplication.deduplicator import VacancyDeduplicator, deduplicate_vacancies
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.config.schema import AppConfig, ParserConfig
+from jobdesk.deduplication.deduplicator import VacancyDeduplicator, deduplicate_vacancies
+from jobdesk.models.vacancy import Vacancy
 
 
 def _v(text: str, vid: str) -> Vacancy:

@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from tg_jobs_parser.hh.dedup import dedupe_vacancies, normalize_text, vacancy_key
-from tg_jobs_parser.hh.models import VacancyShort
+from jobdesk.hh.dedup import dedupe_vacancies, normalize_text, vacancy_key
+from jobdesk.hh.models import VacancyShort
 
 
 def _vacancy_dict(**overrides: Any) -> dict[str, Any]:

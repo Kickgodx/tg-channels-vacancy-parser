@@ -12,9 +12,9 @@ from backend.db import repository as repo
 from backend.db.models import ParseRunVacancyRow, VacancyRow, VacancySightingRow
 from backend.db.session import session_scope
 from backend.services.near_duplicate_merge import apply_merges, find_near_duplicates, merge_all
-from tg_jobs_parser.config.schema import AppConfig
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.config.schema import AppConfig
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.hashing import vacancy_content_id
 
 _POST = (
     "Компания Acme ищет QA инженера в команду платежей. Удалёнка, полный день. Требования: "
@@ -124,7 +124,7 @@ def test_parse_job_passes_known_vacancies(admin_client, monkeypatch):
     import time
 
     from backend.settings import get_settings
-    from tg_jobs_parser.models.parse_result import ParseResult
+    from jobdesk.models.parse_result import ParseResult
 
     run = None
     with session_scope() as s:

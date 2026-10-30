@@ -16,8 +16,8 @@ from backend.db.company_profile import (
 from backend.db.models import VacancyRow, VacancySightingRow
 from backend.db.vacancy_mapper import vacancy_to_row
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.company import company_key
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.company import company_key
 
 _ids = iter(range(1, 1_000_000))
 _DAY = datetime(2026, 9, 1, tzinfo=UTC)

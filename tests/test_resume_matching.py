@@ -15,8 +15,8 @@ from backend.db.models import VacancyMatchRow, VacancyRow
 from backend.db.session import session_scope
 from backend.schemas import VacancyQuery
 from backend.services import llm_result_freshness, match_service
-from tg_jobs_parser.ai.clients.openrouter import _parse_match
-from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION, build_match_messages
+from jobdesk.ai.clients.openrouter import _parse_match
+from jobdesk.ai.prompts import MATCH_PROMPT_VERSION, build_match_messages
 
 
 def _vacancy(vid: str, text: str, score: int = 0) -> VacancyRow:
@@ -218,7 +218,7 @@ def test_match_extraction_tolerates_sloppy_llm_output():
 
 
 def test_calculate_overall_score_weights():
-    from tg_jobs_parser.ai.schema import (
+    from jobdesk.ai.schema import (
         MatchBreakdown,
         calculate_overall_score,
     )
@@ -235,7 +235,7 @@ def test_calculate_overall_score_weights():
 
 
 def test_calculate_overall_score_critical_penalty():
-    from tg_jobs_parser.ai.schema import (
+    from jobdesk.ai.schema import (
         MatchBreakdown,
         SkillMatch,
         calculate_overall_score,
@@ -266,8 +266,8 @@ def test_calculate_overall_score_critical_penalty():
 @pytest.fixture
 def counting_match_llm(monkeypatch):
     """Реальный ``match_single`` с подменённым клиентом: считает вызовы LLM."""
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
-    from tg_jobs_parser.ai.schema import VacancyMatchExtraction
+    from jobdesk.ai.clients.openrouter import LLMUsage
+    from jobdesk.ai.schema import VacancyMatchExtraction
 
     calls: list[str] = []
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
+from jobdesk.ai.schema import VacancyAIExtraction
 
 
 def test_preserves_usd_hour_suffix():

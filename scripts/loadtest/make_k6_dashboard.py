@@ -129,7 +129,7 @@ dashboard = {
     "panels": panels,
     "refresh": "10s",
     "schemaVersion": 39,
-    "tags": ["tg-jobs-parser", "loadtest", "k6"],
+    "tags": ["jobdesk", "loadtest", "k6"],
     "templating": {
         "list": [
             {
@@ -146,14 +146,14 @@ dashboard = {
                 "type": "query",
             },
             {
-                "current": {"selected": True, "text": "tg-jobs-loadtest", "value": "tg-jobs-loadtest"},
+                "current": {"selected": True, "text": "jobdesk-loadtest", "value": "jobdesk-loadtest"},
                 "name": "backend_job",
                 "label": "Backend",
                 "options": [
-                    {"selected": True, "text": "tg-jobs-loadtest", "value": "tg-jobs-loadtest"},
-                    {"selected": False, "text": "tg-jobs-backend", "value": "tg-jobs-backend"},
+                    {"selected": True, "text": "jobdesk-loadtest", "value": "jobdesk-loadtest"},
+                    {"selected": False, "text": "jobdesk-backend", "value": "jobdesk-backend"},
                 ],
-                "query": "tg-jobs-loadtest,tg-jobs-backend",
+                "query": "jobdesk-loadtest,jobdesk-backend",
                 "type": "custom",
             },
         ]

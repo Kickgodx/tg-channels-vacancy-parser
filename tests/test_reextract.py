@@ -9,7 +9,7 @@ import pytest
 from tests.llm_job_helpers import await_llm_job
 
 from backend.services import reextract_service
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.models.vacancy import Vacancy
 
 
 def _register(client, email: str) -> str:
@@ -68,7 +68,7 @@ class _FakeAI:
     calls: ClassVar[list[str]] = []
 
     def __init__(self, config):
-        from tg_jobs_parser.ai.enricher import RunAIStats
+        from jobdesk.ai.enricher import RunAIStats
 
         self.stats = RunAIStats()
 
@@ -93,13 +93,13 @@ class _FakeAI:
 @pytest.fixture
 def fake_ai(monkeypatch, default_test_config) -> list[str]:
     from backend.api.routes import vacancies as vacancies_route
-    from tg_jobs_parser.config.loader import load_config
+    from jobdesk.config.loader import load_config
 
     real_cfg = load_config(default_test_config)
     ai_cfg = real_cfg.model_copy(update={"ai": real_cfg.ai.model_copy(update={"enabled": True})})
     monkeypatch.setattr(reextract_service, "load_config", lambda *a, **k: ai_cfg)
     monkeypatch.setattr(vacancies_route, "load_config", lambda *a, **k: ai_cfg)
-    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", _FakeAI, raising=True)
+    monkeypatch.setattr("jobdesk.ai.enricher.AIEnrichmentService", _FakeAI, raising=True)
     monkeypatch.setattr(_FakeAI, "calls", [])
     return _FakeAI.calls
 

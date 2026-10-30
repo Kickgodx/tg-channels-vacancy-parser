@@ -7,12 +7,12 @@ from unittest.mock import MagicMock, patch
 
 from prometheus_client import REGISTRY
 
-from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
-from tg_jobs_parser.ai.enricher import AIEnrichmentService
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.ai.search_context import SearchContext
-from tg_jobs_parser.config.schema import AppConfig
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient
+from jobdesk.ai.enricher import AIEnrichmentService
+from jobdesk.ai.schema import VacancyAIExtraction
+from jobdesk.ai.search_context import SearchContext
+from jobdesk.config.schema import AppConfig
+from jobdesk.models.vacancy import Vacancy
 
 
 def _counter(name: str, labels: dict[str, str]) -> float:
@@ -133,7 +133,7 @@ def test_llm_enrich_disabled_series_start_at_zero():
 
     code = (
         "from prometheus_client import REGISTRY\n"
-        "import tg_jobs_parser.observability.llm_metrics\n"
+        "import jobdesk.observability.llm_metrics\n"
         "for r in ('circuit_breaker', 'quota', 'init_failed'):\n"
         "    assert REGISTRY.get_sample_value('llm_enrich_disabled_total', {'reason': r}) == 0, r\n"
     )

@@ -29,7 +29,7 @@ from urllib.parse import parse_qsl, urlencode
 
 from opentelemetry import trace
 
-from tg_jobs_parser.utils.logger import request_id_var
+from jobdesk.utils.logger import request_id_var
 
 _LOG = logging.getLogger("backend.http")
 

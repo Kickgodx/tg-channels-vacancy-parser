@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "prod"] = Field(default="dev", alias="APP_ENV")
     api_host: str = Field(default="127.0.0.1", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
-    # Процессов API на одном порту (tg-jobs-api / backend.main:main). Больше 1 — только с
+    # Процессов API на одном порту (jobdesk-api / backend.main:main). Больше 1 — только с
     # общим состоянием в Redis и задачами в rq (см. check_api_workers). `uvicorn --reload`
     # всегда один процесс.
     api_workers: int = Field(default=1, ge=1, alias="API_WORKERS")

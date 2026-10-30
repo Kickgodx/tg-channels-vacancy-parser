@@ -1,10 +1,10 @@
 """Тесты цепочки fallback_models."""
 
-from tg_jobs_parser.ai.llm_models_registry import (
+from jobdesk.ai.llm_models_registry import (
     apply_ai_defaults_from_registry,
     load_llm_models_registry,
 )
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.config.schema import AiConfig
 
 
 def test_resolved_fallback_models_dedupes_primary():

@@ -12,10 +12,10 @@ from backend.db import repository as repo
 from backend.db.models import VacancySightingRow
 from backend.db.session import session_scope
 from backend.services.near_duplicate_merge import apply_merges, find_near_duplicates
-from tg_jobs_parser.config.schema import AppConfig
-from tg_jobs_parser.deduplication.changes import is_edited_repost, vacancy_changes
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.config.schema import AppConfig
+from jobdesk.deduplication.changes import is_edited_repost, vacancy_changes
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.hashing import vacancy_content_id
 
 _POST = (
     "Компания Acme ищет QA инженера в команду платежей. Офис в Москве. Требования: "

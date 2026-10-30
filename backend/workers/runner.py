@@ -11,8 +11,8 @@ from collections.abc import Callable
 
 from backend.settings import get_settings
 from backend.tracing import setup_tracing, shutdown_tracing
-from tg_jobs_parser.utils.env_loader import try_load_dotenv
-from tg_jobs_parser.utils.logger import setup_logging
+from jobdesk.utils.env_loader import try_load_dotenv
+from jobdesk.utils.logger import setup_logging
 
 
 def worker_name(role: str) -> str:
@@ -39,7 +39,7 @@ def run_rq_worker(
     try_load_dotenv()
     log = logging.getLogger(f"backend.workers.{role}")
     settings = get_settings()
-    os.environ.setdefault("OTEL_SERVICE_NAME", f"tg-jobs-parser-{role}")
+    os.environ.setdefault("OTEL_SERVICE_NAME", f"jobdesk-{role}")
 
     # Минимальный FastAPI app не нужен — поднимаем OTEL через Settings как у backend.
     try:

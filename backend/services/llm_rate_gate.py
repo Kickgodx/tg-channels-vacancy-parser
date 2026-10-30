@@ -16,7 +16,7 @@ import math
 import time
 
 from backend.settings import get_settings
-from tg_jobs_parser.ai.rate_limit import register_global_rate_gate
+from jobdesk.ai.rate_limit import register_global_rate_gate
 
 _LOG = logging.getLogger(__name__)
 

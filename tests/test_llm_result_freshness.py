@@ -14,8 +14,8 @@ from tests.conftest import add_legacy_vacancy, new_user
 from backend.db.migrate import alembic_ini_path
 from backend.db.models import ResumeRow
 from backend.services.llm_result_freshness import cover_letter_is_stale, match_is_stale
-from tg_jobs_parser.ai.prompts import COVER_LETTER_PROMPT_VERSION, MATCH_PROMPT_VERSION
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.ai.prompts import COVER_LETTER_PROMPT_VERSION, MATCH_PROMPT_VERSION
+from jobdesk.config.schema import AiConfig
 
 
 def test_migration_backfills_requested_model(pg_empty_db):

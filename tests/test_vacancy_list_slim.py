@@ -9,8 +9,8 @@ from tests.conftest import new_parse_run
 
 from backend.db.repository import upsert_vacancies
 from backend.db.session import get_session_factory
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.hashing import vacancy_content_id
 
 _LONG = ("Python senior remote " * 40).strip()  # >> 120 символов
 

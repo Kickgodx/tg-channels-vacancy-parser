@@ -18,9 +18,9 @@ from sqlalchemy.orm import Session, aliased
 from backend.db.models import ParseRunVacancyRow, VacancyRow, VacancySightingRow
 from backend.db.vacancy_mapper import row_to_vacancy
 from backend.db.vacancy_repository import NON_TELEGRAM_CHANNELS, invalidate_vacancy_count_cache
-from tg_jobs_parser.config.schema import AppConfig
-from tg_jobs_parser.deduplication.changes import vacancy_changes
-from tg_jobs_parser.deduplication.deduplicator import VacancyDeduplicator
+from jobdesk.config.schema import AppConfig
+from jobdesk.deduplication.changes import vacancy_changes
+from jobdesk.deduplication.deduplicator import VacancyDeduplicator
 
 # Появления с тем же текстом, что у вакансии: точный повтор в прогоне или текст, уже бывший в БД.
 EXACT_REASONS = ("exact_raw_hash", "normalized_hash", "seen_before")

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from tg_jobs_parser.extraction.salary_period import (
+from jobdesk.extraction.salary_period import (
     annual_markers_in_text,
     apply_hourly_currency_from_text,
     hourly_markers_in_text,
@@ -10,7 +10,7 @@ from tg_jobs_parser.extraction.salary_period import (
     sanitize_salary_amounts,
     sanitize_salary_currency_period,
 )
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.models.vacancy import Vacancy
 
 
 def _vacancy(**kwargs) -> Vacancy:

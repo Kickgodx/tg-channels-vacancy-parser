@@ -21,8 +21,8 @@ from backend.db.models import (
 from backend.db.session import session_scope
 from backend.services import db_cleanup
 from backend.services.db_cleanup import purge_service_tables
-from tg_jobs_parser.ai.prompts import EXTRACT_PROMPT_VERSION
-from tg_jobs_parser.config.schema import RetentionConfig
+from jobdesk.ai.prompts import EXTRACT_PROMPT_VERSION
+from jobdesk.config.schema import RetentionConfig
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 

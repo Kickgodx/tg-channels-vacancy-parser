@@ -13,14 +13,14 @@ from __future__ import annotations
 from typing import Protocol
 
 from backend.settings import get_settings
-from tg_jobs_parser.ai.prompts import (
+from jobdesk.ai.prompts import (
     COVER_LETTER_PROMPT_VERSION,
     INTERVIEW_PREP_PROMPT_VERSION,
     MATCH_PROMPT_VERSION,
     RESUME_TAILOR_PROMPT_VERSION,
 )
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import AiConfig
 
 
 class _LlmResult(Protocol):

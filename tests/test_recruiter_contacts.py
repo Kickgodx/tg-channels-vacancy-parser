@@ -6,7 +6,7 @@ import pytest
 
 from backend.db.models import ChannelCandidateRow, VacancyRow
 from backend.services.recruiter_contacts import SIGNATURE_MIN_POSTS, recruiter_contacts
-from tg_jobs_parser.extraction.recruiter_contacts import find_recruiter_contacts
+from jobdesk.extraction.recruiter_contacts import find_recruiter_contacts
 
 _ids = iter(range(1, 1_000_000))
 

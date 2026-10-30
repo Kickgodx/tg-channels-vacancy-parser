@@ -7,19 +7,19 @@ from types import SimpleNamespace
 
 import pytest
 
-import tg_jobs_parser.parse_runner as parse_runner
-from tg_jobs_parser.ai import rate_limit
-from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
-from tg_jobs_parser.ai.rate_limit import LlmQuotaExhausted
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.config.schema import (
+import jobdesk.parse_runner as parse_runner
+from jobdesk.ai import rate_limit
+from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient
+from jobdesk.ai.rate_limit import LlmQuotaExhausted
+from jobdesk.ai.schema import VacancyAIExtraction
+from jobdesk.config.schema import (
     AiConfig,
     AppConfig,
     FxConfig,
     ParserConfig,
     SourcesConfig,
 )
-from tg_jobs_parser.parsers.base import RawPost
+from jobdesk.parsers.base import RawPost
 
 
 class _ApiError(Exception):
@@ -290,7 +290,7 @@ class _StatusError(Exception):
 
 
 def test_rate_limit_is_detected_by_status_code_not_text():
-    from tg_jobs_parser.ai.clients.openrouter import _is_rate_limit_error
+    from jobdesk.ai.clients.openrouter import _is_rate_limit_error
 
     assert _is_rate_limit_error(_StatusError(429, "Too Many Requests")) is True
     # Клиент оборачивает ошибку SDK: статус ищется по цепочке __cause__.

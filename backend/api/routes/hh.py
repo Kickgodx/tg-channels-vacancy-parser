@@ -59,7 +59,7 @@ from backend.services.hh_sync_service import HhSyncNotConfigured
 from backend.services.hh_sync_window import HhSyncWindowError, resolve_hh_search_window
 from backend.services.pubsub_hub import PubSubUnavailable, get_pubsub_hub
 from backend.settings import Settings, get_settings
-from tg_jobs_parser.config.loader import load_config
+from jobdesk.config.loader import load_config
 
 _LOG = logging.getLogger(__name__)
 

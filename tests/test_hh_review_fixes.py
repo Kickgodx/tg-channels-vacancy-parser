@@ -11,11 +11,11 @@ from backend.db import hh_repository as hh_repo
 from backend.db.models import HhListingRow, VacancyRow
 from backend.services import hh_sync_service
 from backend.settings import Settings
-from tg_jobs_parser.config.schema import AppConfig, HhConfig, HhSearchConfig
-from tg_jobs_parser.hh.client import HHApiError
-from tg_jobs_parser.hh.dedup import DedupedVacancy
-from tg_jobs_parser.hh.mapper import hh_source_post_key, stable_vacancy_id
-from tg_jobs_parser.hh.models import VacancyShort
+from jobdesk.config.schema import AppConfig, HhConfig, HhSearchConfig
+from jobdesk.hh.client import HHApiError
+from jobdesk.hh.dedup import DedupedVacancy
+from jobdesk.hh.mapper import hh_source_post_key, stable_vacancy_id
+from jobdesk.hh.models import VacancyShort
 
 
 def _short(vid: str, *, area: str = "Москва", req: str = "Python") -> VacancyShort:
@@ -211,7 +211,7 @@ def test_mid_group_flush_when_duplicates_exceed_batch(monkeypatch):
             yield page
 
         def get_vacancy(self, vacancy_id: str):
-            from tg_jobs_parser.hh.models import VacancyDetail
+            from jobdesk.hh.models import VacancyDetail
 
             return VacancyDetail.model_validate(
                 {

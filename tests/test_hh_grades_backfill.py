@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from backend.db.hh_repository import backfill_hh_grades_from_experience
 from backend.db.models import VacancyRow
-from tg_jobs_parser.hh.mapper import hh_source_post_key, stable_vacancy_id
+from jobdesk.hh.mapper import hh_source_post_key, stable_vacancy_id
 
 
 def test_backfill_hh_grades_from_experience_name(db_session):

@@ -1,5 +1,5 @@
-from tg_jobs_parser.extraction.normalizer import normalize_for_match
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.extraction.normalizer import normalize_for_match
+from jobdesk.utils.hashing import vacancy_content_id
 
 
 def test_vacancy_content_id_stable_for_formatting():

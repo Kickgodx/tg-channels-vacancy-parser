@@ -20,14 +20,14 @@ from backend.fx.apply import (
 )
 from backend.observability import record_hh_listings_purged, record_vacancy_upsert
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import FxConfig
-from tg_jobs_parser.extraction.grade_extractor import UNKNOWN_GRADE
-from tg_jobs_parser.hh.dedup import vacancy_key_hex
-from tg_jobs_parser.hh.grades import grade_from_experience_name
-from tg_jobs_parser.hh.mapper import HH_CHANNEL, hh_source_post_key, parse_hh_datetime
-from tg_jobs_parser.hh.models import VacancyShort
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import FxConfig
+from jobdesk.extraction.grade_extractor import UNKNOWN_GRADE
+from jobdesk.hh.dedup import vacancy_key_hex
+from jobdesk.hh.grades import grade_from_experience_name
+from jobdesk.hh.mapper import HH_CHANNEL, hh_source_post_key, parse_hh_datetime
+from jobdesk.hh.models import VacancyShort
+from jobdesk.models.vacancy import Vacancy
 
 _LOG = logging.getLogger(__name__)
 

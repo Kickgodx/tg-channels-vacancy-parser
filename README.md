@@ -1,6 +1,14 @@
-# tg_jobs_parser
+# JobDesk
 
-Локальное **Windows-first** приложение для парсинга Telegram-каналов с IT-вакансиями: **Telethon** (ваш аккаунт, MTProto), правиловое извлечение полей, опциональный **AI** (OpenRouter), фильтры, дедуп, метрики, экспорт **Excel/JSON**. Дополнительно — admin-sync вакансий с **HH.ru**, матчинг резюме и сопроводительные письма (фоновые LLM-джобы).
+**JobDesk** — агрегатор IT-вакансий и рабочее место соискателя (Windows-first). Вакансии собираются из
+**Telegram-каналов** (Telethon, ваш аккаунт, MTProto), **HH.ru** (admin-sync) и **ручного импорта**; поля
+извлекаются правилами и опционально **AI** (OpenRouter), затем фильтры, дедуп, курсы валют, метрики и экспорт
+**Excel/JSON**. Поверх базы — аналитика рынка, матчинг резюме, сопроводительные письма, адаптация резюме,
+подготовка к собеседованию (фоновые LLM-джобы) и MCP-сервер для Claude.
+
+> Проект начинался как `tg_jobs_parser` (парсер Telegram-каналов). Имена, хранящие состояние, сохранены:
+> база и роль Postgres `tgjobs`, тома Docker `tg_jobs_parser_*` (имя compose-проекта закреплено),
+> префикс персональных токенов `tgj_`; MCP-сервер по-прежнему читает и env `TGJOBS_*`.
 
 **Основной способ работы** — веб-интерфейс на **React** + **FastAPI** backend + **PostgreSQL** + **Redis** / `parse-worker` + `llm-worker` + `hh-worker` (Docker Compose). Парсинг ставится в очередь RQ, прогресс пишется в БД (SSE + poll), вакансии сохраняются в PostgreSQL.
 
@@ -19,7 +27,7 @@
 ### Запуск
 
 ```powershell
-cd путь\к\tg_jobs_parser
+cd путь\к\jobdesk
 # Скопируйте .env.example → .env и заполните TELEGRAM_API_ID / TELEGRAM_API_HASH
 # В .env должна быть строка COMPOSE_PROFILES=observability (уже есть в .env.example)
 docker compose up --build
@@ -38,7 +46,7 @@ docker compose up --build
 | **PostgreSQL** | `127.0.0.1:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
 | **Redis** | `127.0.0.1:16379` → контейнер `:6379` (очереди RQ: parse + LLM) |
 
-В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `parse-worker` (тот же образ, команда `tg-jobs-parse-worker`) выполняет прогоны парсинга через RQ (очередь `parse`, concurrency=1, volume `sessions/` для Telethon); метрики — контейнерный `:9102` (на хост не публикуется). Сервис `llm-worker` (`tg-jobs-llm-worker`) обрабатывает матчинг и письма; метрики — `:9101` (тоже без host mapping, чтобы работал `--scale`). Сервис `hh-worker` (`tg-jobs-hh-worker`, очередь `hh`) выполняет HH sync; метрики — `:9103`. Redis хранит очереди на томе `redis_data` с AOF (`appendonly yes`): рестарт контейнера их не теряет.
+В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `parse-worker` (тот же образ, команда `jobdesk-parse-worker`) выполняет прогоны парсинга через RQ (очередь `parse`, concurrency=1, volume `sessions/` для Telethon); метрики — контейнерный `:9102` (на хост не публикуется). Сервис `llm-worker` (`jobdesk-llm-worker`) обрабатывает матчинг и письма; метрики — `:9101` (тоже без host mapping, чтобы работал `--scale`). Сервис `hh-worker` (`jobdesk-hh-worker`, очередь `hh`) выполняет HH sync; метрики — `:9103`. Redis хранит очереди на томе `redis_data` с AOF (`appendonly yes`): рестарт контейнера их не теряет.
 
 Полный стек (Prometheus, Grafana, Loki, Alloy, Tempo) включается профилем
 `observability` через `COMPOSE_PROFILES=observability` в `.env` (уже есть в
@@ -63,7 +71,7 @@ $env:COMPOSE_PROFILES=""; docker compose up --build
 В контейнере backend интерактивный ввод телефона и кода удобнее, чем в браузере:
 
 ```powershell
-docker compose exec backend python -m tg_jobs_parser.cli login --config /app/config.yaml
+docker compose exec backend python -m jobdesk.cli login --config /app/config.yaml
 ```
 
 Введите номер (`+79991234567`), код из Telegram/SMS и при необходимости пароль 2FA. Файл сессии появится в `sessions/` на хосте (volume).
@@ -107,7 +115,7 @@ GRAFANA_ADMIN_PASSWORD=...      # только с профилем observability
 # LLM_JOB_LEASE_SECONDS=120       # lease running LLM
 # JOB_RECOVER_INTERVAL_SECONDS=60 # периодический recover: в worker (rq) или в API (inprocess)
 # ANALYTICS_CACHE_SECONDS=30      # кэш агрегатов дашборда/аналитики в памяти API (сек); 0 — выключить
-# API_WORKERS=1                  # процессов API (tg-jobs-api; в compose — 4); >1 требует REDIS_URL, JWT_SECRET и rq у всех задач
+# API_WORKERS=1                  # процессов API (jobdesk-api; в compose — 4); >1 требует REDIS_URL, JWT_SECRET и rq у всех задач
 # DB_POOL_SIZE= / DB_MAX_OVERFLOW= # пул БД процесса; у API — на все процессы вместе (по умолчанию 20 + 20)
 # DB_POOL_TIMEOUT=                # ожидание соединения из пула (сек); по умолчанию API 5, воркеры 30
 # API_QUEUE_TIMEOUT_SECONDS=2     # ожидание места обработки в процессе API; не дождался — 503 OVERLOADED
@@ -125,7 +133,7 @@ GRAFANA_ADMIN_PASSWORD=...      # только с профилем observability
 # OTEL_ENABLED=false              # OpenTelemetry-трассировка (в compose — true)
 # OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # куда слать OTLP (в compose — http://alloy:4318)
 # OTEL_TRACES_SAMPLE_RATIO=1.0    # доля сохраняемых трасс (head sampling); под нагрузкой — 0.1
-# OTEL_SERVICE_NAME=tg-jobs-parser-backend
+# OTEL_SERVICE_NAME=jobdesk-backend
 ```
 
 Первый вход в UI — через регистрацию на странице `/login`; подробнее — в
@@ -229,7 +237,7 @@ PostgreSQL, Kafka…) — **технологии** вакансии (`technologi
 `["Automation QA"]` + технология `Python`, ML на Python — `["AI"]` + `Python`.
 Языки, которые LLM или пользовательский словарь всё же ставят специализацией,
 переносятся в технологии детерминированно (`split_specializations` в
-`tg_jobs_parser/config/schema.py`); «Python Developer» без другой роли получает роль
+`jobdesk/config/schema.py`); «Python Developer» без другой роли получает роль
 `Software Engineer`. Имена технологий канонические: `Golang` → `Go`,
 `Apache Kafka` → `Kafka`, регистр — по словарю; все варианты 1С (`1С:Предприятие 8.3`,
 `1C:ERP`, `1С КА`) — одна технология `1С` (миграция 038 привела и сохранённые вакансии).
@@ -328,7 +336,7 @@ SQL встречаются вместе просто потому, что обе
 свежей оценки карточка считает её на лету. Оценка не попадает ни в `detected_salary_avg_rub`, ни в
 аналитику, ни в строки списка. В фильтрах списка под «Только с указанной зарплатой» — флажок
 «…и с оценкой по похожим» (`salary_estimates=true`): вакансии с оценкой тоже проходят фильтр
-`has_salary`; метрики и `/analytics/*` флаг игнорируют. Точность — `python -m tg_jobs_parser.cli db
+`has_salary`; метрики и `/analytics/*` флаг игнорируют. Точность — `python -m jobdesk.cli db
 salary-estimate-eval` (только чтение): каждая вакансия с зарплатой оценивается так, будто зарплаты
 нет. На живой базе (718 вакансий с зарплатой) медианная ошибка 25,5%, реальная зарплата внутри
 p25–p75 у 48,6%; у лестницы «Рынка для похожих» — 28,2% и меньше вакансий с оценкой (617 против 679).
@@ -474,7 +482,7 @@ confidence оценки, пояснение и списки совпадающи
   (`sort_by=match_score` при выбранном резюме; без `resume_id` — 422).
 - Мэтчинг и письма — фоновые джобы (`llm_jobs`): кэш → 200; иначе 202 +
   `job_id`. В Docker: Redis Queue (RQ) + сервис `llm-worker` (тот же образ,
-  `tg-jobs-llm-worker`). UI ждёт через SSE `GET /llm-jobs/{id}/events`
+  `jobdesk-llm-worker`). UI ждёт через SSE `GET /llm-jobs/{id}/events`
   (fallback — poll). Параллелизм: `--scale llm-worker=N` и
   `ai.interactive_per_user_limit`; `ai.interactive_concurrency` — для
   inprocess / ориентир scale. Воркер — RQ ``SimpleWorker`` (без fork: меньше
@@ -803,14 +811,14 @@ SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`):
 - **Паузы между страницами.** `parser.sleep_between_requests_seconds` (по умолчанию `1`) — страницы истории канала (100 сообщений) запрашиваются не чаще раза в N секунд; сколько она стоит, видно в логе канала, в span `telegram.channel` и в `telegram_request_pause_seconds_total`.
 - **Дедуп** сравнивает fuzzy только в блоках, где вакансия могла бы оказаться: тот же набор специализаций (`parser.fuzzy_dedup_block_by_specializations`), та же компания или тот же контакт — почти-дубль с по-другому извлечёнными специализациями находится по компании или контакту. Снимок прогресса несёт последние 30 вакансий, а не копию всех уникальных.
 - **Перепост с правками.** Кроме составного ключа (он сравнивает и зарплату) пост сравнивается по полному нормализованному тексту (RapidFuzz `ratio` не ниже `parser.fuzzy_text_duplicate_threshold`, 95) с вакансиями прогона и с вакансиями Telegram из БД за `parser.cross_run_dedup_days` (40) дней. Разные известные грейды, разные компании, непересекающиеся роли или языки программирования — разные вакансии (шаблон компании: junior и senior, аналитик и разработчик, Java и Python почти одним текстом), посты дальше 40 дней друг от друга не сравниваются. Совпавший пост — появление известной вакансии с причиной `fuzzy_text:<score>`: она, как при точном перепосте, получает более позднюю дату поста, возвращается из архива и привязывается к прогону; новой вакансии не появляется. HH и ручной импорт в этом не участвуют.
-- **Чистка сохранённых вакансий** по позже появившимся правилам — разово: `python -m tg_jobs_parser.cli db clean-vacancies` показывает, что удалит (посты соискателей и подборки — они не вакансии, удаление каскадом убирает оценки, письма и эмбеддинги) и какие технологии перепишет, `--apply` применяет.
-- **Накопленные почти-дубли** (до дедупа между прогонами) склеиваются разово: `python -m tg_jobs_parser.cli db merge-duplicates` показывает пары, `--apply` склеивает. Более поздняя копия помечается дублем (`is_duplicate`, `duplicate_of` — исходная) и пропадает из списков и аналитики, её появления и прогоны переходят к исходной; строка и оценки с письмами к ней остаются.
+- **Чистка сохранённых вакансий** по позже появившимся правилам — разово: `python -m jobdesk.cli db clean-vacancies` показывает, что удалит (посты соискателей и подборки — они не вакансии, удаление каскадом убирает оценки, письма и эмбеддинги) и какие технологии перепишет, `--apply` применяет.
+- **Накопленные почти-дубли** (до дедупа между прогонами) склеиваются разово: `python -m jobdesk.cli db merge-duplicates` показывает пары, `--apply` склеивает. Более поздняя копия помечается дублем (`is_duplicate`, `duplicate_of` — исходная) и пропадает из списков и аналитики, её появления и прогоны переходят к исходной; строка и оценки с письмами к ней остаются.
 
 ---
 
 ### MCP-сервер (Claude Desktop / Claude Code)
 
-`tg_jobs_mcp` — MCP-сервер по stdio: даёт Claude инструменты поверх API, чтобы в чате искать
+`jobdesk_mcp` — MCP-сервер по stdio: даёт Claude инструменты поверх API, чтобы в чате искать
 вакансии, смотреть рынок для своего резюме, получать оценку и письмо. Это клиент HTTP API с
 персональным токеном: авторизация, квоты LLM и защита от перегрузки остаются на стороне API,
 а `backend` и ядро он не импортирует.
@@ -821,7 +829,7 @@ poetry install --extras mcp          # или: pip install -e ".[mcp]"
 
 # 1. Токен: UI → «Токены» → «Создать токен» (для оценки и писем — отметить LLM-задачи)
 # 2. Claude Code (из корня проекта):
-claude mcp add tg-jobs -e TGJOBS_TOKEN=tgj_... -- .venv/Scripts/python.exe -m tg_jobs_mcp
+claude mcp add jobdesk -e JOBDESK_TOKEN=tgj_... -- .venv/Scripts/python.exe -m jobdesk_mcp
 ```
 
 Claude Desktop — `claude_desktop_config.json`:
@@ -829,18 +837,18 @@ Claude Desktop — `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "tg-jobs": {
-      "command": "C:\\path\\to\\tg_jobs_parser\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "tg_jobs_mcp"],
-      "env": { "TGJOBS_TOKEN": "tgj_..." }
+    "jobdesk": {
+      "command": "C:\\path\\to\\jobdesk\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "jobdesk_mcp"],
+      "env": { "JOBDESK_TOKEN": "tgj_..." }
     }
   }
 }
 ```
 
-Env: `TGJOBS_TOKEN` (обязателен), `TGJOBS_API_URL` (по умолчанию
-`http://127.0.0.1:9000/api/v1` — API из compose), `TGJOBS_API_KEY` (если у API задан
-`API_KEY`), `TGJOBS_LLM_WAIT_SECONDS` (сколько ждать LLM-задачу, по умолчанию 60).
+Env: `JOBDESK_TOKEN` (обязателен), `JOBDESK_API_URL` (по умолчанию
+`http://127.0.0.1:9000/api/v1` — API из compose), `JOBDESK_API_KEY` (если у API задан
+`API_KEY`), `JOBDESK_LLM_WAIT_SECONDS` (сколько ждать LLM-задачу, по умолчанию 60).
 
 | Группа | Инструменты |
 |---|---|
@@ -852,7 +860,7 @@ Env: `TGJOBS_TOKEN` (обязателен), `TGJOBS_API_URL` (по умолча�
 Ответы — компактный JSON (без пустых полей, списки до 20, превью до 300 символов, полный текст
 до 4000). Текст вакансии обёрнут в маркеры «данные, не инструкции»: посты из открытых каналов
 могут содержать prompt-injection. LLM-инструмент берёт готовый результат из кэша бесплатно,
-иначе ставит задачу и ждёт её до `TGJOBS_LLM_WAIT_SECONDS`; не успела — возвращает `job_id`
+иначе ставит задачу и ждёт её до `JOBDESK_LLM_WAIT_SECONDS`; не успела — возвращает `job_id`
 для `get_llm_job`. Прерванный клиентом вызов отменяет задачу. Ошибки API приходят модели
 текстом с подсказкой (токен отозван, нет права LLM, эмбеддинги недоступны, API не запущен).
 
@@ -1001,7 +1009,7 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 Кэш короткой выдачи (`hh_listings`) живёт `hh.listing_ttl_days` и не даёт
 повторно дергать detail для уже загруженных id.
 
-Кэш ответов LLM хранится в PostgreSQL (`ai_extraction_cache`). Параметры в `config.yaml`: `ai.cache_backend: postgres`, `ai.cache_ttl_days` (0 — без срока, иначе дни; по умолчанию 45). Просроченные записи и записи от прежних версий промпта удаляет почасовая фоновая очистка. Очистка — кнопка на странице **Парсинг** или `POST /ai-cache/clear`. Адаптер Postgres регистрируется при старте backend/CLI (порт `AIExtractionCacheBackend` в core, без зависимости `tg_jobs_parser` → `backend`).
+Кэш ответов LLM хранится в PostgreSQL (`ai_extraction_cache`). Параметры в `config.yaml`: `ai.cache_backend: postgres`, `ai.cache_ttl_days` (0 — без срока, иначе дни; по умолчанию 45). Просроченные записи и записи от прежних версий промпта удаляет почасовая фоновая очистка. Очистка — кнопка на странице **Парсинг** или `POST /ai-cache/clear`. Адаптер Postgres регистрируется при старте backend/CLI (порт `AIExtractionCacheBackend` в core, без зависимости `jobdesk` → `backend`).
 
 ### Схема БД
 
@@ -1040,14 +1048,14 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 
 **Если меняете колонки/таблицы** — добавьте новую миграцию (`alembic revision`) и обновите модели в `backend/db/models.py`; при следующем `docker compose up` она применится автоматически, данные сохранятся.
 
-Ядро парсинга (`tg_jobs_parser.parse_runner` + общий `tg_jobs_parser.ingestion`) вызывается из `backend/workers/parse_tasks.py` (`run_service` только ставит прогон в очередь); результаты пишутся в PostgreSQL (UPSERT по `id` вакансии). Ручной импорт использует тот же ingestion с `MANUAL_POLICY`.
+Ядро парсинга (`jobdesk.parse_runner` + общий `jobdesk.ingestion`) вызывается из `backend/workers/parse_tasks.py` (`run_service` только ставит прогон в очередь); результаты пишутся в PostgreSQL (UPSERT по `id` вакансии). Ручной импорт использует тот же ingestion с `MANUAL_POLICY`.
 
 ---
 
 ## Структура проекта
 
 ```text
-tg_jobs_parser/
+jobdesk/
   README.md
   pyproject.toml
   config.yaml
@@ -1075,9 +1083,9 @@ tg_jobs_parser/
     src/components/        — ParseForm, VacancyTable, VacancyModal, ResumePanel,
                              MetricsCharts, AnalyticsPanel
 
-  tg_jobs_mcp/             — MCP-сервер (stdio): клиент HTTP API с токеном доступа
+  jobdesk_mcp/             — MCP-сервер (stdio): клиент HTTP API с токеном доступа
 
-  tg_jobs_parser/          — ядро парсинга (общее для API и CLI)
+  jobdesk/          — ядро парсинга (общее для API и CLI)
     parse_runner.py        — Telethon fetch, dedup, progress; ingest через ingestion/
     ingestion/             — shared RawPost → Vacancy (rules / AI / policy)
     cli/                   — Typer CLI (+ db dump/import)
@@ -1118,7 +1126,7 @@ tg_jobs_parser/
 ## Установка без Docker (Poetry)
 
 ```powershell
-cd путь\к\tg_jobs_parser
+cd путь\к\jobdesk
 poetry install
 poetry install --extras telethon   # cryptg (опционально)
 poetry install --extras ai         # OpenRouter
@@ -1132,13 +1140,13 @@ poetry install --extras ai         # OpenRouter
 poetry run python -c "import telethon; print(telethon.__version__)"
 ```
 
-Используйте **`poetry run python -m tg_jobs_parser.cli …`** или активируйте `.venv`.
+Используйте **`poetry run python -m jobdesk.cli …`** или активируйте `.venv`.
 
 ---
 
 ## Конфигурация
 
-Основной файл: `config.yaml` (схема: `tg_jobs_parser/config/schema.py`).
+Основной файл: `config.yaml` (схема: `jobdesk/config/schema.py`).
 
 Полное описание секций — в [config.md](config.md).
 
@@ -1151,7 +1159,7 @@ poetry run python -c "import telethon; print(telethon.__version__)"
   «Ещё 14 вакансий дня», «Дайджест вакансий», `#дайджест`) получают score 0 всегда — до LLM не доходят.
   Курсы, обучение, школа, менторство, «резюме» обнуляют score, только если в посте нет ни маркеров
   найма, ни названия роли: «присылайте резюме» и «оплачиваем обучение» есть в обычных вакансиях
-  (`tg_jobs_parser/extraction/vacancy_detector.py`).
+  (`jobdesk/extraction/vacancy_detector.py`).
 - **`channel_concurrency`** — сколько каналов опрашивать параллельно в одной
   Telethon-сессии (`1` — последовательно; слишком большое значение повышает риск FloodWait).
   Это же размер очереди прочитанных, но ещё не разобранных каналов.
@@ -1221,15 +1229,15 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 |----------|------|
 | Golden dataset | `evals/golden/extraction.jsonl` |
 | Offline fixtures | `evals/fixtures/extraction_outputs.json` |
-| Scorer | `tg_jobs_parser/evals/score_extraction.py` |
-| Версии промптов | `EXTRACT_PROMPT_VERSION` / `MATCH_PROMPT_VERSION` / `COVER_LETTER_PROMPT_VERSION` / `RESUME_TAILOR_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py` |
+| Scorer | `jobdesk/evals/score_extraction.py` |
+| Версии промптов | `EXTRACT_PROMPT_VERSION` / `MATCH_PROMPT_VERSION` / `COVER_LETTER_PROMPT_VERSION` / `RESUME_TAILOR_PROMPT_VERSION` в `jobdesk/ai/prompts.py` |
 
 ```powershell
 # Offline (в обычном pytest -q)
 .venv\Scripts\python.exe -m pytest tests/test_evals_extraction.py -q
 
 # Live против OpenRouter (дорого; не в CI)
-.venv\Scripts\python.exe -m tg_jobs_parser.evals.run_extraction
+.venv\Scripts\python.exe -m jobdesk.evals.run_extraction
 ```
 
 Правило: изменили system/few-shot extraction → bump `EXTRACT_PROMPT_VERSION` → старый кэш не подхватится. Новый кейс — строка в JSONL + fixture для offline.
@@ -1251,11 +1259,11 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 
 ```powershell
 .venv\Scripts\python.exe scripts\build_embedding_eval.py                      # выгрузка (READ ONLY)
-.venv\Scripts\python.exe -m tg_jobs_parser.evals.embeddings queries --n 150   # синтетические запросы (LLM)
-.venv\Scripts\python.exe -m tg_jobs_parser.evals.embeddings run               # векторы + судья + отчёт
+.venv\Scripts\python.exe -m jobdesk.evals.embeddings queries --n 150   # синтетические запросы (LLM)
+.venv\Scripts\python.exe -m jobdesk.evals.embeddings run               # векторы + судья + отчёт
 ```
 
-Варианты моделей — `VARIANTS` в `tg_jobs_parser/evals/embeddings/embedder.py` (в т.ч. с инструкцией
+Варианты моделей — `VARIANTS` в `jobdesk/evals/embeddings/embedder.py` (в т.ч. с инструкцией
 для запроса у Qwen3). Векторы и оценки судьи кэшируются в `evals/embeddings/` (в `.gitignore`: тексты
 вакансий и резюме), отчёт — `evals/reports/embeddings_<ts>.md`.
 
@@ -1273,14 +1281,14 @@ poetry run python -c "import telethon; print(telethon.__version__)"
 (см. [Docker](#первая-авторизация-telethon)) и дампа/импорта PostgreSQL.
 
 ```powershell
-python -m tg_jobs_parser.cli login --config config.yaml
+python -m jobdesk.cli login --config config.yaml
 # или с явным путём к сессии:
-python -m tg_jobs_parser.cli login --telegram-session sessions/tg_jobs.session
+python -m jobdesk.cli login --telegram-session sessions/tg_jobs.session
 # точность оценки зарплаты по похожим вакансиям (только чтение)
-python -m tg_jobs_parser.cli db salary-estimate-eval
+python -m jobdesk.cli db salary-estimate-eval
 ```
 
-Короткая команда после `poetry install`: `poetry run tg-jobs-parser login`
+Короткая команда после `poetry install`: `poetry run jobdesk login`
 
 ### Резервное копирование (pg_dump по расписанию)
 
@@ -1339,18 +1347,18 @@ Backend при старте догонит схему миграциями, ес
 
 ```powershell
 # локально (DATABASE_URL в .env)
-poetry run tg-jobs-parser db dump -o backup/tgjobs_dump.json
+poetry run jobdesk db dump -o backup/jobdesk_dump.json
 
 # из контейнера backend
-docker compose exec backend tg-jobs-parser db dump -o /app/backup/tgjobs_dump.json
+docker compose exec backend jobdesk db dump -o /app/backup/jobdesk_dump.json
 ```
 
 Импорт в другой инстанс (целевой `DATABASE_URL`):
 
 ```powershell
-poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json
+poetry run jobdesk db import -f backup/jobdesk_dump.json
 # полная замена данных в целевой БД (с подтверждением):
-poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
+poetry run jobdesk db import -f backup/jobdesk_dump.json --mode replace
 ```
 
 По умолчанию `--mode merge` — UPSERT по первичному ключу (существующие строки обновляются).  
@@ -1386,7 +1394,7 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment; ожидание RPM-лимита (`llm_rate_gate_wait_seconds`), повторы (`llm_retries_total{reason}`), оценка стоимости по ценам `llm_models.yaml` (`llm_cost_usd_total{model}`), отключение LLM посреди разбора — раз за прогон или импорт (`llm_enrich_disabled_total{reason}`: `circuit_breaker`, `quota`, `init_failed`) |
 | **Метрики прогона** | Живые, во время прогона: каналы и посты Telegram (`telegram_channels_fetched_total{result}`, `telegram_posts_fetched_total`, `telegram_channel_fetch_duration_seconds`), паузы между страницами истории (`telegram_request_pause_seconds_total`), FloodWait — в т.ч. короткие, которые Telethon пережидает сам (`telegram_flood_waits_total{handled_by}`), поток обработанных постов (`parse_posts_processed_total{result}`), длительность фаз (`parse_phase_duration_seconds{phase}`) |
 | **Доменные метрики** | прогоны, UPSERT/TTL, импорт, матчинг, письма, LLM-джобы (`llm_job_enqueue_*`, `llm_worker_*`, `llm_jobs_by_status`, recover), глубина RQ-очередей (`llm_rq_queue_jobs{queue="llm"|"parse"}`), parse recover (`parse_jobs_recover_total`), отказы 503 `OVERLOADED` (`api_overload_rejections_total`; 503 от HH сюда не входят), auth, ЦБ |
-| **`db_*` gauges** | COUNT-агрегаты по таблицам с кэшем `METRICS_DB_STATS_CACHE_SECONDS` (30 с) между scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ, задачи в `running` с истёкшим lease — `db_jobs_lease_expired{kind="parse"|"llm"|"hh_sync"}`); только на backend (`job="tg-jobs-backend"`) |
+| **`db_*` gauges** | COUNT-агрегаты по таблицам с кэшем `METRICS_DB_STATS_CACHE_SECONDS` (30 с) между scrape (вакансии, резюме, матчи, письма, прогоны, LLM-кэш, свежесть курсов ЦБ, задачи в `running` с истёкшим lease — `db_jobs_lease_expired{kind="parse"|"llm"|"hh_sync"}`); только на backend (`job="jobdesk-backend"`) |
 | **`db_pool_*` gauges** | SQLAlchemy QueuePool: занято / свободно / overflow / лимит (`pool_size` + `max_overflow`); на backend, llm-worker и parse-worker |
 | **Loki** | Хранение логов (filesystem, retention 30 дней — `observability/loki-config.yml`) |
 | **Alloy** | Собирает stdout контейнеров compose-проекта через `docker-socket-proxy` (только чтение контейнеров, сетей и логов; сам `docker.sock` в Alloy не монтируется, Alloy работает не под root), парсит `level`/`logger` (labels) и `request_id`/`trace_id` (structured metadata) из формата логов и шлёт в Loki; принимает OTLP-трассы от backend и воркеров, отбрасывает шумные span'ы `connect` SQLAlchemy и отправляет в Tempo (`observability/alloy-config.alloy`) |
@@ -1394,17 +1402,17 @@ poetry run tg-jobs-parser db import -f backup/tgjobs_dump.json --mode replace
 
 **Затор очереди LLM:** смотреть дашборд **LLM jobs / queue** — растут `llm_rq_queue_jobs` и `llm_jobs_by_status{status="queued"}`; worker latency в `llm_worker_job_duration_seconds`. TraceQL: `{ name = "llm_job.run" }`, `{ name = "llm_job.enqueue" }`.
 
-**Прогон парсинга:** дашборд **Parse run** — итоги за выбранный период (посты, кандидаты, LLM-вызовы, стоимость, FloodWait), время по фазам, воронка AI, живой поток постов, Telegram fetch, LLM (полный вызов vs ожидание RPM-лимита, повторы, $/мин), воркеры (heartbeat, RAM, CPU, `up`), таблица трасс `parse_run` и логи parse-worker. Трасса: `parse_run` → `parse.fetch_posts` → `telegram.channel` (канал, постов, просмотрено, секунды пауз `telegram.pause_seconds`, events `telegram.flood_wait`); `parse.process_posts` → `chat <model>` (атрибуты `llm.rate_gate.wait_seconds`, `llm.retries`, `llm.cost_usd`) и `parse.flush_vacancies`. У каждого процесса свой `service.name` (`OTEL_SERVICE_NAME`): `tg-jobs-parser-parse-worker` и т.д. TraceQL: `{ resource.service.name = "tg-jobs-parser-parse-worker" && name = "parse_run" }`.
+**Прогон парсинга:** дашборд **Parse run** — итоги за выбранный период (посты, кандидаты, LLM-вызовы, стоимость, FloodWait), время по фазам, воронка AI, живой поток постов, Telegram fetch, LLM (полный вызов vs ожидание RPM-лимита, повторы, $/мин), воркеры (heartbeat, RAM, CPU, `up`), таблица трасс `parse_run` и логи parse-worker. Трасса: `parse_run` → `parse.fetch_posts` → `telegram.channel` (канал, постов, просмотрено, секунды пауз `telegram.pause_seconds`, events `telegram.flood_wait`); `parse.process_posts` → `chat <model>` (атрибуты `llm.rate_gate.wait_seconds`, `llm.retries`, `llm.cost_usd`) и `parse.flush_vacancies`. У каждого процесса свой `service.name` (`OTEL_SERVICE_NAME`): `jobdesk-parse-worker` и т.д. TraceQL: `{ resource.service.name = "jobdesk-parse-worker" && name = "parse_run" }`.
 
 **Пул БД:** дашборд **DB pool** — `db_pool_checked_out` / `db_pool_checked_in` / `db_pool_overflow` / `db_pool_max_connections`. Утилизация ≈ `checked_out / max_connections` (по job).
 
-**Нагрузочный тест:** дашборд **k6 load test** — RPS, p50/p95/p99, ошибки и VU k6 (remote write, `PROM_RW=1`) рядом с RPS, задержками и пулом БД стенда `lt-api` (job `tg-jobs-loadtest`). Порядок — [scripts/loadtest/README.md](scripts/loadtest/README.md).
+**Нагрузочный тест:** дашборд **k6 load test** — RPS, p50/p95/p99, ошибки и VU k6 (remote write, `PROM_RW=1`) рядом с RPS, задержками и пулом БД стенда `lt-api` (job `jobdesk-loadtest`). Порядок — [scripts/loadtest/README.md](scripts/loadtest/README.md).
 
 Конфигурация: `observability/prometheus.yml`, `observability/alerts/`, `observability/alertmanager.yml`, `observability/loki-config.yml`, `observability/tempo-config.yml`, `observability/alloy-config.alloy`, provisioning Grafana — `observability/grafana/provisioning/` (datasources Prometheus, Loki и Tempo с переходами лог ↔ трасса, Alertmanager).
 
 ### Алерты
 
-Prometheus вычисляет правила из `observability/alerts/tg-jobs.yml` и отдаёт сработавшие в
+Prometheus вычисляет правила из `observability/alerts/jobdesk.yml` и отдаёт сработавшие в
 Alertmanager. **Доставки наружу нет**: алерты видны в UI Alertmanager (http://localhost:9093)
 и в Grafana → Alerting (правила — источник Prometheus, сработавшие и silences —
 Alertmanager). Пороги — в `openspec/specs/platform/alerting`.

@@ -2,7 +2,7 @@
 
 ``Тестировщик`` и ``Manual QA`` → ``QA``, ``AQA`` → ``Automation QA``,
 ``Программист, разработчик`` (роль HH) → ``Software Engineer``
-(``SPECIALIZATION_ALIASES`` в ``tg_jobs_parser/config/schema.py``). Меняются вакансии и
+(``SPECIALIZATION_ALIASES`` в ``jobdesk/config/schema.py``). Меняются вакансии и
 сохранённые фильтры списка; повторы после замены схлопываются, порядок сохраняется.
 Снимки прогонов (``parse_runs``) — история, их не трогаем. Downgrade не разделяет обратно.
 

@@ -1,6 +1,6 @@
 import pytest
 
-from tg_jobs_parser.extraction.vacancy_detector import compute_vacancy_score, is_not_vacancy_post
+from jobdesk.extraction.vacancy_detector import compute_vacancy_score, is_not_vacancy_post
 
 
 def test_hiring_post_scores():

@@ -108,8 +108,8 @@ def test_vacancy_metrics_aggregated(client: TestClient):
 
     from backend.db.repository import upsert_vacancies
     from backend.db.session import get_session_factory
-    from tg_jobs_parser.models.vacancy import Vacancy
-    from tg_jobs_parser.utils.hashing import vacancy_content_id
+    from jobdesk.models.vacancy import Vacancy
+    from jobdesk.utils.hashing import vacancy_content_id
 
     text1 = "Python dev remote"
     v = Vacancy(

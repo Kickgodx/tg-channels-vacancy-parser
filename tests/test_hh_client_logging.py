@@ -7,8 +7,8 @@ import logging
 import httpx
 from prometheus_client import REGISTRY
 
-from tg_jobs_parser.hh.client import HHClient, HHClientConfig
-from tg_jobs_parser.hh.metrics import _endpoint_label
+from jobdesk.hh.client import HHClient, HHClientConfig
+from jobdesk.hh.metrics import _endpoint_label
 
 
 def _sample(name: str, labels: dict[str, str]) -> float:
@@ -38,7 +38,7 @@ def test_request_logs_and_metrics(caplog, monkeypatch):
         "hh_api_requests_total",
         {"method": "GET", "endpoint": "/vacancies", "status": "200"},
     )
-    with caplog.at_level(logging.INFO, logger="tg_jobs_parser.hh.client"):
+    with caplog.at_level(logging.INFO, logger="jobdesk.hh.client"):
         payload = client.request("GET", "/vacancies", params={"text": "python"})
     client.close()
 
@@ -74,7 +74,7 @@ def test_detail_response_preview(caplog, monkeypatch):
         )
 
     monkeypatch.setattr(client, "_http_request", fake_http_request)
-    with caplog.at_level(logging.INFO, logger="tg_jobs_parser.hh.client"):
+    with caplog.at_level(logging.INFO, logger="jobdesk.hh.client"):
         client.request("GET", "/vacancies/42")
     client.close()
 

@@ -23,8 +23,8 @@ from backend.db import llm_job_repository as llm_repo
 from backend.db import parse_run_repository as run_repo
 from backend.db import refresh_token_repository as refresh_repo
 from backend.db.session import session_scope
-from tg_jobs_parser.ai.prompts import EXTRACT_PROMPT_VERSION
-from tg_jobs_parser.config.schema import RetentionConfig
+from jobdesk.ai.prompts import EXTRACT_PROMPT_VERSION
+from jobdesk.config.schema import RetentionConfig
 
 _LOG = logging.getLogger(__name__)
 

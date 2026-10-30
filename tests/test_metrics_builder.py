@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
 
-from tg_jobs_parser.analytics.metrics_builder import build_metrics
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.analytics.metrics_builder import build_metrics
+from jobdesk.models.vacancy import Vacancy
 
 
 def _vac(i: int, post_date: datetime | None) -> Vacancy:

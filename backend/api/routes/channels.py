@@ -9,8 +9,8 @@ from backend.api.deps import get_db, require_admin, verify_api_key
 from backend.db import channel_candidate_repository as candidates
 from backend.schemas import ChannelCandidate, ChannelCandidatePatch, ChannelCandidatesResponse
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.parsers.channel_username import normalize_channel_username
+from jobdesk.config.loader import load_config
+from jobdesk.parsers.channel_username import normalize_channel_username
 
 router = APIRouter(
     prefix="/channels",

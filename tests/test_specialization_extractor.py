@@ -1,7 +1,7 @@
 """Тесты извлечения специализаций."""
 
-from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
-from tg_jobs_parser.extraction.specialization_extractor import extract_specializations
+from jobdesk.config.schema import DEFAULT_SPECIALIZATIONS
+from jobdesk.extraction.specialization_extractor import extract_specializations
 
 
 def test_extract_ai_ml_engineer():

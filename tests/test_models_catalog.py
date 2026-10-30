@@ -1,6 +1,6 @@
 """Утилиты каталога моделей."""
 
-from tg_jobs_parser.ai.models_catalog import LlmModelEntry, dedupe_model_ids
+from jobdesk.ai.models_catalog import LlmModelEntry, dedupe_model_ids
 
 
 def test_dedupe_model_ids():

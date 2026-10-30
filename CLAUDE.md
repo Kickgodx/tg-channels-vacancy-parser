@@ -26,15 +26,15 @@ docker compose up --build                 # UI :5173, API :9000/docs
 # DATABASE_URL не нужен: без него — tgjobs:<POSTGRES_PASSWORD из .env>@127.0.0.1:5432/tgjobs
 # (127.0.0.1, не localhost: порт опубликован только на IPv4, через ::1 psycopg на Windows ждёт connect timeout)
 .venv/Scripts/python.exe -m uvicorn backend.main:app --reload --port 8000
-# (всегда один процесс; несколько — API_WORKERS у tg-jobs-api, нужны Redis, JWT_SECRET и rq)
+# (всегда один процесс; несколько — API_WORKERS у jobdesk-api, нужны Redis, JWT_SECRET и rq)
 
 # frontend локально: /api проксируется Vite (VITE_API_PROXY_TARGET=http://localhost:9000 для
 # compose-backend, по умолчанию :8000 — uvicorn); same-origin нужен refresh-cookie SameSite=Strict
 cd frontend && npm run dev
 
 # CLI: первая авторизация Telethon, дамп/импорт БД
-.venv/Scripts/python.exe -m tg_jobs_parser.cli login --config config.yaml
-.venv/Scripts/python.exe -m tg_jobs_parser.cli db dump -o backup/tgjobs_dump.json
+.venv/Scripts/python.exe -m jobdesk.cli login --config config.yaml
+.venv/Scripts/python.exe -m jobdesk.cli db dump -o backup/jobdesk_dump.json
 ```
 
 У frontend тестов нет — проверка это `npm run lint` + `npm run build` (tsc).
@@ -44,10 +44,10 @@ cd frontend && npm run dev
 
 Три Python-пакета в одном репозитории плюс React UI:
 
-- **`tg_jobs_parser/`** — ядро: Telethon-fetch, правиловое извлечение, AI-enrichment,
+- **`jobdesk/`** — ядро: Telethon-fetch, правиловое извлечение, AI-enrichment,
   дедуп, FX, HH-клиент, экспорт. Не знает о FastAPI/SQLAlchemy.
 - **`backend/`** — FastAPI, SQLAlchemy-репозитории, очереди RQ, воркеры, auth, observability.
-- **`tg_jobs_mcp/`** — MCP-сервер (stdio) для Claude: только клиент HTTP API с персональным
+- **`jobdesk_mcp/`** — MCP-сервер (stdio) для Claude: только клиент HTTP API с персональным
   токеном (`tgj_…`), не импортирует ни `backend`, ни ядро. Зависимость `mcp` — extra `mcp`,
   в образ backend не входит. Новый инструмент = эндпоинт API; мутирующий эндпоинт, который
   должен быть доступен токену, помечается `@pat_scope("llm")` (`backend/api/deps.py`), иначе PAT
@@ -59,11 +59,11 @@ cd frontend && npm run dev
 
 ### Граница core ↔ backend
 
-Зависимость односторонняя: `backend` импортирует `tg_jobs_parser`, обратно — нет
-(единственное исключение — `tg_jobs_parser/cli/db.py`, дамп/импорт БД).
+Зависимость односторонняя: `backend` импортирует `jobdesk`, обратно — нет
+(единственное исключение — `jobdesk/cli/db.py`, дамп/импорт БД).
 Там, где ядру нужна инфраструктура, используется порт: Postgres-кэш LLM
-(`AIExtractionCacheBackend` в `tg_jobs_parser/ai/cache.py`, адаптер `DbAIExtractionCache`)
-и общий лимит запросов к LLM (`GlobalRateGate` в `tg_jobs_parser/ai/rate_limit.py`,
+(`AIExtractionCacheBackend` в `jobdesk/ai/cache.py`, адаптер `DbAIExtractionCache`)
+и общий лимит запросов к LLM (`GlobalRateGate` в `jobdesk/ai/rate_limit.py`,
 адаптер на Redis). Оба регистрирует `backend.core_ports.register_core_ports()` при старте
 каждого процесса с LLM: FastAPI lifespan, `parse-worker`, `llm-worker`. Новый entrypoint с
 LLM обязан вызвать её — без кэша `AIEnrichmentService` не создаётся, и LLM-разбор молча
@@ -74,7 +74,7 @@ entrypoint'а сбрасывает регистрацию сам (см. `tests/t
 
 `POST /runs` → `backend/services/run_service.py` → строка `parse_runs` (`queued`,
 со снимком конфигурации) → RQ-очередь `parse` или поток (`PARSE_JOB_BACKEND`) →
-`backend/workers/parse_tasks.run_parse_job` → `tg_jobs_parser/parse_runner.run_parse`:
+`backend/workers/parse_tasks.run_parse_job` → `jobdesk/parse_runner.run_parse`:
 
 Telethon fetch → `ingestion.process` (rules → опциональный AI → policy gates) →
 dedup → FX в ₽ → UPSERT в `vacancies` → метрики.
@@ -85,7 +85,7 @@ dedup → FX в ₽ → UPSERT в `vacancies` → метрики.
   `parse_runs.config_snapshot`, а не файл. Overrides — whitelist-схема
   `RunCreateRequest` (`extra="forbid"`): новое поле добавлять явно и только
   если его безопасно отдать клиенту (не `base_url`, не пути, не лимиты).
-- `tg_jobs_parser/ingestion/` — общий путь для Telegram и ручного импорта
+- `jobdesk/ingestion/` — общий путь для Telegram и ручного импорта
   (`POST /vacancies/import`, `MANUAL_POLICY` — без пост-фильтров и порога score).
   HH sync идёт мимо него: `hh/mapper` + `hh/dedup`, без LLM.
 - `id` вакансии — content-hash очищенного текста (`utils/hashing.vacancy_content_id`),
@@ -129,7 +129,7 @@ pub/sub для SSE). Все три типа джоб устроены одина
   (`backend/db/vacancy_filters.py`) из `VacancyQuery` — новый фильтр добавлять там,
   иначе список и аналитика разойдутся.
 - Специализация — роль, технология — стек: языки и инструменты из специализаций
-  переносит `split_specializations` (`tg_jobs_parser/config/schema.py`) в каждой точке
+  переносит `split_specializations` (`jobdesk/config/schema.py`) в каждой точке
   входа (правила, ответ LLM, HH, `FiltersConfig`, `VacancyQuery`); имена технологий —
   через `canonical_technologies`.
 - Только Postgres (`DATABASE_URL` другого диалекта отклоняет `Settings`): FTS,
@@ -152,7 +152,7 @@ pub/sub для SSE). Все три типа джоб устроены одина
 
 ### Конфигурация
 
-- `config.yaml` (схема — `tg_jobs_parser/config/schema.py`, описание — `config.md`) —
+- `config.yaml` (схема — `jobdesk/config/schema.py`, описание — `config.md`) —
   доменные настройки; `backend/settings.py` — env-настройки процесса (`.env`).
   `get_settings()` под `lru_cache`: в тестах после `monkeypatch.setenv` нужен
   `get_settings.cache_clear()` (и `reset_engine()` при смене `DATABASE_URL`) —

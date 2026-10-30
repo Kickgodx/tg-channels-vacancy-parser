@@ -19,7 +19,7 @@ from backend.services.parse_run_events import publish_parse_run_event
 from backend.settings import get_settings
 from backend.tracing import current_traceparent
 from backend.workers.parse_tasks import run_parse_job
-from tg_jobs_parser.config.schema import AppConfig
+from jobdesk.config.schema import AppConfig
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)

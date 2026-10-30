@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tg_jobs_parser.ai.prompts import SYSTEM_PROMPT_V1, build_messages
-from tg_jobs_parser.ai.search_context import SearchContext
+from jobdesk.ai.prompts import SYSTEM_PROMPT_V1, build_messages
+from jobdesk.ai.search_context import SearchContext
 
 
 def _ctx() -> SearchContext:

@@ -32,7 +32,7 @@
       },
       "targets": [
         {
-          "expr": "llm_rq_queue_jobs{queue=\"llm\", job=\"tg-jobs-backend\"}",
+          "expr": "llm_rq_queue_jobs{queue=\"llm\", job=\"jobdesk-backend\"}",
           "legendFormat": "RQ depth",
           "refId": "A"
         }
@@ -54,7 +54,7 @@
       },
       "targets": [
         {
-          "expr": "llm_jobs_by_status{job=\"tg-jobs-backend\"}",
+          "expr": "llm_jobs_by_status{job=\"jobdesk-backend\"}",
           "legendFormat": "{{status}}",
           "refId": "A"
         }
@@ -169,7 +169,7 @@
       },
       "targets": [
         {
-          "expr": "llm_job_sse_connections{job=\"tg-jobs-backend\"}",
+          "expr": "llm_job_sse_connections{job=\"jobdesk-backend\"}",
           "legendFormat": "SSE connections",
           "refId": "A"
         }
@@ -180,12 +180,12 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["tg-jobs-parser", "llm", "rq"],
+  "tags": ["jobdesk", "llm", "rq"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
   "title": "LLM jobs / queue",
-  "uid": "tg-jobs-llm-jobs",
+  "uid": "jobdesk-llm-jobs",
   "version": 1
 }

@@ -12,7 +12,7 @@ from backend.db.models import ParseRunRow
 from backend.db.session import get_session_factory, session_scope
 from backend.services.parse_run_events import publish_parse_run_event
 from backend.services.vacancy_preview import build_vacancies_preview
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.models.vacancy import Vacancy
 
 
 def _vac(vid: str, *, channel: str = "ch", post_id: str = "1") -> Vacancy:

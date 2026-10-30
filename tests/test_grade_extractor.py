@@ -1,4 +1,4 @@
-from tg_jobs_parser.extraction.grade_extractor import extract_grade
+from jobdesk.extraction.grade_extractor import extract_grade
 
 
 def test_senior_over_middle():

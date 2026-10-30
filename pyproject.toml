@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tg-jobs-parser"
+name = "jobdesk"
 version = "0.1.0"
-description = "MVP-парсер Telegram-каналов с IT-вакансиями через Telethon (Windows-first)"
+description = "JobDesk — агрегатор IT-вакансий (Telegram, HH.ru, ручной импорт) с AI-разбором, аналитикой рынка и инструментами соискателя"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -48,16 +48,16 @@ dependencies = [
 # testcontainers: тесты сами поднимают postgres:16 + pgvector (docker/postgres), если не задан TEST_DATABASE_URL.
 dev = ["pytest>=8.0.0", "pytest-xdist>=3.5.0", "pytest-cov>=6.0.0", "ruff>=0.14.0,<1.0.0", "fakeredis>=2.26.0", "testcontainers>=4.8.0"]
 telethon = ["cryptg>=0.5.0"]
-# MCP-сервер (tg_jobs_mcp): клиент HTTP API для Claude Desktop / Claude Code; в образ backend не входит.
+# MCP-сервер (jobdesk_mcp): клиент HTTP API для Claude Desktop / Claude Code; в образ backend не входит.
 mcp = ["mcp>=2.3.0,<3"]
 
 [project.scripts]
-tg-jobs-parser = "tg_jobs_parser.cli.app:main"
-tg-jobs-api = "backend.main:main"
-tg-jobs-llm-worker = "backend.workers.llm_worker:main"
-tg-jobs-parse-worker = "backend.workers.parse_worker:main"
-tg-jobs-hh-worker = "backend.workers.hh_worker:main"
-tg-jobs-mcp = "tg_jobs_mcp.__main__:main"
+jobdesk = "jobdesk.cli.app:main"
+jobdesk-api = "backend.main:main"
+jobdesk-llm-worker = "backend.workers.llm_worker:main"
+jobdesk-parse-worker = "backend.workers.parse_worker:main"
+jobdesk-hh-worker = "backend.workers.hh_worker:main"
+jobdesk-mcp = "jobdesk_mcp.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -72,7 +72,7 @@ markers = [
 
 # Покрытие считается по запросу (`pytest --cov`), в addopts не включено — замедляет прогон.
 [tool.coverage.run]
-source = ["tg_jobs_parser", "backend", "tg_jobs_mcp"]
+source = ["jobdesk", "backend", "jobdesk_mcp"]
 branch = true
 
 [tool.coverage.report]
@@ -93,7 +93,7 @@ directory = "htmlcov"
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-src = ["tg_jobs_parser", "backend", "tests"]
+src = ["jobdesk", "backend", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -115,7 +115,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["tg_jobs_parser", "backend"]
+known-first-party = ["jobdesk", "backend"]
 
 [tool.ruff.lint.per-file-ignores]
 # Исторические миграции не трогаем (UP/I ломают стабильность ревизий).

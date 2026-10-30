@@ -9,7 +9,7 @@ from logging.handlers import QueueHandler
 
 import pytest
 
-from tg_jobs_parser.utils import logger as logger_mod
+from jobdesk.utils import logger as logger_mod
 
 
 @pytest.fixture

@@ -96,7 +96,7 @@ function QuantileTable({ title, rows }: { title: string; rows: SalaryGroupStats[
   );
 }
 
-// Порядок грейдов по старшинству — как _ORDER в tg_jobs_parser/extraction/grade_extractor.py.
+// Порядок грейдов по старшинству — как _ORDER в jobdesk/extraction/grade_extractor.py.
 const GRADE_ORDER = [
   "intern",
   "junior",

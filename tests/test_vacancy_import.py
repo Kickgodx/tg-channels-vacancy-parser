@@ -111,7 +111,7 @@ class _FakeAI:
     calls: ClassVar[list[str]] = []
 
     def __init__(self, config):
-        from tg_jobs_parser.ai.enricher import RunAIStats
+        from jobdesk.ai.enricher import RunAIStats
 
         self.stats = RunAIStats()
 
@@ -136,12 +136,12 @@ class _FakeAI:
 @pytest.fixture
 def fake_ai(monkeypatch, default_test_config) -> list[str]:
     """ai.enabled + фейковый LLM; возвращает id вакансий, ушедших в модель."""
-    from tg_jobs_parser.config.loader import load_config
+    from jobdesk.config.loader import load_config
 
     real_cfg = load_config(default_test_config)
     ai_cfg = real_cfg.model_copy(update={"ai": real_cfg.ai.model_copy(update={"enabled": True})})
     monkeypatch.setattr(import_service, "load_config", lambda *a, **k: ai_cfg)
-    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", _FakeAI, raising=True)
+    monkeypatch.setattr("jobdesk.ai.enricher.AIEnrichmentService", _FakeAI, raising=True)
     monkeypatch.setattr(_FakeAI, "calls", [])
     return _FakeAI.calls
 
@@ -296,7 +296,7 @@ def test_import_job_rq_timeout_grows_with_texts():
 @pytest.fixture
 def broken_ai(monkeypatch, default_test_config) -> None:
     """ai.enabled, но LLM не запускается (например, нет ключа)."""
-    from tg_jobs_parser.config.loader import load_config
+    from jobdesk.config.loader import load_config
 
     real_cfg = load_config(default_test_config)
     ai_cfg = real_cfg.model_copy(update={"ai": real_cfg.ai.model_copy(update={"enabled": True})})
@@ -305,7 +305,7 @@ def broken_ai(monkeypatch, default_test_config) -> None:
     def broken(*args, **kwargs):
         raise ValueError("OPENROUTER_API_KEY не задан")
 
-    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", broken)
+    monkeypatch.setattr("jobdesk.ai.enricher.AIEnrichmentService", broken)
 
 
 def test_import_job_fails_when_llm_does_not_start(api_client, broken_ai):
@@ -333,7 +333,7 @@ def test_import_job_without_llm_keeps_partial_result_and_quota(api_client, broke
 
     from backend.db.models import LlmUserUsageRow, VacancyRow
     from backend.db.session import session_scope
-    from tg_jobs_parser.ai.enricher import LlmUnavailableError
+    from jobdesk.ai.enricher import LlmUnavailableError
 
     done_item = {"index": 0, "status": "not_vacancy", "message": "LLM: текст не похож на вакансию"}
     partial = {"total": 2, "ai_enabled": True, "warning": None, "items": [done_item]}
@@ -356,9 +356,9 @@ def test_import_text_over_max_posts_per_run_in_primary_is_error(api_client, monk
 
     from backend.db.models import VacancyRow
     from backend.db.session import session_scope
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
-    from tg_jobs_parser.ai.schema import VacancyAIExtraction
-    from tg_jobs_parser.config.loader import load_config
+    from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient
+    from jobdesk.ai.schema import VacancyAIExtraction
+    from jobdesk.config.loader import load_config
 
     real_cfg = load_config(default_test_config)
     ai_cfg = real_cfg.model_copy(

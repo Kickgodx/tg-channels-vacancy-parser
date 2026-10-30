@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
-from tg_jobs_parser.config.schema import AppConfig, FiltersConfig, ParserConfig, SourcesConfig
-from tg_jobs_parser.ingestion.policy import MANUAL_POLICY, IngestPolicy
-from tg_jobs_parser.ingestion.process import apply_ingest_stages, process_raw_post
-from tg_jobs_parser.ingestion.rules import rules_from_raw_post
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.parsers.base import RawPost
+from jobdesk.config.schema import AppConfig, FiltersConfig, ParserConfig, SourcesConfig
+from jobdesk.ingestion.policy import MANUAL_POLICY, IngestPolicy
+from jobdesk.ingestion.process import apply_ingest_stages, process_raw_post
+from jobdesk.ingestion.rules import rules_from_raw_post
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.parsers.base import RawPost
 
 
 def _cfg(**kwargs) -> AppConfig:

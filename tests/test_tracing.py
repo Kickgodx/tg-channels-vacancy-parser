@@ -16,7 +16,7 @@ from opentelemetry.trace import SpanKind
 
 from backend.http_logging import HttpLoggingMiddleware
 from backend.tracing import excluded_urls, instrument_app
-from tg_jobs_parser.utils.logger import RequestIdFilter
+from jobdesk.utils.logger import RequestIdFilter
 
 
 @pytest.fixture
@@ -119,8 +119,8 @@ def test_excluded_path_has_no_span(traced_client, exporter):
 
 
 def test_llm_call_span_has_genai_attributes(exporter, monkeypatch):
-    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
-    from tg_jobs_parser.config.schema import AiConfig
+    from jobdesk.ai.clients.openrouter import OpenRouterClient
+    from jobdesk.config.schema import AiConfig
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     client = OpenRouterClient(AiConfig(model="parse/model", cover_letter_model="writer/model"))
@@ -197,7 +197,7 @@ def test_main_serves_the_instrumented_app_object(monkeypatch):
 
 
 def test_post_workers_inherit_parent_span(exporter):
-    from tg_jobs_parser.parse_runner import _submit_in_context
+    from jobdesk.parse_runner import _submit_in_context
 
     seen: list[int] = []
 

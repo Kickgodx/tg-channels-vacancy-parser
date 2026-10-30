@@ -7,15 +7,15 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from backend.db import fx_repository as fx_repo
-from tg_jobs_parser.config.schema import FxConfig
-from tg_jobs_parser.fx.convert import (
+from jobdesk.config.schema import FxConfig
+from jobdesk.fx.convert import (
     currency_for_rate_lookup,
     is_ruble_currency,
     monthly_salary_amount,
     normalize_currency,
 )
-from tg_jobs_parser.fx.vacancy_rub import effective_salary_amount_for_vacancy
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.fx.vacancy_rub import effective_salary_amount_for_vacancy
+from jobdesk.models.vacancy import Vacancy
 
 
 def _rates_from_cache(

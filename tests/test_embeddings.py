@@ -262,7 +262,7 @@ def test_match_batch_scores_skips_fresh_and_reports(api_client, monkeypatch):
     from tests.llm_job_helpers import current_ai
 
     from backend.db import repository as repo
-    from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION
+    from jobdesk.ai.prompts import MATCH_PROMPT_VERSION
 
     token = _token(api_client)
     rid = api_client.post("/api/v1/resumes", headers=_h(token), json={"name": "CV", "text": "python"}).json()["id"]
@@ -387,8 +387,8 @@ def test_embed_sends_provider_order(monkeypatch):
     """Порядок провайдеров уходит в OpenRouter как provider.order с запасными; пустой — без него."""
     from types import SimpleNamespace
 
-    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
-    from tg_jobs_parser.config.schema import AiConfig
+    from jobdesk.ai.clients.openrouter import OpenRouterClient
+    from jobdesk.config.schema import AiConfig
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     client = OpenRouterClient(AiConfig(enabled=True))

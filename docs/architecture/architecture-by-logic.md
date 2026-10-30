@@ -22,7 +22,7 @@ flowchart LR
 |-----|--------|
 | Run | `backend.services.run_service` |
 | Fetch | `parsers.telegram_telethon` / `parse_runner` |
-| Ingest | `tg_jobs_parser.ingestion` (`rules` + `process` + `IngestPolicy`) |
+| Ingest | `jobdesk.ingestion` (`rules` + `process` + `IngestPolicy`) |
 | Rules | `extraction/*` (через `ingestion.rules`) |
 | Filters | `filters.vacancy_filters` (policy Telegram) |
 | AI | `ai.enricher` → OpenRouter (+ cache port) |

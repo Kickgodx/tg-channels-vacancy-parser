@@ -12,8 +12,8 @@ from backend.db import vacancy_repository
 from backend.db.repository import upsert_vacancies
 from backend.db.session import get_session_factory
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.hashing import vacancy_content_id
 
 _BASE = datetime(2026, 10, 1, tzinfo=UTC)
 

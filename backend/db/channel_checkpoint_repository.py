@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.db.models import TelegramChannelCheckpointRow
-from tg_jobs_parser.parsers.base import ChannelCheckpoint
+from jobdesk.parsers.base import ChannelCheckpoint
 
 CheckpointChanges = dict[str, tuple[ChannelCheckpoint | None, ChannelCheckpoint]]
 

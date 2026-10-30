@@ -18,8 +18,8 @@
   "graphTooltip": 1,
   "id": null,
   "links": [
-    { "title": "Pipeline", "type": "link", "url": "/d/tg-jobs-app" },
-    { "title": "LLM", "type": "link", "url": "/d/tg-jobs-llm" }
+    { "title": "Pipeline", "type": "link", "url": "/d/jobdesk-app" },
+    { "title": "LLM", "type": "link", "url": "/d/jobdesk-llm" }
   ],
   "panels": [
     {
@@ -54,7 +54,7 @@
       },
       "targets": [
         {
-          "expr": "max((parse_runs_active{job=\"tg-jobs-parse-worker\"} > 0) * (time() - parse_run_started_timestamp_seconds{job=\"tg-jobs-parse-worker\"})) or vector(0)",
+          "expr": "max((parse_runs_active{job=\"jobdesk-parse-worker\"} > 0) * (time() - parse_run_started_timestamp_seconds{job=\"jobdesk-parse-worker\"})) or vector(0)",
           "refId": "A",
           "instant": true
         }
@@ -150,7 +150,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(llm_requests_total{job=\"tg-jobs-parse-worker\"}[$__range])) or vector(0)",
+          "expr": "sum(increase(llm_requests_total{job=\"jobdesk-parse-worker\"}[$__range])) or vector(0)",
           "refId": "A",
           "instant": true
         }
@@ -181,7 +181,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(llm_cost_usd_total{job=\"tg-jobs-parse-worker\"}[$__range])) or vector(0)",
+          "expr": "sum(increase(llm_cost_usd_total{job=\"jobdesk-parse-worker\"}[$__range])) or vector(0)",
           "refId": "A",
           "instant": true
         }
@@ -282,7 +282,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (event) (increase(llm_enrich_events_total{job=\"tg-jobs-parse-worker\"}[$__range]))",
+          "expr": "sum by (event) (increase(llm_enrich_events_total{job=\"jobdesk-parse-worker\"}[$__range]))",
           "legendFormat": "{{event}}",
           "refId": "A",
           "instant": true
@@ -356,7 +356,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (event) (rate(llm_enrich_events_total{job=\"tg-jobs-parse-worker\"}[1m])) * 60",
+          "expr": "sum by (event) (rate(llm_enrich_events_total{job=\"jobdesk-parse-worker\"}[1m])) * 60",
           "legendFormat": "{{event}}",
           "refId": "A"
         }
@@ -578,22 +578,22 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(llm_request_duration_seconds_bucket{job=\"tg-jobs-parse-worker\"}[2m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(llm_request_duration_seconds_bucket{job=\"jobdesk-parse-worker\"}[2m])))",
           "legendFormat": "вызов p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(llm_request_duration_seconds_bucket{job=\"tg-jobs-parse-worker\"}[2m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(llm_request_duration_seconds_bucket{job=\"jobdesk-parse-worker\"}[2m])))",
           "legendFormat": "вызов p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(llm_rate_gate_wait_seconds_bucket{job=\"tg-jobs-parse-worker\"}[2m])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(llm_rate_gate_wait_seconds_bucket{job=\"jobdesk-parse-worker\"}[2m])))",
           "legendFormat": "ожидание лимита p50",
           "refId": "C"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(llm_rate_gate_wait_seconds_bucket{job=\"tg-jobs-parse-worker\"}[2m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(llm_rate_gate_wait_seconds_bucket{job=\"jobdesk-parse-worker\"}[2m])))",
           "legendFormat": "ожидание лимита p95",
           "refId": "D"
         }
@@ -626,7 +626,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(llm_requests_total{job=\"tg-jobs-parse-worker\"}[1m])) * 60",
+          "expr": "sum by (outcome) (rate(llm_requests_total{job=\"jobdesk-parse-worker\"}[1m])) * 60",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
@@ -659,7 +659,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (reason) (rate(llm_retries_total{job=\"tg-jobs-parse-worker\"}[1m])) * 60",
+          "expr": "sum by (reason) (rate(llm_retries_total{job=\"jobdesk-parse-worker\"}[1m])) * 60",
           "legendFormat": "{{reason}}",
           "refId": "A"
         }
@@ -692,7 +692,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (model) (rate(llm_cost_usd_total{job=\"tg-jobs-parse-worker\"}[1m])) * 60",
+          "expr": "sum by (model) (rate(llm_cost_usd_total{job=\"jobdesk-parse-worker\"}[1m])) * 60",
           "legendFormat": "{{model}}",
           "refId": "A"
         }
@@ -724,7 +724,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (direction) (rate(llm_tokens_total{job=\"tg-jobs-parse-worker\"}[1m])) * 60",
+          "expr": "sum by (direction) (rate(llm_tokens_total{job=\"jobdesk-parse-worker\"}[1m])) * 60",
           "legendFormat": "{{direction}}",
           "refId": "A"
         }
@@ -764,7 +764,7 @@
       },
       "targets": [
         {
-          "expr": "time() - max by (job, instance) (worker_heartbeat_timestamp_seconds{job=~\"tg-jobs-.*-worker\"} > 0)",
+          "expr": "time() - max by (job, instance) (worker_heartbeat_timestamp_seconds{job=~\"jobdesk-.*-worker\"} > 0)",
           "legendFormat": "{{job}} {{instance}}",
           "refId": "A"
         }
@@ -797,7 +797,7 @@
       },
       "targets": [
         {
-          "expr": "process_resident_memory_bytes{job=~\"tg-jobs-.*\"}",
+          "expr": "process_resident_memory_bytes{job=~\"jobdesk-.*\"}",
           "legendFormat": "{{job}} {{instance}}",
           "refId": "A"
         }
@@ -829,7 +829,7 @@
       },
       "targets": [
         {
-          "expr": "rate(process_cpu_seconds_total{job=~\"tg-jobs-.*\"}[1m])",
+          "expr": "rate(process_cpu_seconds_total{job=~\"jobdesk-.*\"}[1m])",
           "legendFormat": "{{job}} {{instance}}",
           "refId": "A"
         }
@@ -868,7 +868,7 @@
         "legend": { "showLegend": false }
       },
       "targets": [
-        { "expr": "up{job=~\"tg-jobs-.*\"}", "legendFormat": "{{job}} {{instance}}", "refId": "A" }
+        { "expr": "up{job=~\"jobdesk-.*\"}", "legendFormat": "{{job}} {{instance}}", "refId": "A" }
       ]
     },
     {
@@ -893,7 +893,7 @@
           "refId": "A",
           "limit": 20,
           "tableType": "traces",
-          "query": "{resource.service.name=\"tg-jobs-parser-parse-worker\" && name=\"parse_run\"}"
+          "query": "{resource.service.name=\"jobdesk-parse-worker\" && name=\"parse_run\"}"
         }
       ],
       "options": { "showHeader": true },
@@ -923,12 +923,12 @@
   ],
   "refresh": "10s",
   "schemaVersion": 39,
-  "tags": ["tg-jobs-parser", "parse", "telegram", "llm"],
+  "tags": ["jobdesk", "parse", "telegram", "llm"],
   "templating": { "list": [] },
   "time": { "from": "now-30m", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "tg-jobs-parser Parse run",
-  "uid": "tg-jobs-parse-run",
+  "title": "jobdesk Parse run",
+  "uid": "jobdesk-parse-run",
   "version": 1
 }

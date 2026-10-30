@@ -61,9 +61,9 @@ bash scripts/loadtest/clone_db.sh drop
 - **Живой дашборд**: `LIVE=1 bash scripts/loadtest/run.sh mix 32 2m`, во время прогона —
   http://localhost:5665.
 - **Grafana**: `PROM_RW=1 bash scripts/loadtest/run.sh mix 32 2m` пишет метрики k6 в
-  Prometheus compose (remote write). Дашборд **k6 load test** (папка tg-jobs-parser)
+  Prometheus compose (remote write). Дашборд **k6 load test** (папка jobdesk)
   показывает RPS, p50/p95/p99, ошибки и VU k6. Рядом — RPS, задержки, эндпоинты и пул
-  БД стенда: Prometheus снимает `lt-api:9100` каждые 5 с (job `tg-jobs-loadtest`).
+  БД стенда: Prometheus снимает `lt-api:9100` каждые 5 с (job `jobdesk-loadtest`).
   Прогоны различаются меткой `testid`.
 
 ## Настройки стенда

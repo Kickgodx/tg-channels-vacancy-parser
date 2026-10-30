@@ -4,7 +4,7 @@
 
 Пишет corpus.jsonl (уникальные вакансии, текст — как у прод-индексации), dups.jsonl (скрытые
 копии → оригинал), resumes.jsonl (резюме + LLM-оценки матчей). Каталог в .gitignore: там тексты
-вакансий и резюме. Дальше — ``python -m tg_jobs_parser.evals.embeddings``.
+вакансий и резюме. Дальше — ``python -m jobdesk.evals.embeddings``.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from sqlalchemy.orm import Session, aliased
 from backend.db.models import ResumeRow, VacancyMatchRow, VacancyRow
 from backend.services.embedding_service import vacancy_text
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.evals.embeddings.data import DATA_DIR, CorpusDoc, DupPair, ResumeCase, write_jsonl
+from jobdesk.config.loader import load_config
+from jobdesk.evals.embeddings.data import DATA_DIR, CorpusDoc, DupPair, ResumeCase, write_jsonl
 
 
 def main() -> int:

@@ -12,7 +12,7 @@ from backend.db.models import RefreshTokenRow, UserRow
 from backend.db.session import session_scope
 from backend.services import auth_service
 from backend.services.db_cleanup import purge_service_tables
-from tg_jobs_parser.config.schema import RetentionConfig
+from jobdesk.config.schema import RetentionConfig
 
 COOKIE = auth_service.REFRESH_COOKIE
 

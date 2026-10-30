@@ -14,14 +14,14 @@ alerting:
 
 scrape_configs:
   # Отдельный порт метрик backend (API_METRICS_PORT), не порт API: на хост он не публикуется.
-  - job_name: tg-jobs-backend
+  - job_name: jobdesk-backend
     static_configs:
       - targets: ["backend:9100"]
     metrics_path: /metrics
 
   # Стенд нагрузочного теста (scripts/loadtest/stand.sh, контейнер lt-api). DNS SD:
   # без стенда имя не резолвится — целей нет, а не down-таргет.
-  - job_name: tg-jobs-loadtest
+  - job_name: jobdesk-loadtest
     scrape_interval: 5s
     dns_sd_configs:
       - names:
@@ -33,7 +33,7 @@ scrape_configs:
 
   # Все реплики llm-worker (compose DNS отдаёт A-записи по имени сервиса).
   # static_configs на llm-worker:9101 при --scale скрейпит только один контейнер.
-  - job_name: tg-jobs-llm-worker
+  - job_name: jobdesk-llm-worker
     dns_sd_configs:
       - names:
           - llm-worker
@@ -44,7 +44,7 @@ scrape_configs:
       - source_labels: [__meta_dns_name]
         target_label: dns_name
 
-  - job_name: tg-jobs-parse-worker
+  - job_name: jobdesk-parse-worker
     dns_sd_configs:
       - names:
           - parse-worker
@@ -55,7 +55,7 @@ scrape_configs:
       - source_labels: [__meta_dns_name]
         target_label: dns_name
 
-  - job_name: tg-jobs-hh-worker
+  - job_name: jobdesk-hh-worker
     dns_sd_configs:
       - names:
           - hh-worker

@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from tg_jobs_parser.config.loader import ConfigLoadError
+from jobdesk.config.loader import ConfigLoadError
 
 CODE_CONFLICT_ACTIVE_RUN = "CONFLICT_ACTIVE_RUN"
 CODE_RATE_LIMITED = "RATE_LIMITED"

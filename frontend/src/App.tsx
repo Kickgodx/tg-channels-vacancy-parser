@@ -58,7 +58,7 @@ export default function App() {
   const authed = Boolean(getToken());
   return (
     <div className="app-shell">
-      <h1 className="no-print">Telegram Jobs Parser</h1>
+      <h1 className="no-print">JobDesk</h1>
       {authed && (
         <nav className="no-print">
           <AdminNavLink to="/" end>

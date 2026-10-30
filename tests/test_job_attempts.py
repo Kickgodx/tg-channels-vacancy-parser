@@ -16,9 +16,9 @@ from backend.settings import get_settings
 from backend.workers import parse_tasks
 from backend.workers.recover import recover_stuck_llm_jobs
 from backend.workers.recover_parse import recover_stuck_parse_runs
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.models.metrics import MetricsSummary
-from tg_jobs_parser.models.parse_result import ParseResult
+from jobdesk.config.loader import load_config
+from jobdesk.models.metrics import MetricsSummary
+from jobdesk.models.parse_result import ParseResult
 
 
 @pytest.fixture(autouse=True)

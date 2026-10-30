@@ -1,18 +1,18 @@
-"""Пост-фильтры вакансий (tg_jobs_parser.filters.vacancy_filters)."""
+"""Пост-фильтры вакансий (jobdesk.filters.vacancy_filters)."""
 
 from __future__ import annotations
 
 import pytest
 
-from tg_jobs_parser.config.schema import AppConfig
-from tg_jobs_parser.filters.vacancy_filters import (
+from jobdesk.config.schema import AppConfig
+from jobdesk.filters.vacancy_filters import (
     apply_post_filters,
     matches_exclude_keywords,
     matches_location_policy,
     matches_specialization_filter,
     matches_work_format_policy,
 )
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.models.vacancy import Vacancy
 
 
 def _vacancy(text: str = "Python backend developer, Django, PostgreSQL", **kwargs) -> Vacancy:

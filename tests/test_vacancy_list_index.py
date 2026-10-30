@@ -9,8 +9,8 @@ from tests.conftest import new_parse_run
 
 from backend.db.repository import list_vacancies, upsert_vacancies
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.hashing import vacancy_content_id
 
 
 def _vac(cleaned: str, *, days_ago: int = 0) -> Vacancy:

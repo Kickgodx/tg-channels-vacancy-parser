@@ -14,8 +14,8 @@ def _instant_runs(monkeypatch) -> None:
     get_settings.cache_clear()
 
     def fake_run_parse(config, **kwargs):
-        from tg_jobs_parser.models.metrics import MetricsSummary
-        from tg_jobs_parser.models.parse_result import ParseResult
+        from jobdesk.models.metrics import MetricsSummary
+        from jobdesk.models.parse_result import ParseResult
 
         return ParseResult(
             run_params={},

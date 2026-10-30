@@ -34,12 +34,12 @@ from backend.services.llm_job_service import KIND_MATCH, llm_job_runner
 from backend.services.llm_rate_gate import RedisWindowRateGate
 from backend.settings import get_settings
 from backend.workers import hh_sync_tasks, hh_worker, liveness, llm_worker, parse_tasks, parse_worker, runner
-from tg_jobs_parser.ai import cache_registry, rate_limit
-from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
-from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION
-from tg_jobs_parser.ai.schema import VacancyAIExtraction, VacancyMatchExtraction
-from tg_jobs_parser.models.metrics import MetricsSummary
-from tg_jobs_parser.models.parse_result import ParseResult
+from jobdesk.ai import cache_registry, rate_limit
+from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient
+from jobdesk.ai.prompts import MATCH_PROMPT_VERSION
+from jobdesk.ai.schema import VacancyAIExtraction, VacancyMatchExtraction
+from jobdesk.models.metrics import MetricsSummary
+from jobdesk.models.parse_result import ParseResult
 
 _executed: list[str] = []
 
@@ -125,7 +125,7 @@ def _assert_process_lifecycle(rec, *, role: str, queue: str, metrics_port: int) 
     assert rec.pool_role == role
     assert rec.queues == [queue]
     assert rec.metrics_ports == [metrics_port]
-    assert os.environ["OTEL_SERVICE_NAME"] == f"tg-jobs-parser-{role}"
+    assert os.environ["OTEL_SERVICE_NAME"] == f"jobdesk-{role}"
     assert rec.recover_interval == get_settings().job_recover_interval_seconds
     assert rec.watchdog_seconds == get_settings().worker_stall_exit_seconds
     # После выхода из work() фоновые потоки остановлены, трассировка сброшена.
@@ -331,7 +331,7 @@ def test_llm_worker_runs_import_with_llm(fake_redis, worker_process, monkeypatch
     from backend.db.models import AIExtractionCacheRow
     from backend.services import import_service
     from backend.services.llm_job_service import KIND_IMPORT
-    from tg_jobs_parser.config.loader import load_config
+    from jobdesk.config.loader import load_config
 
     cfg = load_config(default_test_config)
     ai_cfg = cfg.model_copy(
@@ -377,7 +377,7 @@ def test_llm_worker_fails_import_when_llm_does_not_start(fake_redis, worker_proc
     """RQ-путь: LLM в воркере не запустился — импорт-задача error, текст не сохранён правилами."""
     from backend.services import import_service
     from backend.services.llm_job_service import KIND_IMPORT
-    from tg_jobs_parser.config.loader import load_config
+    from jobdesk.config.loader import load_config
 
     cfg = load_config(default_test_config)
     ai_cfg = cfg.model_copy(update={"ai": cfg.ai.model_copy(update={"enabled": True})})
@@ -386,7 +386,7 @@ def test_llm_worker_fails_import_when_llm_does_not_start(fake_redis, worker_proc
     def broken(*args, **kwargs):
         raise ValueError("OPENROUTER_API_KEY не задан")
 
-    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", broken)
+    monkeypatch.setattr("jobdesk.ai.enricher.AIEnrichmentService", broken)
     with session_scope() as session:
         user_id = new_user(session)
     job_id = llm_job_runner.enqueue(

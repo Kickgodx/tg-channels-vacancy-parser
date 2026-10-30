@@ -1,6 +1,6 @@
 # Описание `config.yaml`
 
-Структура соответствует `tg_jobs_parser/config/schema.py`.
+Структура соответствует `jobdesk/config/schema.py`.
 
 Неизвестный ключ (опечатка вроде `fx.enabeld`) — ошибка загрузки конфигурации со списком путей всех таких ключей: `GET /config` отвечает 500, прогон не создаётся, `GET /health` — `degraded`. Устаревшие `ai.models` и `ai.fallback_model` (= `ai.fallback_models: [<модель>]`) принимаются. Свободные ключи словарей (`dictionaries.specializations` и т. п.) не проверяются.
 
@@ -74,7 +74,7 @@
 |------|------------|
 | **`specializations`** | Дополнительные **синонимы** к уже заданным в коде ролям (`"Backend"`, `"QA"`…) или новые роли со своими синонимами. Языки и инструменты (`Python`, `Go`…) — не роли: такие ключи игнорируются, их ищет словарь `technologies`. |
 | **`exclude_keywords`** | `null` — к **дефолтному** большому списку из схемы (`DEFAULT_EXCLUDE_KEYWORDS`) добавляются только `filters.exclude_keywords`. Если задать **список** — **только он** считается базой исключений (дефолт из кода подменяется). |
-| **`technologies`** | Дополнительные технологии к `DEFAULT_TECHNOLOGIES`, для распознавания в тексте поста (и варианты фильтра технологий в форме прогона). Каноническое написание и алиасы (`Golang` → `Go`, `Postgres` → `PostgreSQL`) — `TECHNOLOGY_ALIASES` в `tg_jobs_parser/config/schema.py`; любое упоминание 1С (`1С:Предприятие 8.3`, `1C:ERP`, `язык запросов 1С`) — одна технология `1С`, `1С-Битрикс` / `Битрикс24` — `Bitrix`. |
+| **`technologies`** | Дополнительные технологии к `DEFAULT_TECHNOLOGIES`, для распознавания в тексте поста (и варианты фильтра технологий в форме прогона). Каноническое написание и алиасы (`Golang` → `Go`, `Postgres` → `PostgreSQL`) — `TECHNOLOGY_ALIASES` в `jobdesk/config/schema.py`; любое упоминание 1С (`1С:Предприятие 8.3`, `1C:ERP`, `язык запросов 1С`) — одна технология `1С`, `1С-Битрикс` / `Битрикс24` — `Bitrix`. |
 | **`work_format_synonyms`** | Дополнительные фразы к встроенным синонимам remote/hybrid/office/relocation для детектирования формата работы. |
 
 ---
@@ -85,7 +85,7 @@
 
 | Поле | Назначение |
 |------|------------|
-| **`prompt_version`** | Должен совпадать с `EXTRACT_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py`. Кэш LLM ключуется константой; при расхождении — warning. Смысловое изменение extraction-промпта → bump константы. |
+| **`prompt_version`** | Должен совпадать с `EXTRACT_PROMPT_VERSION` в `jobdesk/ai/prompts.py`. Кэш LLM ключуется константой; при расхождении — warning. Смысловое изменение extraction-промпта → bump константы. |
 | **`concurrency`** | Параллелизм LLM при **парсинге** постов. |
 | **`interactive_concurrency`** | Только `LLM_JOB_BACKEND=inprocess` (локально, тесты): размер пула потоков фоновых LLM-джоб в процессе API. При `rq` не действует — параллелизм равен числу реплик `llm-worker` (`--scale llm-worker=N`). |
 | **`interactive_per_user_limit`** | Сколько LLM-джоб (`queued`+`running`) одновременно на одного пользователя (по умолчанию 2); сверх лимита — HTTP 429. |
@@ -100,7 +100,7 @@
 | **`allow_unknown_specializations`** | `true` (по умолчанию) — специализации, которых нет в словаре, сохраняются как есть; `false` — отбрасываются. |
 | **`skip_if_vacancy_score_below`** | Пост с rules-score ниже порога в LLM не отправляется и отбрасывается (`0` — все посты идут в LLM). Ручной импорт этот порог не применяет. |
 | **`embeddings.enabled`** | Эмбеддинги вакансий и резюме: «Похожие вакансии», смысловой поиск, подбор под резюме (по умолчанию `true`; без `OPENROUTER_API_KEY` индексация пропускается, смысловые запросы — 503). |
-| **`embeddings.model`** | Модель OpenRouter `/embeddings` (по умолчанию `qwen/qwen3-embedding-8b`). Размерность 1536 зашита в колонку `vector(1536)` — модель должна её поддерживать (параметр `dimensions`; voyage-4 и bge-m3 — нет). Смена модели — фоновая переиндексация каталога; до её конца используются только векторы новой модели. Сравнить модели — `python -m tg_jobs_parser.evals.embeddings`. |
+| **`embeddings.model`** | Модель OpenRouter `/embeddings` (по умолчанию `qwen/qwen3-embedding-8b`). Размерность 1536 зашита в колонку `vector(1536)` — модель должна её поддерживать (параметр `dimensions`; voyage-4 и bge-m3 — нет). Смена модели — фоновая переиндексация каталога; до её конца используются только векторы новой модели. Сравнить модели — `python -m jobdesk.evals.embeddings`. |
 | **`embeddings.providers`** | Порядок провайдеров OpenRouter для модели эмбеддингов (`provider.order`, остальные — запасные; по умолчанию `[DeepInfra, Nebius]` — у Nebius бывает исчерпана квота на Qwen3, 429). `[]` — провайдера выбирает OpenRouter. |
 | **`embeddings.query_instruction`** / **`resume_instruction`** | Инструкция к тексту смыслового запроса / резюме: уходит как `Instruct: …\nQuery:<текст>` (формат Qwen3, Nemotron). Для моделей без инструкций (OpenAI, Gemini, pplx) — `""`. Вакансии — всегда без инструкции. |
 | **`embeddings.near_duplicate_distance`** | «Похожие»: ближе этого косинусного расстояния — тот же текст, не показывается (0.013 для Qwen3; 0.02 для `text-embedding-3-small`). Зависит от модели — пересчёт в отчёте eval (`scale.dup_threshold_equiv`). |

@@ -12,9 +12,9 @@ from tests.llm_job_helpers import use_ai_config
 from backend.db.models import MarketDigestRow, VacancyRow
 from backend.db.session import session_scope
 from backend.services import market_digest_service as svc
-from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
-from tg_jobs_parser.ai.prompts import build_market_digest_messages
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient
+from jobdesk.ai.prompts import build_market_digest_messages
+from jobdesk.config.schema import AiConfig
 
 WEEK = date(2026, 10, 12)  # понедельник
 _n = iter(range(1, 1_000_000))

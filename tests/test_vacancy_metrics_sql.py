@@ -72,8 +72,8 @@ def test_daily_buckets_keep_latest_days(monkeypatch, pg_db):
     from backend.db import vacancy_metrics
     from backend.db.repository import upsert_vacancies
     from backend.db.session import session_scope
-    from tg_jobs_parser.models.vacancy import Vacancy
-    from tg_jobs_parser.utils.hashing import vacancy_content_id
+    from jobdesk.models.vacancy import Vacancy
+    from jobdesk.utils.hashing import vacancy_content_id
 
     vacancies = []
     for day in (1, 2, 3):
@@ -111,7 +111,7 @@ def test_metrics_and_salary_analytics_query_count(db_session):
     from backend.db.repository import upsert_vacancies
     from backend.db.session import get_engine
     from backend.db.vacancy_metrics import aggregate_vacancy_metrics
-    from tg_jobs_parser.models.vacancy import Vacancy
+    from jobdesk.models.vacancy import Vacancy
 
     upsert_vacancies(
         db_session,

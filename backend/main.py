@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace
 from prometheus_fastapi_instrumentator import Instrumentator
 
-import tg_jobs_parser.observability.llm_metrics  # noqa: F401 — регистрация llm_* в /metrics
+import jobdesk.observability.llm_metrics  # noqa: F401 — регистрация llm_* в /metrics
 from backend.api.routes import (
     ai_cache,
     analytics,
@@ -42,9 +42,9 @@ from backend.observability import register_db_stats_collector
 from backend.overload import OverloadMiddleware, RequestSlots
 from backend.settings import check_api_workers, check_exposure, get_settings
 from backend.tracing import setup_tracing, shutdown_tracing
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.utils.env_loader import try_load_dotenv
-from tg_jobs_parser.utils.logger import setup_logging
+from jobdesk.config.loader import load_config
+from jobdesk.utils.env_loader import try_load_dotenv
+from jobdesk.utils.logger import setup_logging
 
 setup_logging()
 try_load_dotenv()
@@ -366,7 +366,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="tg-jobs-parser API",
+    title="JobDesk API",
     version="0.2.0",
     description="Backend: Telethon parsing, AI enrichment, PostgreSQL storage",
     lifespan=lifespan,
@@ -446,7 +446,7 @@ def _prepare_multiprocess_metrics_dir() -> str:
     import shutil
     import tempfile
 
-    path = os.environ.get("PROMETHEUS_MULTIPROC_DIR") or os.path.join(tempfile.gettempdir(), "tg-jobs-api-metrics")
+    path = os.environ.get("PROMETHEUS_MULTIPROC_DIR") or os.path.join(tempfile.gettempdir(), "jobdesk-api-metrics")
     shutil.rmtree(path, ignore_errors=True)
     os.makedirs(path, exist_ok=True)
     os.environ["PROMETHEUS_MULTIPROC_DIR"] = path

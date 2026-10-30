@@ -1,4 +1,4 @@
-from tg_jobs_parser.extraction.normalizer import normalize_for_match
+from jobdesk.extraction.normalizer import normalize_for_match
 
 
 def test_remote_aliases():

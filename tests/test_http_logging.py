@@ -13,7 +13,7 @@ from fastapi.responses import Response, StreamingResponse
 from fastapi.testclient import TestClient
 
 from backend.http_logging import MASK, HttpLoggingMiddleware, render_body
-from tg_jobs_parser.utils.logger import RequestIdFilter
+from jobdesk.utils.logger import RequestIdFilter
 
 
 def _records(caplog) -> list[dict]:

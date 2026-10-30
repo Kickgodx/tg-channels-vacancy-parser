@@ -1,0 +1,117 @@
+"""Базовый интерфейс парсера канала."""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import date, datetime
+from typing import TYPE_CHECKING
+
+from jobdesk.config.schema import AppConfig
+
+if TYPE_CHECKING:
+    from jobdesk.parse_cancel import ParseCancellationToken
+
+
+@dataclass(frozen=True)
+class ForwardSource:
+    """Канал, из которого переслан пост: id Telegram, публичный username (если есть) и название."""
+
+    channel_id: int
+    username: str | None = None
+    title: str | None = None
+    # id сообщения в исходном канале (ссылка t.me/<username>/<id>), если Telegram его отдал.
+    post_id: int | None = None
+
+
+@dataclass(frozen=True)
+class ForwardedPost:
+    """Пересланный пост прогона: где встретили, откуда переслан, стал ли кандидатом в вакансии."""
+
+    channel: str
+    post_id: str
+    post_date: datetime | None
+    source: ForwardSource
+    is_vacancy: bool
+
+
+@dataclass
+class RawPost:
+    """Сырой пост из источника."""
+
+    channel_username: str
+    post_id: str
+    text: str
+    post_date: datetime | None
+    post_url: str | None
+    forward_from: ForwardSource | None = None
+
+
+@dataclass(frozen=True)
+class ChannelCheckpoint:
+    """Сплошное покрытие канала: прочитаны все сообщения с ``covered_from`` по ``last_message_id``.
+
+    Следующий прогон с ``date_from >= covered_from`` (и окном до «сегодня») читает
+    только сообщения новее ``last_message_id`` (``min_id`` в Telethon).
+    """
+
+    last_message_id: int
+    covered_from: date
+
+
+# Колбэк потоковой вычитки: (канал, посты, предупреждение) — по готовности каждого канала.
+ChannelCallback = Callable[[str, list[RawPost], str | None], None]
+
+
+class BaseChannelParser(ABC):
+    """Абстракция источника постов (Telethon и др.)."""
+
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        cancellation: ParseCancellationToken | None = None,
+    ) -> None:
+        self.config = config
+        self.cancellation = cancellation
+        # Чекпоинты на вход (из БД) и новые — по каналам, прочитанным сплошь от новых
+        # сообщений до границы окна. Парсеры без поддержки их просто не заполняют.
+        self.checkpoints: dict[str, ChannelCheckpoint] = {}
+        self.new_checkpoints: dict[str, ChannelCheckpoint] = {}
+
+    @abstractmethod
+    def fetch_posts(self, channel_username: str) -> tuple[list[RawPost], str | None]:
+        """
+        Возвращает список постов и предупреждение об ограничениях (если есть).
+        ``channel_username`` — без ``@``.
+        """
+
+    def fetch_posts_many(self, channel_usernames: list[str]) -> list[tuple[str, list[RawPost], str | None]]:
+        """
+        Пакетный вариант: вернуть результаты по нескольким каналам.
+
+        Дефолтная реализация — последовательный fallback через ``fetch_posts``.
+        Конкретные парсеры (Telethon) переопределяют для распараллеливания.
+        """
+        out: list[tuple[str, list[RawPost], str | None]] = []
+        for ch in channel_usernames:
+            if self.cancellation:
+                self.cancellation.check()
+            posts, warn = self.fetch_posts(ch)
+            out.append((ch, posts, warn))
+        return out
+
+    def stream_posts_many(self, channel_usernames: list[str], on_channel: ChannelCallback) -> None:
+        """
+        Потоковый вариант ``fetch_posts_many``: каждый канал отдаётся ``on_channel``
+        сразу по готовности и в памяти парсера не копится.
+
+        ``on_channel`` может блокировать (ограниченная очередь обработки) — это и есть
+        обратное давление на вычитку. Дефолт — последовательный обход через ``fetch_posts``.
+        """
+        for ch in channel_usernames:
+            if self.cancellation:
+                self.cancellation.check()
+            posts, warn = self.fetch_posts(ch)
+            on_channel(ch, posts, warn)

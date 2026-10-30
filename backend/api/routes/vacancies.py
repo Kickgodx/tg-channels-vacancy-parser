@@ -59,9 +59,9 @@ from backend.services.llm_job_service import KIND_IMPORT, KIND_REEXTRACT, LlmJob
 from backend.services.llm_result_freshness import current_ai_config
 from backend.services.recruiter_contacts import recruiter_contacts
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.models.metrics import MetricsSummary
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.config.loader import load_config
+from jobdesk.models.metrics import MetricsSummary
+from jobdesk.models.vacancy import Vacancy
 
 router = APIRouter(
     prefix="/vacancies",
@@ -368,7 +368,7 @@ def _post_url(channel: str, source_post_key: str) -> str | None:
 @router.get("/{vacancy_id}/history", response_model=VacancyHistory)
 def get_vacancy_history(vacancy_id: str, db: Session = Depends(get_db)) -> VacancyHistory:
     """Появления вакансии по дате поста: первая публикация, перепосты и что в них поменялось."""
-    from tg_jobs_parser.deduplication.changes import is_edited_repost
+    from jobdesk.deduplication.changes import is_edited_repost
 
     row = repo.get_vacancy_row(db, vacancy_id)
     if row is None:

@@ -14,11 +14,11 @@ import pytest
 
 pytest.importorskip("mcp")
 
+from jobdesk_mcp.client import ApiClient, Settings
+from jobdesk_mcp.format import compact, truncate, vacancy_brief
+from jobdesk_mcp.server import build_server
 from mcp import Client, StdioServerParameters
 from tests.test_llm_quota import _fake_match
-from tg_jobs_mcp.client import ApiClient, Settings
-from tg_jobs_mcp.format import compact, truncate, vacancy_brief
-from tg_jobs_mcp.server import build_server
 
 from backend.db.models import VacancyRow
 from backend.db.session import session_scope
@@ -244,9 +244,9 @@ async def test_llm_job_returned_by_id_after_timeout(api_client, monkeypatch):
 
 @pytest.mark.anyio
 async def test_stdio_entrypoint_lists_tools_and_reports_unreachable_api():
-    # Настоящий процесс, как его запускает Claude: python -m tg_jobs_mcp по stdio.
-    env = {**os.environ, "TGJOBS_TOKEN": "tgj_x", "TGJOBS_API_URL": "http://127.0.0.1:9/api/v1"}
-    params = StdioServerParameters(command=sys.executable, args=["-m", "tg_jobs_mcp"], env=env)
+    # Настоящий процесс, как его запускает Claude: python -m jobdesk_mcp по stdio.
+    env = {**os.environ, "JOBDESK_TOKEN": "tgj_x", "JOBDESK_API_URL": "http://127.0.0.1:9/api/v1"}
+    params = StdioServerParameters(command=sys.executable, args=["-m", "jobdesk_mcp"], env=env)
     with anyio.fail_after(60):
         async with Client(params) as c:
             names = {t.name for t in (await c.list_tools()).tools}
@@ -256,20 +256,21 @@ async def test_stdio_entrypoint_lists_tools_and_reports_unreachable_api():
 
 
 def test_settings_from_env():
-    with pytest.raises(ValueError, match="TGJOBS_TOKEN"):
+    with pytest.raises(ValueError, match="JOBDESK_TOKEN"):
         Settings.from_env({})
-    s = Settings.from_env({"TGJOBS_TOKEN": " tgj_a ", "TGJOBS_API_URL": "http://h:1/api/v1/"})
+    s = Settings.from_env({"JOBDESK_TOKEN": " tgj_a ", "JOBDESK_API_URL": "http://h:1/api/v1/"})
     assert (s.token, s.api_url, s.api_key, s.llm_wait_seconds) == ("tgj_a", "http://h:1/api/v1", None, 60.0)
 
 
 def test_main_without_token_exits(monkeypatch, capsys):
-    from tg_jobs_mcp.__main__ import main
+    from jobdesk_mcp.__main__ import main
 
+    monkeypatch.delenv("JOBDESK_TOKEN", raising=False)
     monkeypatch.delenv("TGJOBS_TOKEN", raising=False)
     with pytest.raises(SystemExit) as e:
         main()
     assert e.value.code == 2
-    assert "TGJOBS_TOKEN" in capsys.readouterr().err
+    assert "JOBDESK_TOKEN" in capsys.readouterr().err
 
 
 def test_format_helpers():
@@ -294,7 +295,7 @@ def test_format_helpers():
 
 
 def test_analytics_summaries_drop_bulky_breakdowns():
-    from tg_jobs_mcp.server import _salary_summary, _technology_summary
+    from jobdesk_mcp.server import _salary_summary, _technology_summary
 
     row = {
         "group": "senior",
@@ -325,3 +326,10 @@ async def test_filter_values_skip_form_only_formats(api_client):
     assert not err
     assert "remote" in out["work_formats"]
     assert not {"any", "exclude_office"} & set(out["work_formats"])
+
+
+def test_settings_from_env_reads_legacy_tgjobs_names():
+    s = Settings.from_env({"TGJOBS_TOKEN": "tgj_old", "TGJOBS_API_URL": "http://old:1/api/v1", "TGJOBS_API_KEY": "k"})
+    assert (s.token, s.api_url, s.api_key) == ("tgj_old", "http://old:1/api/v1", "k")
+    s = Settings.from_env({"JOBDESK_TOKEN": "tgj_new", "TGJOBS_TOKEN": "tgj_old"})
+    assert s.token == "tgj_new"

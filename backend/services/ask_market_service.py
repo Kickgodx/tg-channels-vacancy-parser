@@ -29,11 +29,11 @@ from backend.schemas import VacancyQuery
 from backend.services.interactive_llm import get_interactive_client
 from backend.services.llm_job_service import LlmJobCancelled
 from backend.settings import get_settings
-from tg_jobs_parser.ai.prompts import ASK_MARKET_PROMPT_VERSION
-from tg_jobs_parser.ai.schema import MarketQueryFilters, MarketQueryPlan
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import AppConfig, canonical_technologies, split_specializations
-from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS, extract_grade, normalize_grade
+from jobdesk.ai.prompts import ASK_MARKET_PROMPT_VERSION
+from jobdesk.ai.schema import MarketQueryFilters, MarketQueryPlan
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import AppConfig, canonical_technologies, split_specializations
+from jobdesk.extraction.grade_extractor import GRADE_OPTIONS, extract_grade, normalize_grade
 
 _LOG = logging.getLogger(__name__)
 

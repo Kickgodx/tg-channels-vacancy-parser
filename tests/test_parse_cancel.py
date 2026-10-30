@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from tg_jobs_parser.parse_cancel import ParseCancellationToken, ParseCancelled
+from jobdesk.parse_cancel import ParseCancellationToken, ParseCancelled
 
 
 def test_token_not_cancelled_by_default():

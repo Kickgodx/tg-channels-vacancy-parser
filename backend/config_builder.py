@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from backend.schemas import RunCreateRequest
-from tg_jobs_parser.ai.models_catalog import catalog_model_ids
-from tg_jobs_parser.config.loader import ConfigLoadError, load_config
-from tg_jobs_parser.config.schema import (
+from jobdesk.ai.models_catalog import catalog_model_ids
+from jobdesk.config.loader import ConfigLoadError, load_config
+from jobdesk.config.schema import (
     AiConfig,
     AppConfig,
     FiltersConfig,

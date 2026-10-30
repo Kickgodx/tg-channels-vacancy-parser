@@ -11,8 +11,8 @@ from tests.llm_job_helpers import await_llm_job, current_ai, use_ai_config
 from backend.db.models import CoverLetterRow, VacancyRow
 from backend.db.session import get_session_factory, session_scope
 from backend.services import cover_letter_service
-from tg_jobs_parser.ai.prompts import COVER_LETTER_PROMPT_VERSION
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.ai.prompts import COVER_LETTER_PROMPT_VERSION
+from jobdesk.config.schema import AiConfig
 
 
 def _register(client, email: str, password: str = "secret1") -> str:
@@ -195,7 +195,7 @@ def test_cover_letter_reports_llm_failure(api_client, monkeypatch):
 
 def test_cover_letter_end_to_end(api_client, monkeypatch):
     """Реальный cover_letter_service.generate_single со stubbed interactive client."""
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+    from jobdesk.ai.clients.openrouter import LLMUsage
 
     class _FakeClient:
         def cover_letter_with_fallback(self, *, resume_text, vacancy_text, tone, extra_notes, match_summary):
@@ -225,7 +225,7 @@ def test_cover_letter_end_to_end(api_client, monkeypatch):
 
 def test_generate_single_records_requested_model_and_prompt_version(api_client, monkeypatch, tmp_path):
     """Ответила fallback-модель: ``model`` — она, ``requested_model`` — настроенная модель писем."""
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+    from jobdesk.ai.clients.openrouter import LLMUsage
 
     use_ai_config(monkeypatch, tmp_path, cover_letter_model="writer/a")
 
@@ -266,7 +266,7 @@ def test_cover_letter_model_falls_back_to_match_then_parse():
 
 def test_cover_letter_uses_own_model_without_json_format(monkeypatch):
     """cover_letter() зовёт свою модель в plain-text режиме (без response_format)."""
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
+    from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     ai = AiConfig(
@@ -300,7 +300,7 @@ def test_cover_letter_uses_own_model_without_json_format(monkeypatch):
 
 
 def test_cover_letter_prompt_contains_inputs_and_tone():
-    from tg_jobs_parser.ai.prompts import build_cover_letter_messages
+    from jobdesk.ai.prompts import build_cover_letter_messages
 
     msgs = build_cover_letter_messages(
         resume_text="Опыт: Python 5 лет",
@@ -325,7 +325,7 @@ def test_cover_letter_prompt_contains_inputs_and_tone():
 
 
 def test_parse_cover_letter_strips_fence():
-    from tg_jobs_parser.ai.clients.openrouter import _parse_cover_letter
+    from jobdesk.ai.clients.openrouter import _parse_cover_letter
 
     assert _parse_cover_letter("  Текст письма  ") == "Текст письма"
     assert _parse_cover_letter("```\nТекст письма\n```") == "Текст письма"
@@ -339,7 +339,7 @@ def test_parse_cover_letter_strips_fence():
 @pytest.fixture
 def counting_letter_llm(monkeypatch):
     """Реальный ``generate_single`` с подменённым клиентом: считает вызовы LLM."""
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+    from jobdesk.ai.clients.openrouter import LLMUsage
 
     tones: list[str] = []
 
@@ -415,7 +415,7 @@ def test_letter_regenerated_after_model_change(api_client, counting_letter_llm, 
 def test_cancel_during_generation_keeps_previous_letter(api_client, monkeypatch):
     from tests.test_solo_match import _cancel_active_job
 
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
+    from jobdesk.ai.clients.openrouter import LLMUsage
 
     state: dict = {}
 

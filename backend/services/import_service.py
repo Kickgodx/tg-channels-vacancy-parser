@@ -40,13 +40,13 @@ from backend.services.llm_job_service import (
     reserve_user_llm_calls,
 )
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import AppConfig
-from tg_jobs_parser.ingestion.policy import MANUAL_POLICY
-from tg_jobs_parser.ingestion.process import apply_ingest_stages
-from tg_jobs_parser.ingestion.rules import rules_from_raw_post
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.parsers.base import RawPost
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import AppConfig
+from jobdesk.ingestion.policy import MANUAL_POLICY
+from jobdesk.ingestion.process import apply_ingest_stages
+from jobdesk.ingestion.rules import rules_from_raw_post
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.parsers.base import RawPost
 
 _LOG = logging.getLogger(__name__)
 
@@ -243,7 +243,7 @@ def run_import_job(
         # AI выключили, пока джоба стояла в очереди.
         warning = warning or "AI выключен — вакансии разобраны без LLM."
     else:
-        from tg_jobs_parser.ai.enricher import AIEnrichmentService, LlmUnavailableError
+        from jobdesk.ai.enricher import AIEnrichmentService, LlmUnavailableError
 
         try:
             ai_service = AIEnrichmentService(ingest_config)

@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from tg_jobs_parser.fx.convert import (
+from jobdesk.fx.convert import (
     HOURS_PER_MONTH,
     effective_salary_amount,
     is_ruble_currency,
@@ -11,8 +11,8 @@ from tg_jobs_parser.fx.convert import (
     parse_salary_currency,
     salary_amount_to_rub,
 )
-from tg_jobs_parser.fx.vacancy_rub import enrich_vacancy_salary_rub
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.fx.vacancy_rub import enrich_vacancy_salary_rub
+from jobdesk.models.vacancy import Vacancy
 
 
 def test_salary_amount_to_rub_usd():
@@ -64,7 +64,7 @@ def test_effective_salary_amount_range():
 
 
 def test_enrich_vacancy_salary_rub_with_mocked_rates(monkeypatch):
-    from tg_jobs_parser.fx import vacancy_rub as vr
+    from jobdesk.fx import vacancy_rub as vr
 
     vr.clear_rates_cache()
     monkeypatch.setattr(
@@ -89,8 +89,8 @@ def test_enrich_vacancy_salary_rub_with_mocked_rates(monkeypatch):
 
 def test_enrich_vacancies_salary_rub_one_network_call_on_cbr_failure(monkeypatch):
     """При недоступном ЦБ — один timeout, не N×timeout на каждую вакансию."""
-    from tg_jobs_parser.fx import vacancy_rub as vr
-    from tg_jobs_parser.fx.vacancy_rub import enrich_vacancies_salary_rub
+    from jobdesk.fx import vacancy_rub as vr
+    from jobdesk.fx.vacancy_rub import enrich_vacancies_salary_rub
 
     vr.clear_rates_cache()
     calls = {"n": 0}
@@ -122,8 +122,8 @@ def test_enrich_vacancies_salary_rub_one_network_call_on_cbr_failure(monkeypatch
 def test_enrich_vacancies_salary_rub_uses_preloaded_rates_without_network(monkeypatch):
     from datetime import date
 
-    from tg_jobs_parser.fx import vacancy_rub as vr
-    from tg_jobs_parser.fx.vacancy_rub import enrich_vacancies_salary_rub
+    from jobdesk.fx import vacancy_rub as vr
+    from jobdesk.fx.vacancy_rub import enrich_vacancies_salary_rub
 
     vr.clear_rates_cache()
 

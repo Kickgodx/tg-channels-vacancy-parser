@@ -18,8 +18,8 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from backend.db.models import VacancyRow
-from tg_jobs_parser.config.schema import clean_technology_names
-from tg_jobs_parser.extraction.vacancy_detector import is_not_vacancy_post
+from jobdesk.config.schema import clean_technology_names
+from jobdesk.extraction.vacancy_detector import is_not_vacancy_post
 
 _BATCH = 1000
 

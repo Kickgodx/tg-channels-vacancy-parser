@@ -26,14 +26,14 @@ from backend.observability import (
 from backend.services.parse_progress_serialize import snapshot_to_progress_dict
 from backend.services.parse_run_events import publish_parse_run_event
 from backend.workers import liveness
-from tg_jobs_parser.config.schema import AppConfig
-from tg_jobs_parser.models.parse_result import ParseResult
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.parse_cancel import ParseCancellationToken, ParseCancelled
-from tg_jobs_parser.parse_progress import ParseProgressSnapshot
-from tg_jobs_parser.parse_runner import run_parse
-from tg_jobs_parser.parsers.base import ChannelCheckpoint
-from tg_jobs_parser.parsers.channel_username import normalize_channel_username
+from jobdesk.config.schema import AppConfig
+from jobdesk.models.parse_result import ParseResult
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.parse_cancel import ParseCancellationToken, ParseCancelled
+from jobdesk.parse_progress import ParseProgressSnapshot
+from jobdesk.parse_runner import run_parse
+from jobdesk.parsers.base import ChannelCheckpoint
+from jobdesk.parsers.channel_username import normalize_channel_username
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)

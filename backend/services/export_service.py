@@ -10,9 +10,9 @@ from typing import Any
 from fastapi.responses import StreamingResponse
 
 from backend.settings import get_settings
-from tg_jobs_parser.exporters.excel_exporter import write_vacancies_xlsx
-from tg_jobs_parser.models.metrics import MetricsSummary
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.exporters.excel_exporter import write_vacancies_xlsx
+from jobdesk.models.metrics import MetricsSummary
+from jobdesk.models.vacancy import Vacancy
 
 _LOG = logging.getLogger(__name__)
 

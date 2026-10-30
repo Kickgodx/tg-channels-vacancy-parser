@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from backend.db import repository as repo
 from backend.db.models import VacancyRow
 from backend.db.session import session_scope
-from tg_jobs_parser.analytics.skill_gaps import MatchSkills, TechnologyMatcher, summarize_skill_gaps
+from jobdesk.analytics.skill_gaps import MatchSkills, TechnologyMatcher, summarize_skill_gaps
 
 _MATCHER = TechnologyMatcher(["Go", "MySQL", "ClickHouse", "Kafka", "Kubernetes", "Jenkins", "C", "C++"])
 
@@ -185,7 +185,7 @@ def test_summary_with_market_demand(api_client):
 
 
 def test_mentions_whole_word_only():
-    from tg_jobs_parser.analytics.skill_gaps import mentions
+    from jobdesk.analytics.skill_gaps import mentions
 
     assert mentions("Трекер Atlassian Jira, Ёлка", "jira")
     assert mentions("ёлка", "Елка")

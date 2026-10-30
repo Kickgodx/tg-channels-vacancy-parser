@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from backend.db.models import AIExtractionCacheRow
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
+from jobdesk.ai.schema import VacancyAIExtraction
 
 
 def _utcnow() -> datetime:

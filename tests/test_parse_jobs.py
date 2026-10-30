@@ -112,7 +112,7 @@ def fake_redis_for_parse(monkeypatch):
 
 def test_snapshot_to_progress_dict_slim():
     from backend.services.parse_progress_serialize import snapshot_to_progress_dict
-    from tg_jobs_parser.parse_progress import ParseProgressSnapshot
+    from jobdesk.parse_progress import ParseProgressSnapshot
 
     snap = ParseProgressSnapshot(posts_processed=2, posts_total=9, vacancies_found=0, phase="ai")
     d = snapshot_to_progress_dict(snap)
@@ -154,9 +154,9 @@ def test_start_parse_run_inprocess_completes(admin_client, monkeypatch):
     import time
 
     def fake_run_parse(config, **kwargs):
-        from tg_jobs_parser.models.metrics import MetricsSummary
-        from tg_jobs_parser.models.parse_result import ParseResult
-        from tg_jobs_parser.parse_progress import ParseProgressSnapshot
+        from jobdesk.models.metrics import MetricsSummary
+        from jobdesk.models.parse_result import ParseResult
+        from jobdesk.parse_progress import ParseProgressSnapshot
 
         cb = kwargs.get("progress_callback")
         if cb:
@@ -239,8 +239,8 @@ def test_enqueue_failure_marks_run_failed(admin_client, monkeypatch):
     get_settings.cache_clear()
 
     def fake_run_parse(config, **kwargs):
-        from tg_jobs_parser.models.metrics import MetricsSummary
-        from tg_jobs_parser.models.parse_result import ParseResult
+        from jobdesk.models.metrics import MetricsSummary
+        from jobdesk.models.parse_result import ParseResult
 
         return ParseResult(
             run_params={},
@@ -424,8 +424,8 @@ def test_recover_skips_live_rq_job(fake_redis_for_parse, monkeypatch):
 
 def test_real_telethon_is_unreachable_in_tests(default_test_config):
     """Страховка conftest.no_real_telegram: без подмены парсера каналов прогон падает, а не идёт в сеть."""
-    from tg_jobs_parser.config.loader import load_config
-    from tg_jobs_parser.parse_runner import run_parse
+    from jobdesk.config.loader import load_config
+    from jobdesk.parse_runner import run_parse
 
     with pytest.raises(RuntimeError, match="настоящего Telethon"):
         run_parse(load_config(default_test_config))

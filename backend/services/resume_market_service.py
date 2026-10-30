@@ -21,7 +21,7 @@ from backend.db.vector_type import query_vector
 from backend.schemas import MarketShare, ResumeMarketOut, ResumeMarketTechnology
 from backend.services import embedding_service
 from backend.services.skill_gap_service import technology_matcher
-from tg_jobs_parser.analytics.skill_gaps import mentions
+from jobdesk.analytics.skill_gaps import mentions
 
 WINDOW_DAYS = 365
 # Профиль и технологии — по стольким ближайшим вакансиям.

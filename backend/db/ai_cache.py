@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from backend.db.ai_cache_repository import cache_get, cache_put
 from backend.db.session import session_scope
-from tg_jobs_parser.ai.cache import cache_key as make_cache_key
-from tg_jobs_parser.ai.cache_registry import register_postgres_cache_factory
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.config.schema import AiConfig
-from tg_jobs_parser.utils.logger import get_logger
+from jobdesk.ai.cache import cache_key as make_cache_key
+from jobdesk.ai.cache_registry import register_postgres_cache_factory
+from jobdesk.ai.schema import VacancyAIExtraction
+from jobdesk.config.schema import AiConfig
+from jobdesk.utils.logger import get_logger
 
 _LOG = get_logger(__name__)
 

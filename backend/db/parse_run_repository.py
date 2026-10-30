@@ -16,8 +16,8 @@ from backend.db.vacancy_repository import (
 )
 from backend.schemas import RunStatus
 from backend.settings import get_settings
-from tg_jobs_parser.models.metrics import MetricsSummary
-from tg_jobs_parser.models.parse_result import ParseResult
+from jobdesk.models.metrics import MetricsSummary
+from jobdesk.models.parse_result import ParseResult
 
 _ACTIVE_PARSE_STATUSES = frozenset({"queued", "running"})
 _TERMINAL_PARSE_STATUSES = frozenset({"completed", "partial", "cancelled", "failed"})

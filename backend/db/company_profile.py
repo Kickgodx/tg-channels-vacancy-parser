@@ -16,7 +16,7 @@ from backend.schemas import (
     VacancyFlag,
     VacancyFlags,
 )
-from tg_jobs_parser.utils.company import company_key
+from jobdesk.utils.company import company_key
 
 # Флаги вакансии.
 REPOST_MIN_DAYS = 3  # один текст публиковали в столько разных дней

@@ -15,12 +15,12 @@ from backend.db.session import reset_engine, session_scope
 from backend.settings import get_settings
 from backend.workers import parse_tasks
 from backend.workers.parse_tasks import run_parse_job
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.models.metrics import MetricsSummary
-from tg_jobs_parser.models.parse_result import ParseResult
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.parse_progress import ParseProgressSnapshot
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.config.loader import load_config
+from jobdesk.models.metrics import MetricsSummary
+from jobdesk.models.parse_result import ParseResult
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.parse_progress import ParseProgressSnapshot
+from jobdesk.utils.hashing import vacancy_content_id
 
 
 @pytest.fixture(autouse=True)
@@ -199,7 +199,7 @@ def test_incomplete_run_is_partial_and_keeps_vacancies(monkeypatch, run_id):
 
 def test_primary_run_without_llm_fails_before_telegram(monkeypatch, default_test_config):
     """primary + LLM не запустился → failed до вычитки, без вакансий, чекпоинтов и ретрая."""
-    import tg_jobs_parser.parse_runner as parse_runner
+    import jobdesk.parse_runner as parse_runner
     from backend.db.models import TelegramChannelCheckpointRow
     from backend.workers.recover_parse import recover_stuck_parse_runs
 
@@ -226,7 +226,7 @@ def test_primary_run_without_llm_fails_before_telegram(monkeypatch, default_test
         def stream_posts_many(self, channels, on_channel):
             fetches.append(channels)
 
-    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", broken)
+    monkeypatch.setattr("jobdesk.ai.enricher.AIEnrichmentService", broken)
     monkeypatch.setattr(parse_runner, "_channel_parser", lambda config, cancellation=None: _Parser())
 
     run_parse_job(str(rid))

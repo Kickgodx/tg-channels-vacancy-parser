@@ -51,9 +51,9 @@ def _declared_metric_names() -> set[str]:
     # Импорт модулей регистрирует их метрики в REGISTRY.
     import backend.observability as app_metrics
     import backend.workers.liveness  # noqa: F401
-    import tg_jobs_parser.hh.metrics
-    import tg_jobs_parser.observability.llm_metrics
-    import tg_jobs_parser.observability.parse_metrics  # noqa: F401
+    import jobdesk.hh.metrics
+    import jobdesk.observability.llm_metrics
+    import jobdesk.observability.parse_metrics  # noqa: F401
 
     names = set(REGISTRY._names_to_collectors)
     # db_* и прочие агрегаты считает сборщик процесса API; describe() не ходит в БД.

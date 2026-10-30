@@ -1,7 +1,7 @@
 """Нормализованный ключ компании в vacancies (company_key) для профиля компании.
 
 «ООО Ромашка», «Ромашка», «РОМАШКА LLC» → «ромашка». Правило — копия
-``tg_jobs_parser.utils.company.company_key`` на момент миграции; дальше ключ пишет
+``jobdesk.utils.company.company_key`` на момент миграции; дальше ключ пишет
 ``vacancy_to_row`` при каждой записи вакансии.
 
 Revision ID: 040_vacancies_company_key

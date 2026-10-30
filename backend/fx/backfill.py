@@ -13,8 +13,8 @@ from backend.db.aggregate_cache import invalidate_aggregate_cache
 from backend.db.models import VacancyRow
 from backend.db.vacancy_mapper import row_to_vacancy, vacancy_to_row
 from backend.fx.apply import apply_salary_rub_for_vacancy
-from tg_jobs_parser.config.schema import FxConfig
-from tg_jobs_parser.extraction.salary_period import (
+from jobdesk.config.schema import FxConfig
+from jobdesk.extraction.salary_period import (
     apply_hourly_currency_from_text,
     normalize_annual_salary_to_monthly,
     sanitize_salary_amounts,

@@ -6,14 +6,14 @@ import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-import tg_jobs_parser.parse_runner as parse_runner
+import jobdesk.parse_runner as parse_runner
 from backend.db.channel_candidate_repository import list_candidates, save_forwards
 from backend.db.models import TelegramChannelCheckpointRow, TelegramForwardRow
 from backend.db.session import session_scope
 from backend.settings import get_settings
-from tg_jobs_parser.config.schema import AppConfig, FxConfig, ParserConfig, SourcesConfig
-from tg_jobs_parser.parsers.base import ForwardedPost, ForwardSource, RawPost
-from tg_jobs_parser.parsers.telegram_telethon import forward_source
+from jobdesk.config.schema import AppConfig, FxConfig, ParserConfig, SourcesConfig
+from jobdesk.parsers.base import ForwardedPost, ForwardSource, RawPost
+from jobdesk.parsers.telegram_telethon import forward_source
 
 _DAY = datetime(2026, 10, 20, 12, tzinfo=UTC)
 
@@ -169,7 +169,7 @@ def test_api_admin_only_excludes_read_channels_and_ignores(admin_client):
 
 def test_parse_job_saves_forwards(admin_client, monkeypatch):
     def fake_run_parse(config, **kwargs):
-        from tg_jobs_parser.models.parse_result import ParseResult
+        from jobdesk.models.parse_result import ParseResult
 
         return ParseResult(posts_fetched=1, forwarded_posts=[_fwd("1", ForwardSource(channel_id=1, username="hub"))])
 

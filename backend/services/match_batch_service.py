@@ -27,7 +27,7 @@ from backend.services.llm_job_service import (
     reserve_user_llm_calls,
 )
 from backend.services.llm_result_freshness import current_ai_config, match_is_stale
-from tg_jobs_parser.ai.rate_limit import LlmQuotaExhausted
+from jobdesk.ai.rate_limit import LlmQuotaExhausted
 
 _LOG = logging.getLogger(__name__)
 

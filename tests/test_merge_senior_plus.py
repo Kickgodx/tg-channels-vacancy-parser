@@ -7,7 +7,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 
 from backend.db.migrate import alembic_ini_path
-from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS, extract_grade, normalize_grade
+from jobdesk.extraction.grade_extractor import GRADE_OPTIONS, extract_grade, normalize_grade
 
 
 def test_senior_plus_is_not_a_grade():

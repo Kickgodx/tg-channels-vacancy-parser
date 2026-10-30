@@ -4,15 +4,15 @@ from fastapi import APIRouter, Depends
 
 from backend.api.deps import get_current_user, verify_api_key
 from backend.settings import get_settings
-from tg_jobs_parser.ai.llm_models_registry import (
+from jobdesk.ai.llm_models_registry import (
     load_llm_models_registry,
     resolve_llm_models_path,
 )
-from tg_jobs_parser.ai.models_catalog import catalog_model_ids, label_for_model_id
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import DEFAULT_SPECIALIZATIONS
-from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS
-from tg_jobs_parser.utils.dates import resolve_search_date_from, resolve_search_date_to
+from jobdesk.ai.models_catalog import catalog_model_ids, label_for_model_id
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import DEFAULT_SPECIALIZATIONS
+from jobdesk.extraction.grade_extractor import GRADE_OPTIONS
+from jobdesk.utils.dates import resolve_search_date_from, resolve_search_date_to
 
 router = APIRouter(
     prefix="/config",

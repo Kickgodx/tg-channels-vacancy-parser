@@ -15,8 +15,8 @@ from backend.db.repository import upsert_vacancies
 from backend.db.session import get_session_factory
 from backend.db.vacancy_filters import apply_vacancy_filters
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.hashing import vacancy_content_id
 
 SALARY = "detected_salary_avg_rub"
 

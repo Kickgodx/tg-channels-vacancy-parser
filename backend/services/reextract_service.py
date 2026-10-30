@@ -36,8 +36,8 @@ from backend.services.llm_job_service import (
     reserve_user_llm_calls,
 )
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.hh.mapper import HH_CHANNEL
+from jobdesk.config.loader import load_config
+from jobdesk.hh.mapper import HH_CHANNEL
 
 _LOG = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ def run_reextract_job(
 
     if not config.ai.enabled:
         raise RuntimeError("AI выключен — переразбор вакансий невозможен.")
-    from tg_jobs_parser.ai.enricher import AIEnrichmentService, LlmUnavailableError
+    from jobdesk.ai.enricher import AIEnrichmentService, LlmUnavailableError
 
     # Как в импорте: score-гейт перед LLM не нужен — вакансии уже прошли прогон.
     ingest_config = config.model_copy(update={"ai": config.ai.model_copy(update={"skip_if_vacancy_score_below": 0})})

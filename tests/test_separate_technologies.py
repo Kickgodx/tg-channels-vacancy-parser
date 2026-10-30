@@ -10,18 +10,18 @@ from sqlalchemy import create_engine, text
 
 from backend.db.migrate import alembic_ini_path
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.config.schema import (
+from jobdesk.ai.schema import VacancyAIExtraction
+from jobdesk.config.schema import (
     DEFAULT_SPECIALIZATIONS,
     AppConfig,
     FiltersConfig,
     canonical_technologies,
     split_specializations,
 )
-from tg_jobs_parser.filters.vacancy_filters import apply_post_filters, matches_technology_filter
-from tg_jobs_parser.ingestion.rules import rules_from_raw_post
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.parsers.base import RawPost
+from jobdesk.filters.vacancy_filters import apply_post_filters, matches_technology_filter
+from jobdesk.ingestion.rules import rules_from_raw_post
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.parsers.base import RawPost
 
 
 def test_languages_are_not_specializations():
@@ -76,7 +76,7 @@ def test_vacancy_query_moves_languages_from_old_links():
 
 
 def test_rules_put_language_into_technologies(default_test_config):
-    from tg_jobs_parser.config.loader import load_config
+    from jobdesk.config.loader import load_config
 
     cfg = load_config(default_test_config)
     post = RawPost(
