@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { api, getToken, retryIfRetryable } from "./api/client";
 import AskPage from "./pages/AskPage";
+import CareerReportPage from "./pages/CareerReportPage";
 import CompanyPage from "./pages/CompanyPage";
 import DigestPage from "./pages/DigestPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -57,9 +58,9 @@ export default function App() {
   const authed = Boolean(getToken());
   return (
     <div className="app-shell">
-      <h1>Telegram Jobs Parser</h1>
+      <h1 className="no-print">Telegram Jobs Parser</h1>
       {authed && (
-        <nav>
+        <nav className="no-print">
           <AdminNavLink to="/" end>
             Парсинг
           </AdminNavLink>
@@ -161,6 +162,14 @@ export default function App() {
           element={
             <RequireAuth>
               <ResumesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/resumes/:resumeId/report"
+          element={
+            <RequireAuth>
+              <CareerReportPage />
             </RequireAuth>
           }
         />
