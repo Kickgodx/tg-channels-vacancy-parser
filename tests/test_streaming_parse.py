@@ -9,16 +9,16 @@ from types import SimpleNamespace
 
 import pytest
 
-import tg_jobs_parser.parse_runner as parse_runner
-from tg_jobs_parser.config.schema import (
+import jobdesk.parse_runner as parse_runner
+from jobdesk.config.schema import (
     AiConfig,
     AppConfig,
     FxConfig,
     ParserConfig,
     SourcesConfig,
 )
-from tg_jobs_parser.parse_cancel import ParseCancellationToken, ParseCancelled
-from tg_jobs_parser.parsers.base import ChannelCheckpoint, RawPost
+from jobdesk.parse_cancel import ParseCancellationToken, ParseCancelled
+from jobdesk.parsers.base import ChannelCheckpoint, RawPost
 
 CHANNELS = ["alpha", "beta"]
 
@@ -285,7 +285,7 @@ def _broken_ai(monkeypatch) -> None:
     def broken(*args, **kwargs):
         raise ValueError("OPENROUTER_API_KEY не задан")
 
-    monkeypatch.setattr("tg_jobs_parser.ai.enricher.AIEnrichmentService", broken)
+    monkeypatch.setattr("jobdesk.ai.enricher.AIEnrichmentService", broken)
 
 
 def _init_failed() -> float:
@@ -295,7 +295,7 @@ def _init_failed() -> float:
 
 
 def test_primary_without_llm_fails_before_fetch(monkeypatch):
-    from tg_jobs_parser.ai.enricher import LlmUnavailableError
+    from jobdesk.ai.enricher import LlmUnavailableError
 
     before = _init_failed()
     _broken_ai(monkeypatch)
@@ -331,7 +331,7 @@ class _MemCache:
         self.hits = hits
 
     def get(self, *, text, model, prompt_version, mode):
-        from tg_jobs_parser.ai.schema import VacancyAIExtraction
+        from jobdesk.ai.schema import VacancyAIExtraction
 
         return VacancyAIExtraction(is_job_post=True, confidence=0.9) if text in self.hits else None
 
@@ -341,11 +341,11 @@ class _MemCache:
 
 def _run_primary_with_limit(monkeypatch, *, limit: int, posts: list[RawPost], cached: set[str]):
     """run_parse в primary с настоящим AIEnrichmentService: подменены только кэш и вызов модели."""
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
-    from tg_jobs_parser.ai.schema import VacancyAIExtraction
+    from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient
+    from jobdesk.ai.schema import VacancyAIExtraction
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.setattr("tg_jobs_parser.ai.cache.build_extraction_cache", lambda ai: _MemCache(cached))
+    monkeypatch.setattr("jobdesk.ai.cache.build_extraction_cache", lambda ai: _MemCache(cached))
     calls: list[str] = []
 
     def fake_extract(self, *, text, search_context):
@@ -374,7 +374,7 @@ def test_primary_over_max_posts_per_run_is_incomplete(monkeypatch):
 def test_cached_answers_do_not_spend_max_posts_per_run(monkeypatch):
     posts = [_post("alpha", i) for i in range(5)]
     # Кэшированные идут последними: раньше потолок проверялся до кэша и отсекал их.
-    from tg_jobs_parser.ingestion.rules import rules_from_raw_post
+    from jobdesk.ingestion.rules import rules_from_raw_post
 
     cached = {rules_from_raw_post(p, _config()).cleaned_text for p in posts[2:]}
 
@@ -386,7 +386,7 @@ def test_cached_answers_do_not_spend_max_posts_per_run(monkeypatch):
 
 
 def test_long_window_keeps_newest_days_and_warns(monkeypatch):
-    from tg_jobs_parser.config.schema import SearchConfig
+    from jobdesk.config.schema import SearchConfig
 
     _install(monkeypatch, _StreamingParser({"alpha": [_post("alpha", 1)]}))
     cfg = _config(channels=["alpha"])

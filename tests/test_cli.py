@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from typer.testing import CliRunner
 
-from tg_jobs_parser.cli.app import app
-from tg_jobs_parser.parsers.telegram_telethon import (
+from jobdesk.cli.app import app
+from jobdesk.parsers.telegram_telethon import (
     TelethonSessionInfo,
     ensure_telethon_session,
 )
@@ -42,11 +42,11 @@ def test_ensure_telethon_session_writes_path(tmp_path: Path, monkeypatch: pytest
     client.disconnect = AsyncMock()
 
     monkeypatch.setattr(
-        "tg_jobs_parser.parsers.telegram_telethon.telegram_api_credentials",
+        "jobdesk.parsers.telegram_telethon.telegram_api_credentials",
         lambda: (1, "hash"),
     )
     monkeypatch.setattr(
-        "tg_jobs_parser.parsers.telegram_telethon.telethon_import_error",
+        "jobdesk.parsers.telegram_telethon.telethon_import_error",
         lambda: None,
     )
 

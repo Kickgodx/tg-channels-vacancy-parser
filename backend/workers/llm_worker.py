@@ -1,4 +1,4 @@
-"""Entrypoint RQ-воркера: ``tg-jobs-llm-worker``."""
+"""Entrypoint RQ-воркера: ``jobdesk-llm-worker``."""
 
 from __future__ import annotations
 

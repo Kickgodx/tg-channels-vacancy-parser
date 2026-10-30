@@ -14,8 +14,8 @@ from backend.observability import record_cover_letter
 from backend.services.interactive_llm import get_interactive_client
 from backend.services.llm_job_service import LlmJobCancelled
 from backend.settings import get_settings
-from tg_jobs_parser.ai.prompts import COVER_LETTER_PROMPT_VERSION
-from tg_jobs_parser.config.loader import load_config
+from jobdesk.ai.prompts import COVER_LETTER_PROMPT_VERSION
+from jobdesk.config.loader import load_config
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)

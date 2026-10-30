@@ -354,7 +354,7 @@
       },
       "targets": [
         {
-          "expr": "process_resident_memory_bytes{job=\"tg-jobs-backend\"}",
+          "expr": "process_resident_memory_bytes{job=\"jobdesk-backend\"}",
           "legendFormat": "RSS",
           "refId": "A"
         }
@@ -380,7 +380,7 @@
       },
       "targets": [
         {
-          "expr": "rate(process_cpu_seconds_total{job=\"tg-jobs-backend\"}[5m])",
+          "expr": "rate(process_cpu_seconds_total{job=\"jobdesk-backend\"}[5m])",
           "legendFormat": "CPU cores",
           "refId": "A"
         }
@@ -406,7 +406,7 @@
       },
       "targets": [
         {
-          "expr": "process_open_fds{job=\"tg-jobs-backend\"}",
+          "expr": "process_open_fds{job=\"jobdesk-backend\"}",
           "legendFormat": "open FDs",
           "refId": "A"
         }
@@ -439,7 +439,7 @@
       },
       "targets": [
         {
-          "expr": "time() - process_start_time_seconds{job=\"tg-jobs-backend\"}",
+          "expr": "time() - process_start_time_seconds{job=\"jobdesk-backend\"}",
           "legendFormat": "uptime",
           "refId": "A"
         }
@@ -464,7 +464,7 @@
       },
       "targets": [
         {
-          "expr": "rate(python_gc_collections_total{job=\"tg-jobs-backend\"}[5m]) * 60",
+          "expr": "rate(python_gc_collections_total{job=\"jobdesk-backend\"}[5m]) * 60",
           "legendFormat": "gen {{generation}}",
           "refId": "A"
         }
@@ -475,12 +475,12 @@
   ],
   "refresh": "10s",
   "schemaVersion": 39,
-  "tags": ["fastapi", "tg-jobs-parser"],
+  "tags": ["fastapi", "jobdesk"],
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "tg-jobs-parser API",
-  "uid": "tg-jobs-api",
+  "title": "JobDesk API",
+  "uid": "jobdesk-api",
   "version": 4
 }

@@ -26,7 +26,7 @@ COPY --from=requirements /src/requirements.txt ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 COPY pyproject.toml README.md alembic.ini ./
-COPY tg_jobs_parser ./tg_jobs_parser
+COPY jobdesk ./jobdesk
 COPY backend ./backend
 COPY alembic ./alembic
 COPY config.yaml llm_models.yaml ./
@@ -42,4 +42,4 @@ EXPOSE 8000
 
 # Console script из pyproject (backend.main:main): модуль импортируется под своим
 # именем (логгеры `backend.main`, а не `__main__`) и выполняется ровно один раз.
-CMD ["tg-jobs-api"]
+CMD ["jobdesk-api"]

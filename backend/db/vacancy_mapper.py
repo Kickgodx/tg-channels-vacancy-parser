@@ -8,8 +8,8 @@ from sqlalchemy import case, func
 
 from backend.db.models import VacancyRow
 from backend.schemas import VacancyListItem
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.company import company_key
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.company import company_key
 
 # Длина preview в списке (как в UI-таблице до оптимизации).
 VACANCY_PREVIEW_LEN = 120

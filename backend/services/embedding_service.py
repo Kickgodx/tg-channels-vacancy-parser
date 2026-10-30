@@ -22,8 +22,8 @@ from backend.db.models import ResumeEmbeddingRow, ResumeRow, VacancyEmbeddingRow
 from backend.db.session import session_scope
 from backend.db.vector_type import EMBEDDING_DIMENSIONS, query_vector
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import AiConfig
 
 _LOG = logging.getLogger(__name__)
 
@@ -77,8 +77,8 @@ _client_fp: tuple | None = None
 
 def _get_client(ai: AiConfig):
     """Процессный клиент эмбеддингов со своим RPM-лимитом (общий счётчик — через порт Redis)."""
-    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
-    from tg_jobs_parser.ai.rate_limit import OpenRouterRateLimiter
+    from jobdesk.ai.clients.openrouter import OpenRouterClient
+    from jobdesk.ai.rate_limit import OpenRouterRateLimiter
 
     global _client, _client_fp
     fp = (ai.base_url, ai.requests_per_minute, ai.request_timeout_seconds, ai.max_retries_on_error)

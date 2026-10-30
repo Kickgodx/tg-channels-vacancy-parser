@@ -44,7 +44,7 @@ from backend.settings import Settings
 
 _LOG = logging.getLogger(__name__)
 
-DEFAULT_SERVICE_NAME = "tg-jobs-parser-backend"
+DEFAULT_SERVICE_NAME = "jobdesk-backend"
 
 _provider: TracerProvider | None = None
 
@@ -53,7 +53,7 @@ def service_name() -> str:
     """``OTEL_SERVICE_NAME`` процесса (воркеры задают свой), иначе имя backend.
 
     Явный атрибут в ``Resource.create`` перекрывает env-детектор SDK — без этой
-    функции все воркеры попадали в Tempo как ``tg-jobs-parser-backend``.
+    функции все воркеры попадали в Tempo как ``jobdesk-backend``.
     """
     return os.environ.get("OTEL_SERVICE_NAME", "").strip() or DEFAULT_SERVICE_NAME
 

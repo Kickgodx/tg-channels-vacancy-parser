@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 from backend.db.models import ChannelCandidateRow, VacancyRow
 from backend.schemas import RecruiterContactOut, RecruiterContacts
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.extraction.recruiter_contacts import find_recruiter_contacts
-from tg_jobs_parser.hh.mapper import HH_CHANNEL
+from jobdesk.config.loader import load_config
+from jobdesk.extraction.recruiter_contacts import find_recruiter_contacts
+from jobdesk.hh.mapper import HH_CHANNEL
 
 # Подпись канала: упоминание без слов отклика в такой доле вакансий канала (и не реже)...
 SIGNATURE_MIN_SHARE = 0.3

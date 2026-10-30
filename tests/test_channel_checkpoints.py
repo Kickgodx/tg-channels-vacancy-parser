@@ -18,11 +18,11 @@ from backend.db.session import reset_engine, session_scope
 from backend.settings import get_settings
 from backend.workers import parse_tasks
 from backend.workers.parse_tasks import run_parse_job
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import AiConfig, AppConfig
-from tg_jobs_parser.models.parse_result import ParseResult
-from tg_jobs_parser.parse_runner import _checkpoints_if_fully_processed
-from tg_jobs_parser.parsers.base import ChannelCheckpoint
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import AiConfig, AppConfig
+from jobdesk.models.parse_result import ParseResult
+from jobdesk.parse_runner import _checkpoints_if_fully_processed
+from jobdesk.parsers.base import ChannelCheckpoint
 
 CP_OLD = ChannelCheckpoint(last_message_id=100, covered_from=date(2026, 10, 1))
 CP_NEW = ChannelCheckpoint(last_message_id=150, covered_from=date(2026, 10, 1))
@@ -164,9 +164,9 @@ def test_max_posts_per_run_in_primary_stops_checkpoints(monkeypatch, default_tes
     """primary, потолок 2: канал, разобранный до потолка, сдвинут; канал с пропущенными постами — нет."""
     from tests.test_streaming_parse import _post, _StreamingParser
 
-    import tg_jobs_parser.parse_runner as parse_runner
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
-    from tg_jobs_parser.ai.schema import VacancyAIExtraction
+    import jobdesk.parse_runner as parse_runner
+    from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient
+    from jobdesk.ai.schema import VacancyAIExtraction
 
     cfg = load_config(default_test_config)
     cfg = cfg.model_copy(

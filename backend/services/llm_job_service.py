@@ -17,9 +17,9 @@ from backend.db.session import session_scope
 from backend.observability import record_llm_job, record_llm_job_enqueue
 from backend.settings import get_settings
 from backend.tracing import current_traceparent
-from tg_jobs_parser.ai.rate_limit import interactive_daily_budget_exhausted
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.utils.thread_pool import DaemonThreadPoolExecutor
+from jobdesk.ai.rate_limit import interactive_daily_budget_exhausted
+from jobdesk.config.loader import load_config
+from jobdesk.utils.thread_pool import DaemonThreadPoolExecutor
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)

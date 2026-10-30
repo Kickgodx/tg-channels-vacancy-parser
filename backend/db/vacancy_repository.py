@@ -52,10 +52,10 @@ from backend.observability import record_vacancies_archived, record_vacancy_upse
 from backend.schemas import VacancyListItem, VacancyQuery, VacancySortField, VacancySortOrder
 from backend.services.llm_result_freshness import match_is_stale
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import AiConfig, FxConfig
-from tg_jobs_parser.deduplication.changes import is_edited_repost, vacancy_changes
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import AiConfig, FxConfig
+from jobdesk.deduplication.changes import is_edited_repost, vacancy_changes
+from jobdesk.models.vacancy import Vacancy
 
 
 @dataclass(frozen=True)

@@ -10,8 +10,8 @@ from backend.db.ai_cache_repository import (
     cache_get,
     cache_put,
 )
-from tg_jobs_parser.ai.cache import cache_key
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
+from jobdesk.ai.cache import cache_key
+from jobdesk.ai.schema import VacancyAIExtraction
 
 
 def _sample() -> VacancyAIExtraction:

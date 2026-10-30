@@ -1,1 +1,1 @@
-"""HTTP API backend для tg-jobs-parser."""
+"""HTTP API backend для jobdesk."""

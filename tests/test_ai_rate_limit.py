@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from tg_jobs_parser.ai.rate_limit import (
+from jobdesk.ai.rate_limit import (
     LlmQuotaExhausted,
     OpenRouterRateLimiter,
     extract_rate_limit_headers,

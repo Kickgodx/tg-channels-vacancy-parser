@@ -2,12 +2,12 @@
 
 import pytest
 
-from tg_jobs_parser.ai.llm_models_registry import (
+from jobdesk.ai.llm_models_registry import (
     load_llm_models_registry,
     resolve_llm_models_path,
 )
-from tg_jobs_parser.ai.models_catalog import label_for_model_id
-from tg_jobs_parser.config.loader import ConfigLoadError, load_config
+from jobdesk.ai.models_catalog import label_for_model_id
+from jobdesk.config.loader import ConfigLoadError, load_config
 
 
 def test_llm_models_yaml_exists_and_has_gemini():

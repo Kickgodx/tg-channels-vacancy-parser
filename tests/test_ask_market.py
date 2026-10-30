@@ -13,11 +13,11 @@ from backend.db.session import session_scope
 from backend.services import ask_market_service
 from backend.services.ask_market_service import compute_facts, normalize_filters
 from backend.settings import get_settings
-from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient, _parse_market_plan
-from tg_jobs_parser.ai.prompts import build_ask_market_plan_messages
-from tg_jobs_parser.ai.schema import MarketQueryFilters, MarketQueryPlan
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient, _parse_market_plan
+from jobdesk.ai.prompts import build_ask_market_plan_messages
+from jobdesk.ai.schema import MarketQueryFilters, MarketQueryPlan
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import AiConfig
 
 _n = iter(range(1, 1_000_000))
 

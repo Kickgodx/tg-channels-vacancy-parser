@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.ai.clients.openrouter import OpenRouterClient
+from jobdesk.config.schema import AiConfig
 
 _MATCH_JSON = '{"confidence": 80}'
 

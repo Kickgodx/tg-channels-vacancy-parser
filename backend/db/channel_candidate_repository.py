@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from backend.db.models import ChannelCandidateRow, TelegramChannelCheckpointRow, TelegramForwardRow
-from tg_jobs_parser.parsers.base import ForwardedPost
+from jobdesk.parsers.base import ForwardedPost
 
 CANDIDATE_STATUSES = ("new", "ignored")
 

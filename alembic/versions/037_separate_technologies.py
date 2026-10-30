@@ -9,7 +9,7 @@
    остаётся без роли (такие вакансии переразбирает LLM: ``POST /vacancies/reextract``).
 3. ``saved_filters.params``: языки из ``specializations`` → ``technologies``.
 
-Словари — копия ``tg_jobs_parser/config/schema.py`` на момент миграции (код приложения
+Словари — копия ``jobdesk/config/schema.py`` на момент миграции (код приложения
 миграции не импортируют). Снимки прогонов (``parse_runs``) — история, их не трогаем:
 ``FiltersConfig`` переносит языки при чтении. Downgrade возвращает только тип колонки.
 

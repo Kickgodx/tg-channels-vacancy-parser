@@ -537,12 +537,12 @@
   ],
   "refresh": "10s",
   "schemaVersion": 39,
-  "tags": ["llm", "openrouter", "tg-jobs-parser"],
+  "tags": ["llm", "openrouter", "jobdesk"],
   "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "tg-jobs-parser LLM",
-  "uid": "tg-jobs-llm",
+  "title": "jobdesk LLM",
+  "uid": "jobdesk-llm",
   "version": 1
 }

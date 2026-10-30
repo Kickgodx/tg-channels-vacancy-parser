@@ -141,12 +141,10 @@ def test_hh_sync_skip_detail_on_second_run(client: TestClient, monkeypatch):
     search_page = MagicMock()
     search_page.found = 1
     search_page.items = [
-        __import__("tg_jobs_parser.hh.models", fromlist=["VacancyShort"]).VacancyShort.model_validate(short_payload)
+        __import__("jobdesk.hh.models", fromlist=["VacancyShort"]).VacancyShort.model_validate(short_payload)
     ]
 
-    detail = __import__("tg_jobs_parser.hh.models", fromlist=["VacancyDetail"]).VacancyDetail.model_validate(
-        detail_payload
-    )
+    detail = __import__("jobdesk.hh.models", fromlist=["VacancyDetail"]).VacancyDetail.model_validate(detail_payload)
 
     detail_calls = {"n": 0}
 
@@ -295,7 +293,7 @@ def test_hh_sync_idempotency_key_returns_same_job(client: TestClient, monkeypatc
 
 
 def test_hh_sync_api_error_fails_job(client: TestClient, monkeypatch):
-    from tg_jobs_parser.hh.client import HHApiError
+    from jobdesk.hh.client import HHApiError
 
     class FailingClient(_EmptyClient):
         def iter_vacancy_pages(self, params):
@@ -387,7 +385,7 @@ def test_hh_sync_cancel_of_completed_job_returns_current_state(client: TestClien
 
 
 def _short(hh_id: str, name: str, employer: str):
-    from tg_jobs_parser.hh.models import VacancyShort
+    from jobdesk.hh.models import VacancyShort
 
     return VacancyShort.model_validate(
         {
@@ -402,7 +400,7 @@ def _short(hh_id: str, name: str, employer: str):
 
 
 def _detail(short):
-    from tg_jobs_parser.hh.models import VacancyDetail
+    from jobdesk.hh.models import VacancyDetail
 
     return VacancyDetail.model_validate(
         {
@@ -493,7 +491,7 @@ def _pages(found: int, sizes: list[int]):
 
 def test_collect_shorts_warns_when_hh_found_more_than_depth_limit():
     from backend.services.hh_sync_service import _collect_shorts
-    from tg_jobs_parser.config.schema import HhConfig
+    from jobdesk.config.schema import HhConfig
 
     client = MagicMock()
     client.iter_vacancy_pages.return_value = _pages(5000, [100] * 20)
@@ -508,7 +506,7 @@ def test_collect_shorts_warns_when_hh_found_more_than_depth_limit():
 
 def test_collect_shorts_within_limit_has_no_warning():
     from backend.services.hh_sync_service import _collect_shorts
-    from tg_jobs_parser.config.schema import HhConfig
+    from jobdesk.config.schema import HhConfig
 
     client = MagicMock()
     client.iter_vacancy_pages.return_value = _pages(150, [100, 50])

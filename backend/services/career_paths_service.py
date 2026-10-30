@@ -27,7 +27,7 @@ from backend.services import embedding_service
 from backend.services.resume_market_service import PEERS as POSITION_PEERS
 from backend.services.resume_market_service import WINDOW_DAYS, nearest_vacancies, resume_technology_check
 from backend.services.skill_what_if_service import FIT_THRESHOLD, fits, is_learnable
-from tg_jobs_parser.extraction.grade_extractor import GRADE_RANK, UNKNOWN_GRADE
+from jobdesk.extraction.grade_extractor import GRADE_RANK, UNKNOWN_GRADE
 
 # Соседние роли — среди стольких ближайших к резюме вакансий.
 NEIGHBORHOOD = 300

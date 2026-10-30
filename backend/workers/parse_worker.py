@@ -1,4 +1,4 @@
-"""Entrypoint RQ-воркера: ``tg-jobs-parse-worker``."""
+"""Entrypoint RQ-воркера: ``jobdesk-parse-worker``."""
 
 from __future__ import annotations
 

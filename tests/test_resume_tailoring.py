@@ -13,11 +13,11 @@ from tests.llm_job_helpers import await_llm_job, use_ai_config
 from backend.db.models import ResumeTailoringRow, VacancyRow
 from backend.db.session import get_session_factory, session_scope
 from backend.services import resume_tailoring_service
-from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient, _parse_tailoring
-from tg_jobs_parser.ai.prompts import RESUME_TAILOR_PROMPT_VERSION, build_resume_tailor_messages
-from tg_jobs_parser.ai.schema import ResumeTailoringExtraction
-from tg_jobs_parser.config.schema import AiConfig
-from tg_jobs_parser.utils.resume_file import ResumeFileError, extract_resume_text
+from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient, _parse_tailoring
+from jobdesk.ai.prompts import RESUME_TAILOR_PROMPT_VERSION, build_resume_tailor_messages
+from jobdesk.ai.schema import ResumeTailoringExtraction
+from jobdesk.config.schema import AiConfig
+from jobdesk.utils.resume_file import ResumeFileError, extract_resume_text
 
 _ANSWER = {
     "summary": "Поднимите автотесты на Python выше.",

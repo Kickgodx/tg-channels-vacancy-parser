@@ -1,6 +1,6 @@
 """Нормализация грейда (парсинг сохраняет все грейды; фильтр — только в API вакансий)."""
 
-from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS, normalize_grade
+from jobdesk.extraction.grade_extractor import GRADE_OPTIONS, normalize_grade
 
 
 def test_normalize_grade_aliases():

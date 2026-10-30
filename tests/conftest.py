@@ -25,7 +25,7 @@ def _pg_image() -> str:
     """Тег образа как в docker-compose.yml: версия pgvector — из ARG Dockerfile."""
     text = (_PG_DOCKERFILE_DIR / "Dockerfile").read_text(encoding="utf-8")
     version = re.search(r"^ARG PGVECTOR_VERSION=(\S+)", text, re.MULTILINE).group(1)
-    return f"tgjobs-postgres:16-pgvector{version}"
+    return f"jobdesk-postgres:16-pgvector{version}"
 
 
 def _ensure_pg_image(image: str) -> None:
@@ -40,8 +40,8 @@ def _ensure_pg_image(image: str) -> None:
 
 # Данные в tmpfs без fsync: тестовой базе durability не нужна, а запись заметно быстрее.
 _PG_COMMAND = "postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c max_connections=300"
-_PG_ERROR_ENV = "TGJOBS_TEST_PG_ERROR"
-_RUN_ID_ENV = "TGJOBS_TEST_RUN_ID"
+_PG_ERROR_ENV = "JOBDESK_TEST_PG_ERROR"
+_RUN_ID_ENV = "JOBDESK_TEST_RUN_ID"
 # Нет тестового сервера: адрес никуда не ведёт (а не в dev-базу из .env), отказ — за секунду.
 _NO_DB_URL = "postgresql+psycopg://no-test-db@127.0.0.1:1/none?connect_timeout=1"
 
@@ -284,7 +284,7 @@ def no_real_telegram():
     с настоящими ``TELEGRAM_*`` из ``.env`` и сессией из ``sessions/``. Session-scope:
     заглушка переживает отдельный тест; свой ``_channel_parser`` тест ставит поверх.
     """
-    import tg_jobs_parser.parse_runner as parse_runner
+    import jobdesk.parse_runner as parse_runner
 
     def _forbidden(config, *, cancellation=None):
         raise RuntimeError("Тест дошёл до настоящего Telethon: подмените run_parse или parse_runner._channel_parser")
@@ -318,9 +318,7 @@ def otel_exporter():
         trace._TRACER_PROVIDER_SET_ONCE = Once()
         trace._TRACER_PROVIDER = None
         for name, module in list(sys.modules.items()):
-            if name.startswith(("backend.", "tg_jobs_parser.")) and isinstance(
-                getattr(module, "_TRACER", None), trace.Tracer
-            ):
+            if name.startswith(("backend.", "jobdesk.")) and isinstance(getattr(module, "_TRACER", None), trace.Tracer):
                 module._TRACER = trace.ProxyTracer(name)
 
     exp = InMemorySpanExporter()

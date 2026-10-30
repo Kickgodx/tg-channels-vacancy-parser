@@ -8,16 +8,16 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator, model_validator
 
-from tg_jobs_parser.ai.schema import (
+from jobdesk.ai.schema import (
     InterviewGap,
     InterviewQuestion,
     MatchBreakdown,
     ResumeTailoringSuggestion,
     SkillMatch,
 )
-from tg_jobs_parser.config.schema import split_specializations
-from tg_jobs_parser.models.metrics import MetricsSummary, SalaryDisplayMeta
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.config.schema import split_specializations
+from jobdesk.models.metrics import MetricsSummary, SalaryDisplayMeta
+from jobdesk.models.vacancy import Vacancy
 
 # partial — прогон дошёл до конца, но часть постов не разобрана (LLM отключён / много ошибок в primary).
 RunStatus = Literal["queued", "running", "completed", "partial", "cancelled", "failed"]

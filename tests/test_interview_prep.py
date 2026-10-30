@@ -13,10 +13,10 @@ from backend.db.models import InterviewPrepRow, VacancyRow
 from backend.db.session import get_session_factory, session_scope
 from backend.db.transfer import count_replace_losses
 from backend.services import interview_prep_service
-from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient, _parse_interview_prep
-from tg_jobs_parser.ai.prompts import INTERVIEW_PREP_PROMPT_VERSION, build_interview_prep_messages
-from tg_jobs_parser.ai.schema import InterviewPrepExtraction
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient, _parse_interview_prep
+from jobdesk.ai.prompts import INTERVIEW_PREP_PROMPT_VERSION, build_interview_prep_messages
+from jobdesk.ai.schema import InterviewPrepExtraction
+from jobdesk.config.schema import AiConfig
 
 _ANSWER = {
     "summary": "Будут копать автотесты API на Python.",

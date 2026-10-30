@@ -144,7 +144,7 @@ class VacancyRow(Base):
     country: Mapped[str | None] = mapped_column(String(256), nullable=True)
     city: Mapped[str | None] = mapped_column(String(256), nullable=True)
     company: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    # Нормализованное имя компании (``tg_jobs_parser.utils.company.company_key``, миграция 040):
+    # Нормализованное имя компании (``jobdesk.utils.company.company_key``, миграция 040):
     # сводит «ООО Ромашка» и «РОМАШКА» в профиле компании и топе работодателей.
     company_key: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     contact: Mapped[str | None] = mapped_column(String(512), nullable=True)

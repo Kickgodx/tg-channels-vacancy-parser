@@ -9,8 +9,8 @@ from backend.db.models import VacancyMatchRow
 from backend.db.vacancy_metrics import technology_counts
 from backend.schemas import SkillGapItem, SkillGapsOut, VacancyQuery
 from backend.settings import get_settings
-from tg_jobs_parser.analytics.skill_gaps import MatchSkills, SkillGap, TechnologyMatcher, summarize_skill_gaps
-from tg_jobs_parser.config.loader import load_config
+from jobdesk.analytics.skill_gaps import MatchSkills, SkillGap, TechnologyMatcher, summarize_skill_gaps
+from jobdesk.config.loader import load_config
 
 # Технология каталога попадает в словарь, если она есть хотя бы у стольких активных вакансий:
 # редкие имена из ответов LLM — шум («Moon», «LAVA»), они уходят в прочие навыки.

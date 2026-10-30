@@ -1,4 +1,4 @@
-from tg_jobs_parser.extraction.salary_extractor import extract_salary
+from jobdesk.extraction.salary_extractor import extract_salary
 
 
 def test_salary_range_usd():

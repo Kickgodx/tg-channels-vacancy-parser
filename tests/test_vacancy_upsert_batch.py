@@ -13,8 +13,8 @@ from tests.conftest import new_parse_run
 from backend.db import vacancy_repository as vr
 from backend.db.models import VacancyRow
 from backend.db.session import get_engine
-from tg_jobs_parser.config.schema import FxConfig
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.config.schema import FxConfig
+from jobdesk.models.vacancy import Vacancy
 
 FX_OFF = FxConfig(enabled=False)
 

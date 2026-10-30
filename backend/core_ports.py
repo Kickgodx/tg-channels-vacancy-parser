@@ -1,4 +1,4 @@
-"""Подключение infra-адаптеров к портам ядра ``tg_jobs_parser``.
+"""Подключение infra-адаптеров к портам ядра ``jobdesk``.
 
 Ядро не импортирует ``backend``: кэш LLM в Postgres (``AIExtractionCacheBackend``) и
 общий лимит запросов к LLM (``GlobalRateGate``) регистрируются при старте процесса.

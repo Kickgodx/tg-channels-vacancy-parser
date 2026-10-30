@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from tg_jobs_parser.ai.prompts import (
+from jobdesk.ai.prompts import (
     COVER_LETTER_PROMPT_VERSION,
     EXTRACT_PROMPT_VERSION,
     MATCH_PROMPT_VERSION,
     resolve_extract_prompt_version,
 )
-from tg_jobs_parser.evals.golden import load_extraction_cases
-from tg_jobs_parser.evals.paths import fixtures_extraction_path, golden_extraction_path
-from tg_jobs_parser.evals.score_extraction import aggregate_scores, score_extraction
+from jobdesk.evals.golden import load_extraction_cases
+from jobdesk.evals.paths import fixtures_extraction_path, golden_extraction_path
+from jobdesk.evals.score_extraction import aggregate_scores, score_extraction
 
 # Мягкий порог на старте (план): fixtures ≈ expected → высокий score.
 _MIN_EXACT_MATCH_RATE = 0.8
@@ -117,9 +117,9 @@ def test_live_extraction_smoke(monkeypatch):
     if not config_path.is_file():
         pytest.skip("config.yaml не найден")
 
-    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
-    from tg_jobs_parser.config.loader import load_config
-    from tg_jobs_parser.evals.run_extraction import _default_search_context
+    from jobdesk.ai.clients.openrouter import OpenRouterClient
+    from jobdesk.config.loader import load_config
+    from jobdesk.evals.run_extraction import _default_search_context
 
     cfg = load_config(config_path)
     if not cfg.ai.enabled:

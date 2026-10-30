@@ -12,9 +12,9 @@ from backend.db.aggregate_cache import cached_aggregate, invalidate_aggregate_ca
 from backend.db.session import reset_engine, session_scope
 from backend.schemas import VacancyQuery
 from backend.settings import get_settings
-from tg_jobs_parser.config import loader
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.config import loader
+from jobdesk.config.loader import load_config
+from jobdesk.models.vacancy import Vacancy
 
 
 def _write(path, threshold: int) -> None:

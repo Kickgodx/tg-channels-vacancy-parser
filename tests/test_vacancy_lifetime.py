@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from backend.db.models import VacancyRow, VacancySightingRow
 from backend.db.vacancy_lifetime import MIN_GROUP, vacancy_lifetime
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.utils.company import company_key
+from jobdesk.utils.company import company_key
 
 _ids = iter(range(1, 1_000_000))
 _DAY = datetime(2026, 9, 1, 10, tzinfo=UTC)

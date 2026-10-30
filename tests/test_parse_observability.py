@@ -18,9 +18,9 @@ from tests.test_incremental_db_flush import _run as run_parse_with_posts
 from tests.test_telethon_incremental import MESSAGES, PAGED_MESSAGES, FakeClient, _parser
 
 from backend.tracing import DEFAULT_SERVICE_NAME, service_name
-from tg_jobs_parser.ai.models_catalog import LlmModelEntry
-from tg_jobs_parser.config.schema import AiConfig
-from tg_jobs_parser.observability.parse_metrics import install_telethon_flood_filter
+from jobdesk.ai.models_catalog import LlmModelEntry
+from jobdesk.config.schema import AiConfig
+from jobdesk.observability.parse_metrics import install_telethon_flood_filter
 
 
 @pytest.fixture
@@ -37,8 +37,8 @@ def _sample(name: str, labels: dict[str, str] | None = None) -> float:
 
 
 def test_service_name_follows_otel_env(monkeypatch):
-    monkeypatch.setenv("OTEL_SERVICE_NAME", "tg-jobs-parser-parse-worker")
-    assert service_name() == "tg-jobs-parser-parse-worker"
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "jobdesk-parse-worker")
+    assert service_name() == "jobdesk-parse-worker"
     monkeypatch.setenv("OTEL_SERVICE_NAME", " ")
     assert service_name() == DEFAULT_SERVICE_NAME
     monkeypatch.delenv("OTEL_SERVICE_NAME")
@@ -46,7 +46,7 @@ def test_service_name_follows_otel_env(monkeypatch):
 
 
 def _client_with_sdk(monkeypatch, *, model: str, catalog, acquire_sleep: float = 0.0, errors=()):
-    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
+    from jobdesk.ai.clients.openrouter import OpenRouterClient
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     client = OpenRouterClient(AiConfig(model=model, requests_per_minute=500), catalog=catalog)
@@ -235,7 +235,7 @@ def test_labeled_series_exported_before_first_event(name, labels):
 
 
 def test_model_series_exported_when_client_created(monkeypatch):
-    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
+    from jobdesk.ai.clients.openrouter import OpenRouterClient
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     OpenRouterClient(AiConfig(model="obs/fresh-model", match_model="obs/fresh-match"))

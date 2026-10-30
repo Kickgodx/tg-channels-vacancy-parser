@@ -7,8 +7,8 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 
 from backend.db.migrate import alembic_ini_path
-from tg_jobs_parser.ai.prompts import SYSTEM_PROMPT_V1
-from tg_jobs_parser.extraction.grade_extractor import GRADE_OPTIONS, extract_grade, normalize_grade
+from jobdesk.ai.prompts import SYSTEM_PROMPT_V1
+from jobdesk.extraction.grade_extractor import GRADE_OPTIONS, extract_grade, normalize_grade
 
 
 def test_middle_plus_is_not_a_grade():

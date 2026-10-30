@@ -16,8 +16,8 @@ from backend.db.repository import (
     upsert_vacancies,
 )
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.hashing import vacancy_content_id
 
 
 def _vac(
@@ -298,7 +298,7 @@ def test_repost_fills_missing_post_date(db_session):
 def test_hh_republished_vacancy_returns_from_archive(db_session):
     """HH поднял вакансию заново (published_at новее) — она возвращается из архива."""
     from backend.db import hh_repository as hh_repo
-    from tg_jobs_parser.config.schema import FxConfig
+    from jobdesk.config.schema import FxConfig
 
     now = datetime.now(UTC)
     fx = FxConfig(enabled=False)

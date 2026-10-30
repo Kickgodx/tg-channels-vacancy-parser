@@ -12,7 +12,7 @@ from backend.api.deps import get_current_user, get_db, require_admin, verify_api
 from backend.db import fx_repository as fx_repo
 from backend.fx.backfill import backfill_vacancies_salary_rub
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import load_config
+from jobdesk.config.loader import load_config
 
 # Курсы читает любой залогиненный пользователь; обновление и пересчёт — только admin.
 router = APIRouter(

@@ -29,9 +29,9 @@ from backend.schemas import (
     DigestTechnology,
 )
 from backend.settings import get_settings
-from tg_jobs_parser.ai.prompts import MARKET_DIGEST_PROMPT_VERSION
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import AppConfig
+from jobdesk.ai.prompts import MARKET_DIGEST_PROMPT_VERSION
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import AppConfig
 
 _LOG = logging.getLogger(__name__)
 
@@ -214,8 +214,8 @@ def compute_facts(session: Session, week_start: date) -> DigestFacts:
 
 def _make_client(cfg: AppConfig):
     """Свой клиент на один вызов в неделю: вне суточного бюджета пользовательского LLM."""
-    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
-    from tg_jobs_parser.ai.rate_limit import OpenRouterRateLimiter
+    from jobdesk.ai.clients.openrouter import OpenRouterClient
+    from jobdesk.ai.rate_limit import OpenRouterRateLimiter
 
     limiter = OpenRouterRateLimiter(
         requests_per_minute=cfg.ai.requests_per_minute,

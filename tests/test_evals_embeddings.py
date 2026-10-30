@@ -7,11 +7,11 @@ import math
 import numpy as np
 import pytest
 
-from tg_jobs_parser.evals.embeddings import metrics as m
-from tg_jobs_parser.evals.embeddings.data import CorpusDoc, Dataset, DupPair, Judgment, Query, ResumeCase
-from tg_jobs_parser.evals.embeddings.embedder import VARIANTS, Embedder
-from tg_jobs_parser.evals.embeddings.evaluate import Prepared, render_markdown, run_variant
-from tg_jobs_parser.evals.embeddings.llm import generate_queries, judge, sample_sources
+from jobdesk.evals.embeddings import metrics as m
+from jobdesk.evals.embeddings.data import CorpusDoc, Dataset, DupPair, Judgment, Query, ResumeCase
+from jobdesk.evals.embeddings.embedder import VARIANTS, Embedder
+from jobdesk.evals.embeddings.evaluate import Prepared, render_markdown, run_variant
+from jobdesk.evals.embeddings.llm import generate_queries, judge, sample_sources
 
 
 def _unit(rows):

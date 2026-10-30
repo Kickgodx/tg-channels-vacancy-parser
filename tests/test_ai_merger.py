@@ -2,10 +2,10 @@
 
 from datetime import UTC, datetime
 
-from tg_jobs_parser.ai.merger import merge_rules_and_ai
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.config.schema import AppConfig
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.ai.merger import merge_rules_and_ai
+from jobdesk.ai.schema import VacancyAIExtraction
+from jobdesk.config.schema import AppConfig
+from jobdesk.models.vacancy import Vacancy
 
 
 def _vacancy(**kwargs) -> Vacancy:
@@ -143,7 +143,7 @@ def test_primary_clears_rules_salary_when_ai_null():
 
 
 def test_parse_extraction_coerces_list_required_experience():
-    from tg_jobs_parser.ai.clients.openrouter import _parse_extraction
+    from jobdesk.ai.clients.openrouter import _parse_extraction
 
     raw = """{
         "is_job_post": true,
@@ -168,7 +168,7 @@ def test_merge_ai_notes():
 
 
 def test_openrouter_parse_json_fence():
-    from tg_jobs_parser.ai.clients.openrouter import _parse_extraction
+    from jobdesk.ai.clients.openrouter import _parse_extraction
 
     raw = """```json
 {"is_job_post": true, "detected_specializations": ["QA"], "confidence": 0.8}

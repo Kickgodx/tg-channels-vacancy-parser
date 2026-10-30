@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from tg_jobs_parser.ai.cache import build_extraction_cache
-from tg_jobs_parser.ai.cache_registry import (
+from jobdesk.ai.cache import build_extraction_cache
+from jobdesk.ai.cache_registry import (
     clear_postgres_cache_factory,
     register_postgres_cache_factory,
 )
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.ai.schema import VacancyAIExtraction
+from jobdesk.config.schema import AiConfig
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +51,7 @@ def test_build_postgres_with_registry_returns_stub():
 def test_import_ai_cache_does_not_load_backend():
     # Убедиться, что модуль кэша не тянет backend при импорте.
     # Перезагрузка не нужна: проверяем исходник модуля.
-    import tg_jobs_parser.ai.cache as cache_mod
+    import jobdesk.ai.cache as cache_mod
 
     src = Path(cache_mod.__file__).read_text(encoding="utf-8")
     assert "from backend" not in src
@@ -63,7 +63,7 @@ def test_llm_worker_setup_registers_postgres_cache(worker, monkeypatch):
     """LLM-разбор идёт в RQ-воркерах — без адаптера AI с cache_backend=postgres не создаётся."""
     import importlib
 
-    from tg_jobs_parser.ai import cache_registry, rate_limit
+    from jobdesk.ai import cache_registry, rate_limit
 
     monkeypatch.setattr(rate_limit, "_global_gate", rate_limit._global_gate)
     module = importlib.import_module(f"backend.workers.{worker}")

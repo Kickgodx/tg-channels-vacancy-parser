@@ -11,8 +11,8 @@ from tests.llm_job_helpers import await_llm_job, current_ai, use_ai_config
 from backend.db.models import LlmJobRow, VacancyMatchRow, VacancyRow
 from backend.db.session import get_session_factory, session_scope
 from backend.services import match_service
-from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.ai.prompts import MATCH_PROMPT_VERSION
+from jobdesk.config.schema import AiConfig
 
 
 def _register(client, email: str, password: str = "secret1") -> str:
@@ -158,8 +158,8 @@ def test_solo_match_404_and_auth(api_client, stub_llm):
 
 def test_match_single_end_to_end(api_client, monkeypatch):
     """Реальный match_service.match_single со stubbed interactive client."""
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
-    from tg_jobs_parser.ai.schema import (
+    from jobdesk.ai.clients.openrouter import LLMUsage
+    from jobdesk.ai.schema import (
         MatchBreakdown,
         SkillMatch,
         VacancyMatchExtraction,
@@ -215,8 +215,8 @@ def test_match_single_end_to_end(api_client, monkeypatch):
 
 
 def _fake_match_client(answered_by: str):
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
-    from tg_jobs_parser.ai.schema import VacancyMatchExtraction
+    from jobdesk.ai.clients.openrouter import LLMUsage
+    from jobdesk.ai.schema import VacancyMatchExtraction
 
     class _FakeClient:
         def match_with_fallback(self, *, resume_text, vacancy_text):
@@ -267,7 +267,7 @@ def test_match_model_falls_back_to_parse_model():
 
 def test_match_uses_match_model_and_reasoning(monkeypatch):
     """match() должен звать модель матчинга с её собственным флагом reasoning."""
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
+    from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     ai = AiConfig(
@@ -306,8 +306,8 @@ def test_match_retries_once_on_invalid_json(monkeypatch):
     """Невалидный JSON → один controlled retry той же модели, затем успех."""
     import json as _json
 
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage, OpenRouterClient
-    from tg_jobs_parser.ai.schema import VacancyMatchExtraction
+    from jobdesk.ai.clients.openrouter import LLMUsage, OpenRouterClient
+    from jobdesk.ai.schema import VacancyMatchExtraction
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     client = OpenRouterClient(AiConfig(model="m"))
@@ -364,8 +364,8 @@ def _cancel_active_job(rid: int, vid: str, kind: str = "match") -> None:
 
 
 def test_cancel_during_model_answer_keeps_previous_match(api_client, monkeypatch):
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
-    from tg_jobs_parser.ai.schema import VacancyMatchExtraction
+    from jobdesk.ai.clients.openrouter import LLMUsage
+    from jobdesk.ai.schema import VacancyMatchExtraction
 
     state = {"cancel": False, "rid": None, "vid": None}
 

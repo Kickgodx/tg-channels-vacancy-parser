@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from backend.services.vacancy_preview import build_vacancies_preview
-from tg_jobs_parser.parse_progress import ParseProgressSnapshot
+from jobdesk.parse_progress import ParseProgressSnapshot
 
 
 def snapshot_to_progress_dict(snap: ParseProgressSnapshot) -> dict:

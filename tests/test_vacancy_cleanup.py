@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 from backend.db.models import VacancyRow
 from backend.db.session import session_scope
 from backend.services.vacancy_cleanup import apply_cleanup, plan_cleanup
-from tg_jobs_parser.cli.db import db_app
+from jobdesk.cli.db import db_app
 
 
 def _vac(vid: str, text: str, technologies: list[str], **kw) -> VacancyRow:

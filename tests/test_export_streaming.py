@@ -26,7 +26,7 @@ def client(client_fixture, monkeypatch):  # noqa: F811
 def _seed(n: int = 3) -> uuid.UUID:
     from backend.db.repository import create_parse_run, upsert_vacancies
     from backend.db.session import session_scope
-    from tg_jobs_parser.models.vacancy import Vacancy
+    from jobdesk.models.vacancy import Vacancy
 
     with session_scope() as session:
         run_id = create_parse_run(session, config_snapshot={}).id

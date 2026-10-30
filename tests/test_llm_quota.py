@@ -15,9 +15,9 @@ from backend.db.session import session_scope
 from backend.services import llm_rate_gate, match_service
 from backend.services.llm_rate_gate import RedisWindowRateGate
 from backend.settings import get_settings
-from tg_jobs_parser.ai import rate_limit
-from tg_jobs_parser.ai.prompts import MATCH_PROMPT_VERSION
-from tg_jobs_parser.ai.rate_limit import LlmQuotaExhausted, OpenRouterRateLimiter, register_global_rate_gate
+from jobdesk.ai import rate_limit
+from jobdesk.ai.prompts import MATCH_PROMPT_VERSION
+from jobdesk.ai.rate_limit import LlmQuotaExhausted, OpenRouterRateLimiter, register_global_rate_gate
 
 # --- общий лимит (Redis) ---
 
@@ -194,8 +194,8 @@ def test_no_budget_by_default(limiter):
 def test_budget_applies_to_interactive_llm_only(monkeypatch, default_test_config):
     """Мэтчинг и письма — под бюджетом; парсинг (только админ) — без него."""
     from backend.services import interactive_llm
-    from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
-    from tg_jobs_parser.config.loader import load_config
+    from jobdesk.ai.clients.openrouter import OpenRouterClient
+    from jobdesk.config.loader import load_config
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     cfg = load_config(default_test_config)

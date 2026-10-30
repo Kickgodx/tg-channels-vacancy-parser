@@ -18,8 +18,8 @@ from backend.services.hh_sync_service import HhSyncConflict, HhSyncResult, run_h
 from backend.services.hh_sync_window import ResolvedHhSearchWindow
 from backend.settings import get_settings
 from backend.workers import liveness
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.hh.client import HHApiError
+from jobdesk.config.loader import load_config
+from jobdesk.hh.client import HHApiError
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)

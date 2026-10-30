@@ -13,7 +13,7 @@ from backend.observability import record_llm_job, record_llm_jobs_recover
 from backend.services.llm_job_events import publish_llm_job_event
 from backend.settings import get_settings
 from backend.workers.recover_loop import rq_job_still_live
-from tg_jobs_parser.config.loader import load_config
+from jobdesk.config.loader import load_config
 
 _LOG = logging.getLogger(__name__)
 

@@ -6,12 +6,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from tg_jobs_parser.ai.merger import merge_rules_and_ai
-from tg_jobs_parser.ai.schema import VacancyAIExtraction
-from tg_jobs_parser.config.schema import AppConfig, clean_technology_names
-from tg_jobs_parser.hh.mapper import detail_to_vacancy
-from tg_jobs_parser.hh.models import VacancyDetail
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.ai.merger import merge_rules_and_ai
+from jobdesk.ai.schema import VacancyAIExtraction
+from jobdesk.config.schema import AppConfig, clean_technology_names
+from jobdesk.hh.mapper import detail_to_vacancy
+from jobdesk.hh.models import VacancyDetail
+from jobdesk.models.vacancy import Vacancy
 
 
 @pytest.mark.parametrize(

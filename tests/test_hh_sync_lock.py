@@ -11,7 +11,7 @@ import pytest
 from backend.db import hh_repository as hh_repo
 from backend.services import hh_sync_service
 from backend.settings import Settings
-from tg_jobs_parser.config.schema import AppConfig, HhConfig, HhSearchConfig
+from jobdesk.config.schema import AppConfig, HhConfig, HhSearchConfig
 
 
 class _FakeConn:

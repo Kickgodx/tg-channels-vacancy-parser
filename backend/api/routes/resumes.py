@@ -48,15 +48,15 @@ from backend.services.llm_result_freshness import (
     resume_tailoring_is_stale,
 )
 from backend.services.skill_gap_service import skill_gaps
-from tg_jobs_parser.ai.schema import (
+from jobdesk.ai.schema import (
     InterviewGap,
     InterviewQuestion,
     MatchBreakdown,
     ResumeTailoringSuggestion,
     SkillMatch,
 )
-from tg_jobs_parser.config.schema import AiConfig
-from tg_jobs_parser.utils.resume_file import ResumeFileError, extract_resume_text
+from jobdesk.config.schema import AiConfig
+from jobdesk.utils.resume_file import ResumeFileError, extract_resume_text
 
 _LOG = logging.getLogger(__name__)
 

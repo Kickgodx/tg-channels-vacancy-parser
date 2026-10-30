@@ -97,7 +97,7 @@ export default function TokensPage() {
             </div>
             <p className="caption">Подключение к Claude Code (из корня проекта):</p>
             <pre className="vacancy-full-text">
-              {`claude mcp add tg-jobs -e TGJOBS_TOKEN=${created.token} -- .venv/Scripts/python.exe -m tg_jobs_mcp`}
+              {`claude mcp add jobdesk -e JOBDESK_TOKEN=${created.token} -- .venv/Scripts/python.exe -m jobdesk_mcp`}
             </pre>
           </aside>
         )}

@@ -1,4 +1,4 @@
-"""Entrypoint RQ-воркера: ``tg-jobs-hh-worker`` (фоновый HH sync)."""
+"""Entrypoint RQ-воркера: ``jobdesk-hh-worker`` (фоновый HH sync)."""
 
 from __future__ import annotations
 

@@ -11,8 +11,8 @@ from tests.llm_job_helpers import await_llm_job
 from backend.db import repository as repo
 from backend.db.session import get_session_factory
 from backend.services import match_service
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.hashing import vacancy_content_id
 
 VACANCY_TEXT = (
     "Вакансия: Senior Python-разработчик в компанию Acme.\n"
@@ -88,8 +88,8 @@ def test_import_items_metric(api_client):
 
 
 def test_match_metrics(api_client, monkeypatch):
-    from tg_jobs_parser.ai.clients.openrouter import LLMUsage
-    from tg_jobs_parser.ai.schema import MatchBreakdown, VacancyMatchExtraction
+    from jobdesk.ai.clients.openrouter import LLMUsage
+    from jobdesk.ai.schema import MatchBreakdown, VacancyMatchExtraction
 
     class _FakeClient:
         def match_with_fallback(self, *, resume_text, vacancy_text):

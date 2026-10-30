@@ -75,8 +75,8 @@ def test_live_lease_running_not_recovered(fake_redis):
 
 def test_finalize_after_reclaim_is_noop():
     """Старый worker не может записать terminal после atomic reclaim."""
-    from tg_jobs_parser.models.metrics import MetricsSummary
-    from tg_jobs_parser.models.parse_result import ParseResult
+    from jobdesk.models.metrics import MetricsSummary
+    from jobdesk.models.parse_result import ParseResult
 
     with session_scope() as session:
         row = pr.create_parse_run(session, config_snapshot={})

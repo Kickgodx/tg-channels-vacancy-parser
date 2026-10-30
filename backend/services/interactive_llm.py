@@ -9,10 +9,10 @@ from __future__ import annotations
 import threading
 
 from backend.settings import get_settings
-from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
-from tg_jobs_parser.ai.rate_limit import OpenRouterRateLimiter
-from tg_jobs_parser.config.loader import load_config
-from tg_jobs_parser.config.schema import AiConfig
+from jobdesk.ai.clients.openrouter import OpenRouterClient
+from jobdesk.ai.rate_limit import OpenRouterRateLimiter
+from jobdesk.config.loader import load_config
+from jobdesk.config.schema import AiConfig
 
 _lock = threading.Lock()
 _client: OpenRouterClient | None = None

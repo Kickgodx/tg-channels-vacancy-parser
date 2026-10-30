@@ -39,20 +39,20 @@ bash scripts/check_alerts.sh                   # при правке observabili
 - LLM live evals помечены `@pytest.mark.llm` — **не** входят в обычный
   `pytest -q`. Опционально:
   `pytest -m llm` или
-  `.venv/Scripts/python.exe -m tg_jobs_parser.evals.run_extraction`.
+  `.venv/Scripts/python.exe -m jobdesk.evals.run_extraction`.
 
 ## LLM hygiene (промпты / golden / evals)
 
 - Версии: `EXTRACT_PROMPT_VERSION`, `MATCH_PROMPT_VERSION`,
   `COVER_LETTER_PROMPT_VERSION`, `RESUME_TAILOR_PROMPT_VERSION`, `INTERVIEW_PREP_PROMPT_VERSION`,
-  `MARKET_DIGEST_PROMPT_VERSION`, `ASK_MARKET_PROMPT_VERSION` в `tg_jobs_parser/ai/prompts.py`.
+  `MARKET_DIGEST_PROMPT_VERSION`, `ASK_MARKET_PROMPT_VERSION` в `jobdesk/ai/prompts.py`.
   Смысловое изменение промпта → **bump** версии: кэш extraction ключуется
   версией, а сохранённые оценки, письма, адаптации резюме, подготовка к собеседованию и текст обзора рынка с прежней версией становятся `stale`
   и пересчитываются при следующем запросе без `force`.
 - Golden extraction: `evals/golden/extraction.jsonl`. Новый кейс — новая
   строка JSONL + запись в `evals/fixtures/extraction_outputs.json` (для
   offline CI).
-- Scorer: `tg_jobs_parser/evals/score_extraction.py`.
+- Scorer: `jobdesk/evals/score_extraction.py`.
 
 ## Миграции
 

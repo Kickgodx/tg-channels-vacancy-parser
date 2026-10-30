@@ -11,10 +11,10 @@ from backend.db import fx_repository as fx_repo
 from backend.db.repository import upsert_vacancies
 from backend.db.vacancy_metrics import aggregate_vacancy_metrics
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.config.schema import FxConfig
-from tg_jobs_parser.models.metrics import SalaryDisplayMeta
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.config.schema import FxConfig
+from jobdesk.models.metrics import SalaryDisplayMeta
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.hashing import vacancy_content_id
 
 
 def test_prepare_fx_uses_latest_rates_from_db_without_network(db_session, monkeypatch, tmp_path):

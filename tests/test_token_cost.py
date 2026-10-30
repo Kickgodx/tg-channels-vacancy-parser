@@ -2,8 +2,8 @@
 
 import pytest
 
-from tg_jobs_parser.ai.models_catalog import LlmModelEntry
-from tg_jobs_parser.ai.token_cost import (
+from jobdesk.ai.models_catalog import LlmModelEntry
+from jobdesk.ai.token_cost import (
     cost_usd_for_tokens,
     estimate_run_cost,
     parse_cost_per_million,

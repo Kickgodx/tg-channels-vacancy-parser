@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tg_jobs_parser.ai.clients.openrouter import OpenRouterClient
-from tg_jobs_parser.ai.search_context import SearchContext
-from tg_jobs_parser.config.schema import AppConfig
+from jobdesk.ai.clients.openrouter import OpenRouterClient
+from jobdesk.ai.search_context import SearchContext
+from jobdesk.config.schema import AppConfig
 
 
 @pytest.fixture

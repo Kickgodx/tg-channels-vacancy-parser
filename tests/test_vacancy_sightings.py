@@ -20,8 +20,8 @@ from backend.db.migrate import alembic_ini_path
 from backend.db.models import ParseRunRow, VacancyRow, VacancySightingRow
 from backend.db.transfer import import_dump_file, write_dump_file
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.config.schema import FxConfig
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.config.schema import FxConfig
+from jobdesk.models.vacancy import Vacancy
 
 FX_OFF = FxConfig(enabled=False)
 DAY = datetime(2026, 9, 1, tzinfo=UTC)

@@ -1,7 +1,7 @@
 """Контекст поиска: режим «любая IT-специализация»."""
 
-from tg_jobs_parser.ai.search_context import build_search_context
-from tg_jobs_parser.config.schema import AppConfig, FiltersConfig
+from jobdesk.ai.search_context import build_search_context
+from jobdesk.config.schema import AppConfig, FiltersConfig
 
 
 def test_any_specialization_empty_target_and_prompt_flag():

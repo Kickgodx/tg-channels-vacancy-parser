@@ -29,7 +29,7 @@ from backend.db.models import (
     writable_columns,
 )
 from backend.db.vacancy_repository import backfill_original_sightings
-from tg_jobs_parser.utils.company import company_key
+from jobdesk.utils.company import company_key
 
 _LOG = logging.getLogger(__name__)
 

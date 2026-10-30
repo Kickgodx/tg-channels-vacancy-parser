@@ -8,7 +8,7 @@ from sqlalchemy import text
 from backend.db.session import get_engine
 from backend.schemas import HealthResponse
 from backend.settings import get_settings
-from tg_jobs_parser.config.loader import ConfigLoadError, load_config
+from jobdesk.config.loader import ConfigLoadError, load_config
 
 _LOG = logging.getLogger(__name__)
 

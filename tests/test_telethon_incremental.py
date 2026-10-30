@@ -11,10 +11,10 @@ import pytest
 import telethon
 from telethon.errors import FloodWaitError
 
-from tg_jobs_parser.config.schema import AppConfig, ParserConfig, SearchConfig
-from tg_jobs_parser.parsers import telegram_telethon as tt
-from tg_jobs_parser.parsers.base import ChannelCheckpoint
-from tg_jobs_parser.parsers.telegram_telethon import TelegramTelethonParser
+from jobdesk.config.schema import AppConfig, ParserConfig, SearchConfig
+from jobdesk.parsers import telegram_telethon as tt
+from jobdesk.parsers.base import ChannelCheckpoint
+from jobdesk.parsers.telegram_telethon import TelegramTelethonParser
 
 TODAY = datetime.now(UTC).date()
 WEEK_AGO = TODAY - timedelta(days=7)

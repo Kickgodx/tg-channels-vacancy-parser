@@ -20,17 +20,17 @@ from backend.observability import (
 )
 from backend.services.hh_sync_window import ResolvedHhSearchWindow
 from backend.settings import Settings
-from tg_jobs_parser.config.schema import AppConfig, HhConfig
-from tg_jobs_parser.hh.client import HH_VACANCIES_DEPTH_LIMIT, HHApiError, HHClient, HHClientConfig
-from tg_jobs_parser.hh.dedup import DedupedVacancy, dedupe_vacancies
-from tg_jobs_parser.hh.mapper import (
+from jobdesk.config.schema import AppConfig, HhConfig
+from jobdesk.hh.client import HH_VACANCIES_DEPTH_LIMIT, HHApiError, HHClient, HHClientConfig
+from jobdesk.hh.dedup import DedupedVacancy, dedupe_vacancies
+from jobdesk.hh.mapper import (
     detail_to_vacancy,
     hh_source_post_key,
     short_to_vacancy,
     stable_vacancy_id,
 )
-from tg_jobs_parser.hh.models import VacancySearchParams, VacancyShort
-from tg_jobs_parser.models.vacancy import Vacancy
+from jobdesk.hh.models import VacancySearchParams, VacancyShort
+from jobdesk.models.vacancy import Vacancy
 
 _LOG = logging.getLogger(__name__)
 _TRACER = trace.get_tracer(__name__)

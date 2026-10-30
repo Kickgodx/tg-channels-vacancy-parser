@@ -10,7 +10,7 @@ from backend.config_builder import build_config
 from backend.db import parse_run_repository as pr
 from backend.db.session import session_scope
 from backend.schemas import RunCreateRequest
-from tg_jobs_parser.config.loader import ConfigLoadError, load_config
+from jobdesk.config.loader import ConfigLoadError, load_config
 
 # Фиксированный id: параметры должны совпадать у всех xdist-воркеров.
 _RUN_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")

@@ -49,7 +49,7 @@ loki.source.docker "containers" {
 }
 
 loki.process "app" {
-	// Формат backend (tg_jobs_parser/utils/logger.py):
+	// Формат backend (jobdesk/utils/logger.py):
 	// "2026-09-20 10:00:00 | INFO | backend.main | сообщение"
 	// с контекстом: "... | backend.http | request_id=<uuid> trace_id=<32 hex> | сообщение"
 	// (каждая часть контекста необязательна).

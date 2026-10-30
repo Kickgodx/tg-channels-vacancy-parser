@@ -1,4 +1,4 @@
-from tg_jobs_parser.utils.text import post_id_display
+from jobdesk.utils.text import post_id_display
 
 
 def test_post_id_display_suffix():

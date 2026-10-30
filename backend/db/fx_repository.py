@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 
 from backend.db.models import ExchangeRateRow
 from backend.observability import record_fx_fetch
-from tg_jobs_parser.config.schema import FxConfig
-from tg_jobs_parser.fx.cbr import fetch_cbr_rates
+from jobdesk.config.schema import FxConfig
+from jobdesk.fx.cbr import fetch_cbr_rates
 
 _LOG = logging.getLogger(__name__)
 

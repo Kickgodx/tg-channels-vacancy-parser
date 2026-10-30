@@ -16,6 +16,11 @@ x-logging: &default-logging
     max-file: "5"
     compress: "true"
 
+# Имя проекта закреплено: от него зависят имена томов с данными (tg_jobs_parser_pgdata, …),
+# сети и образов. Без него compose взял бы имя папки, и после её переименования поднялась бы
+# пустая база. Менять только вместе с переносом томов.
+name: tg_jobs_parser
+
 x-app-env: &app-env
   DATABASE_URL: postgresql+psycopg://tgjobs:${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в .env}@postgres:5432/tgjobs
   CONFIG_PATH: /app/config.yaml
@@ -62,7 +67,7 @@ services:
   postgres:
     # postgres:16-alpine + pgvector (docker/postgres/Dockerfile): эмбеддинги вакансий и резюме.
     build: docker/postgres
-    image: tgjobs-postgres:16-pgvector0.8.7
+    image: jobdesk-postgres:16-pgvector0.8.7
     logging: *default-logging
     # POSTGRES_PASSWORD применяется только при инициализации пустого pgdata; сменить на
     # существующем томе: docker compose exec postgres psql -U tgjobs -c "ALTER ROLE tgjobs PASSWORD '...'"
@@ -111,7 +116,7 @@ services:
   # unhealthy — последний проверенный дамп старше 1,5 × BACKUP_INTERVAL_HOURS.
   pg-backup:
     build: docker/postgres
-    image: tgjobs-postgres:16-pgvector0.8.7
+    image: jobdesk-postgres:16-pgvector0.8.7
     logging: *default-logging
     entrypoint: ["/bin/sh", "/scripts/pg_backup.sh"]
     environment:
@@ -153,7 +158,7 @@ services:
       # /metrics — отдельный порт только в Docker-сети (Prometheus), на хост не публикуется.
       API_METRICS_PORT: "9100"
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
-      OTEL_SERVICE_NAME: tg-jobs-parser-backend
+      OTEL_SERVICE_NAME: jobdesk-backend
       LLM_JOB_BACKEND: rq
       PARSE_JOB_BACKEND: rq
       HH_SYNC_JOB_BACKEND: rq
@@ -183,13 +188,13 @@ services:
   # Entrypoint: SimpleWorker (без fork) — метрики и экономия RAM.
   llm-worker:
     <<: *app-common
-    command: ["tg-jobs-llm-worker"]
+    command: ["jobdesk-llm-worker"]
     depends_on: *worker-depends-on
     environment:
       <<: *app-env
       LLM_JOB_BACKEND: rq
       LLM_WORKER_METRICS_PORT: "9101"
-      OTEL_SERVICE_NAME: tg-jobs-parser-llm-worker
+      OTEL_SERVICE_NAME: jobdesk-llm-worker
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
@@ -201,13 +206,13 @@ services:
   # Метрики :9102 в Docker-сети (Prometheus dns_sd).
   parse-worker:
     <<: *app-common
-    command: ["tg-jobs-parse-worker"]
+    command: ["jobdesk-parse-worker"]
     depends_on: *worker-depends-on
     environment:
       <<: *app-env
       PARSE_JOB_BACKEND: rq
       PARSE_WORKER_METRICS_PORT: "9102"
-      OTEL_SERVICE_NAME: tg-jobs-parser-parse-worker
+      OTEL_SERVICE_NAME: jobdesk-parse-worker
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
@@ -221,13 +226,13 @@ services:
   # Метрики :9103 в Docker-сети (Prometheus dns_sd).
   hh-worker:
     <<: *app-common
-    command: ["tg-jobs-hh-worker"]
+    command: ["jobdesk-hh-worker"]
     depends_on: *worker-depends-on
     environment:
       <<: *app-env
       HH_SYNC_JOB_BACKEND: rq
       HH_WORKER_METRICS_PORT: "9103"
-      OTEL_SERVICE_NAME: tg-jobs-parser-hh-worker
+      OTEL_SERVICE_NAME: jobdesk-hh-worker
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
@@ -359,7 +364,7 @@ services:
     logging: *default-logging
     # Непривилегированный пользователь образа. Том alloy_data, созданный прежним
     # root-Alloy, нужно один раз отдать ему:
-    # docker run --rm -v tg_jobs_parser_alloy_data:/d alpine chown -R 473:473 /d
+    # docker run --rm -v jobdesk_alloy_data:/d alpine chown -R 473:473 /d
     user: "473:473"
     command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
     ports:

@@ -41,8 +41,8 @@ def use_ai_config(monkeypatch, tmp_path, **ai: Any):
     from tests.conftest import _TEST_CONFIG
 
     from backend.settings import get_settings
-    from tg_jobs_parser.ai.llm_models_registry import default_llm_models_path
-    from tg_jobs_parser.config.loader import load_config
+    from jobdesk.ai.llm_models_registry import default_llm_models_path
+    from jobdesk.config.loader import load_config
 
     raw = yaml.safe_load(_TEST_CONFIG)
     raw["ai"].update(ai)
@@ -62,6 +62,6 @@ def use_ai_config(monkeypatch, tmp_path, **ai: Any):
 def current_ai():
     """``AiConfig`` текущего тестового конфига (как его видят роуты и воркер)."""
     from backend.settings import get_settings
-    from tg_jobs_parser.config.loader import load_config
+    from jobdesk.config.loader import load_config
 
     return load_config(get_settings().config_path).ai

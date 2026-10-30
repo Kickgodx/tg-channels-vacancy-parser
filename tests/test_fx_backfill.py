@@ -12,9 +12,9 @@ from backend.db import fx_repository as fx_repo
 from backend.db.models import VacancyRow
 from backend.db.repository import upsert_vacancies
 from backend.fx.backfill import backfill_vacancies_salary_rub
-from tg_jobs_parser.config.schema import FxConfig
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.utils.hashing import vacancy_content_id
+from jobdesk.config.schema import FxConfig
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.utils.hashing import vacancy_content_id
 
 
 def test_ensure_latest_rates_prefers_db_without_network(db_session, monkeypatch):
@@ -27,7 +27,7 @@ def test_ensure_latest_rates_prefers_db_without_network(db_session, monkeypatch)
         raise AssertionError("ensure_latest_rates(prefer_db) must not call CBR")
 
     monkeypatch.setattr(fx_repo, "ensure_rates", _forbid)
-    monkeypatch.setattr("tg_jobs_parser.fx.cbr.fetch_cbr_rates", _forbid)
+    monkeypatch.setattr("jobdesk.fx.cbr.fetch_cbr_rates", _forbid)
 
     rate_date, rates = fx_repo.ensure_latest_rates(db_session, fx_cfg)
     assert rate_date == d

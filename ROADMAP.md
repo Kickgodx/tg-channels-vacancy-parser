@@ -59,7 +59,7 @@ backend без `down -v`.
 
 **Backend**
 
-- Модуль `tg_jobs_parser/exporters/google_sheets.py` — service-account
+- Модуль `jobdesk/exporters/google_sheets.py` — service-account
   credentials (путь к JSON в `.env` / `config.yaml`), upsert в существующий
   spreadsheet или создание нового.
 - Опционально `notion.py` — internal integration token, запись в database.

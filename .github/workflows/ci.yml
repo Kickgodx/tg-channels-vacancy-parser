@@ -150,7 +150,7 @@ jobs:
           docker compose --profile observability config --quiet
 
       - name: Build backend image
-        run: docker build --file Dockerfile.backend --tag tg-jobs-backend:ci .
+        run: docker build --file Dockerfile.backend --tag jobdesk-backend:ci .
 
       - name: Build frontend image
-        run: docker build --tag tg-jobs-frontend:ci frontend
+        run: docker build --tag jobdesk-frontend:ci frontend

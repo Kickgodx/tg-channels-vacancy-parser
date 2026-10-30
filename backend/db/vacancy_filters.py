@@ -17,7 +17,7 @@ from sqlalchemy.sql import Select
 
 from backend.db.models import VacancyRow, VacancySalaryEstimateRow, VacancySightingRow
 from backend.schemas import VacancyQuery
-from tg_jobs_parser.config.schema import canonical_specializations, canonical_technologies
+from jobdesk.config.schema import canonical_specializations, canonical_technologies
 
 
 def _specializations_match(c, specs: list[str]) -> ColumnElement[bool]:

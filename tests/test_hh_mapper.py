@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tg_jobs_parser.hh.grades import grade_from_experience, grade_from_experience_name
-from tg_jobs_parser.hh.mapper import (
+from jobdesk.hh.grades import grade_from_experience, grade_from_experience_name
+from jobdesk.hh.mapper import (
     clean_hh_url,
     detail_to_vacancy,
     html_to_text,
@@ -11,7 +11,7 @@ from tg_jobs_parser.hh.mapper import (
     short_to_vacancy,
     stable_vacancy_id,
 )
-from tg_jobs_parser.hh.models import IdName, VacancyDetail, VacancyShort
+from jobdesk.hh.models import IdName, VacancyDetail, VacancyShort
 
 
 def test_grade_from_experience_ids():

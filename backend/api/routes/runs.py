@@ -59,8 +59,8 @@ from backend.services import export_service, idempotency, run_service
 from backend.services.parse_run_events import channel_for
 from backend.services.pubsub_hub import PubSubUnavailable, get_pubsub_hub
 from backend.settings import get_settings
-from tg_jobs_parser.exporters.json_exporter import export_json_bytes
-from tg_jobs_parser.models.parse_result import ParseResult
+from jobdesk.exporters.json_exporter import export_json_bytes
+from jobdesk.models.parse_result import ParseResult
 
 _LOG = logging.getLogger(__name__)
 
@@ -329,7 +329,7 @@ def run_events(run_id: uuid.UUID, creds: SseCredentials = Depends(sse_credential
 
 
 def _parse_result_from_run(row, vacancies) -> ParseResult:
-    from tg_jobs_parser.models.metrics import MetricsSummary
+    from jobdesk.models.metrics import MetricsSummary
 
     metrics = metrics_from_run(row) or MetricsSummary()
     return ParseResult(

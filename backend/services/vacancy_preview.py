@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from tg_jobs_parser.models.vacancy import Vacancy
-from tg_jobs_parser.parse_progress import PROGRESS_PREVIEW_LIMIT
+from jobdesk.models.vacancy import Vacancy
+from jobdesk.parse_progress import PROGRESS_PREVIEW_LIMIT
 
 
 def build_vacancies_preview(vacancies: list[Vacancy] | None, *, limit: int = PROGRESS_PREVIEW_LIMIT) -> list[dict]:
