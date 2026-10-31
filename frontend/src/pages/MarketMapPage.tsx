@@ -402,12 +402,19 @@ export default function MarketMapPage() {
     queryKey: ["market-map", resumeId],
     queryFn: () => api.getMarketMap(resumeId),
     staleTime: 5 * 60_000,
+    // Пересчёт идёт в фоне (минуты на тысячах точек) — опрашиваем, пока он не закончится.
+    refetchInterval: (q) => (q.state.data?.rebuild_pending ? 5_000 : false),
   });
   const rebuildM = useMutation({
     mutationFn: () => api.rebuildMarketMap(),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["market-map"] }),
+    // Ответ — текущая карта с rebuild_pending: флаг включает опрос до конца пересчёта.
+    onSuccess: (data) =>
+      queryClient.setQueryData(["market-map", resumeId], (old: MarketMap | undefined) =>
+        old ? { ...old, rebuild_pending: data.rebuild_pending } : data,
+      ),
   });
   const map = mapQ.data;
+  const rebuilding = rebuildM.isPending || !!map?.rebuild_pending;
   const resumes = resumesQ.data?.items ?? [];
 
   return (
@@ -418,10 +425,10 @@ export default function MarketMapPage() {
           <button
             type="button"
             className="secondary"
-            disabled={rebuildM.isPending}
+            disabled={rebuilding}
             onClick={() => rebuildM.mutate()}
           >
-            {rebuildM.isPending ? "Пересчёт…" : "Пересчитать"}
+            {rebuilding ? "Пересчёт…" : "Пересчитать"}
           </button>
         )}
       </div>

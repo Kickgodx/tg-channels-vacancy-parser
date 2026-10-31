@@ -22,4 +22,4 @@ datasources:
         spanEndTimeShift: "5m"
         customQuery: true
         # Трасса прогона / LLM-джобы пишет логи в воркере, а не в backend.
-        query: '{service=~"backend|parse-worker|llm-worker|hh-worker"} | trace_id="$${__trace.traceId}"'
+        query: '{service=~"backend|parse-worker|llm-worker|hh-worker|maintenance-worker"} | trace_id="$${__trace.traceId}"'

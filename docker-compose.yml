@@ -162,6 +162,8 @@ services:
       LLM_JOB_BACKEND: rq
       PARSE_JOB_BACKEND: rq
       HH_SYNC_JOB_BACKEND: rq
+      # Индексация эмбеддингов, оценки зарплат, обзор и карта рынка — в maintenance-worker.
+      MAINTENANCE_BACKEND: worker
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./llm_models.yaml:/app/llm_models.yaml:ro
@@ -239,6 +241,27 @@ services:
     healthcheck:
       <<: *worker-healthcheck
       test: ["CMD", "python", "-m", "backend.workers.healthcheck", "--port", "9103"]
+
+  # Обслуживание каталога (backend/maintenance.py): индексация эмбеддингов, оценки зарплат,
+  # обзор рынка (LLM) и карта рынка (t-SNE) — вне процессов API, чтобы не отнимать у запросов
+  # CPU и соединения пула. Реплик может быть несколько: работает одна (advisory lock).
+  # Задача может идти минутами — heartbeat бьёт между циклами, порог 1 ч (как у watchdog).
+  # Метрики :9104 в Docker-сети (Prometheus dns_sd).
+  maintenance-worker:
+    <<: *app-common
+    command: ["jobdesk-maintenance-worker"]
+    depends_on: *worker-depends-on
+    environment:
+      <<: *app-env
+      MAINTENANCE_BACKEND: worker
+      MAINTENANCE_WORKER_METRICS_PORT: "9104"
+      OTEL_SERVICE_NAME: jobdesk-maintenance-worker
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./llm_models.yaml:/app/llm_models.yaml:ro
+    healthcheck:
+      <<: *worker-healthcheck
+      test: ["CMD", "python", "-m", "backend.workers.healthcheck", "--port", "9104", "--max-age", "3600"]
 
   frontend:
     build:

@@ -13,6 +13,7 @@ flowchart LR
     PW["parse-worker<br/>RQ · :9102/metrics"]
     W["llm-worker<br/>RQ · :9101/metrics"]
     HW["hh-worker<br/>RQ · :9103/metrics"]
+    MW["maintenance-worker<br/>эмбеддинги · карта · обзор<br/>:9104/metrics"]
     CLI["CLI Typer<br/>login / db dump·import"]
   end
 
@@ -49,19 +50,23 @@ flowchart LR
   PW --> PG
   W --> PG
   HW --> PG
+  MW --> PG
   PW --> TG
   PW --> OR
   W --> OR
   HW --> HH
+  MW -->|"эмбеддинги, LLM обзора"| OR
   BE -->|"лидер"| CBR
   BE -->|"/metrics :9100 (лидер)"| PROM
   PW -->|"/metrics :9102"| PROM
   W -->|"/metrics :9101"| PROM
   HW -->|"/metrics :9103"| PROM
+  MW -->|"/metrics :9104"| PROM
   BE -->|"OTLP :4318"| ALLOY
   PW -->|"OTLP"| ALLOY
   W -->|"OTLP"| ALLOY
   HW -->|"OTLP"| ALLOY
+  MW -->|"OTLP"| ALLOY
   ALLOY --> LOKI
   ALLOY --> TEMPO
   PGB --> PG
@@ -81,6 +86,7 @@ flowchart LR
 | parse-worker | 9102 (только Docker-сеть) | RQ `SimpleWorker`: прогоны парсинга (Telethon, LLM-разбор), очередь `parse`, concurrency=1 |
 | llm-worker | 9101 (только Docker-сеть) | RQ `SimpleWorker`: мэтч/письма/ручной импорт с LLM; `/metrics` без DB COUNT-collector, с `db_pool_*` |
 | hh-worker | 9103 (только Docker-сеть) | RQ `SimpleWorker`: фоновый HH sync (очередь `hh`) |
+| maintenance-worker | 9104 (только Docker-сеть) | Фоновое обслуживание каталога (`MAINTENANCE_BACKEND=worker`): индексация эмбеддингов, оценки зарплат, недельный обзор рынка, карта рынка и её пересчёт по кнопке. Без RQ — свой цикл; работает одна реплика (advisory lock) |
 | redis | 6379 | Очереди RQ `llm` / `parse` / `hh` (AOF на томе `redis_data`) + pub/sub статуса SSE |
 | postgres | 5432 | Вакансии, runs, users, FX, cache, `llm_jobs` |
 | pg-backup | — | `pg_dump` по расписанию с проверкой восстановления; состояние — файл `pg_backup.prom` в каталоге дампов |
@@ -101,7 +107,9 @@ flowchart LR
 - **Лидер** (`backend/leader.py`) — процесс, удерживающий `pg_try_advisory_lock` на отдельном соединении.
   Только он синхронизирует курсы ЦБ при старте, раз в час чистит БД и поднимает сервер `/metrics`
   (сумма метрик всех процессов через `PROMETHEUS_MULTIPROC_DIR`). Если лидер упал, Postgres снимает
-  lock вместе с сессией, и роль за ≤30 с берёт другой процесс.
+  lock вместе с сессией, и роль за ≤30 с берёт другой процесс. Обслуживание каталога (эмбеддинги, оценки
+  зарплат, обзор и карта рынка) лидер выполняет только при `MAINTENANCE_BACKEND=inprocess` (локально);
+  в compose его делает `maintenance-worker`, чтобы t-SNE и проходы индексации не занимали CPU и пул API.
 - **Защита от перегрузки** (`backend/overload.py`) — у каждого процесса столько мест обработки, сколько
   соединений в пуле. Запрос, не получивший место за `API_QUEUE_TIMEOUT_SECONDS`, получает быстрый
   503 `OVERLOADED` (`Retry-After: 1`), а не висит до тайм-аута пула. `/health` идёт без очереди.

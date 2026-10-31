@@ -38,6 +38,8 @@ from backend.db.company_profile import backfill_company_keys
 from backend.db.session import init_db, session_scope
 from backend.errors import register_exception_handlers
 from backend.http_logging import HttpLoggingMiddleware
+from backend.maintenance import MaintenanceDuties
+from backend.maintenance import runs_here_inprocess as maintenance_runs_inprocess
 from backend.observability import register_db_stats_collector
 from backend.overload import OverloadMiddleware, RequestSlots
 from backend.settings import check_api_workers, check_exposure, get_settings
@@ -99,114 +101,24 @@ def _periodic_cleanup() -> None:
 _CLEANUP_INTERVAL_S = 60 * 60
 
 
-def _sweep_embeddings() -> None:
-    """Проход индексации эмбеддингов и оценок зарплаты по ним; ошибки — в лог, повтор через интервал."""
-    try:
-        from backend.services.embedding_service import _ai, sweep_vacancies
-
-        sweep_vacancies()
-    except Exception as e:
-        logging.getLogger(__name__).warning("Индексация эмбеддингов не выполнена: %s", e)
-        return
-    try:
-        from backend.services.salary_estimate_service import sweep_estimates
-
-        cfg = _ai().embeddings
-        if cfg.enabled:
-            sweep_estimates(model=cfg.model)
-    except Exception as e:
-        logging.getLogger(__name__).warning("Оценки зарплаты не пересчитаны: %s", e)
-
-
-def _ensure_digest() -> None:
-    """Обзор рынка за прошедшую неделю, если его ещё нет; ошибки — в лог, повтор через час."""
-    try:
-        from backend.services.market_digest_service import ensure_latest_digest
-
-        ensure_latest_digest()
-    except Exception as e:
-        logging.getLogger(__name__).warning("Обзор рынка не сформирован: %s", e)
-
-
-_DIGEST_CHECK_INTERVAL_S = 60 * 60
-
-
-def _maybe_build_market_map() -> None:
-    """Карта рынка, если её нет или она старше ``ai.embeddings.map_interval_hours``; ошибки — в лог."""
-    try:
-        from backend.services import market_map_service
-
-        cfg = load_config(get_settings().config_path)
-        if not cfg.ai.embeddings.enabled:
-            return
-        with session_scope() as session:
-            due = market_map_service.map_is_due(session, cfg.ai.embeddings.map_interval_hours)
-        if due:
-            market_map_service.build_market_map()
-    except Exception as e:
-        logging.getLogger(__name__).warning("Карта рынка не пересчитана: %s", e)
-
-
-_MAP_CHECK_INTERVAL_S = 10 * 60
-
-
 class _LeaderDuties:
     """Общая для процессов API работа: её выполняет только лидер (``backend.leader``).
 
     Получив роль — очистка (синхронно, до «Backend готов» при старте), фоновая
     синхронизация курсов и сервер ``/metrics``; дальше раз в час — очистка, а в
-    multiprocess-режиме метрик — уборка файлов умерших процессов.
+    multiprocess-режиме метрик — уборка файлов умерших процессов. При
+    ``MAINTENANCE_BACKEND=inprocess`` — ещё и обслуживание каталога (``backend.maintenance``).
     """
 
     def __init__(self) -> None:
         self._metrics_server = None
         self._last_cleanup = 0.0
-        self._last_embedding_sweep = 0.0
-        self._embedding_thread: threading.Thread | None = None
-        self._last_digest_check = 0.0
-        self._digest_thread: threading.Thread | None = None
-        self._last_map_check = 0.0
-        self._map_thread: threading.Thread | None = None
+        # Обслуживание каталога (backend/maintenance.py) — здесь, только если нет отдельного воркера.
+        self._maintenance = MaintenanceDuties(threaded=True) if maintenance_runs_inprocess() else None
 
-    def _maybe_build_map(self) -> None:
-        """Раз в 10 минут — не пора ли пересчитать карту рынка (расчёт — в своём потоке)."""
-        import time
-
-        if self._map_thread is not None and self._map_thread.is_alive():
-            return
-        if self._last_map_check and time.monotonic() - self._last_map_check < _MAP_CHECK_INTERVAL_S:
-            return
-        self._last_map_check = time.monotonic()
-        self._map_thread = threading.Thread(target=_maybe_build_market_map, name="market-map", daemon=True)
-        self._map_thread.start()
-
-    def _maybe_ensure_digest(self) -> None:
-        """Раз в час — обзор за прошедшую неделю (LLM-вызов — в своём потоке, не в тике лидера)."""
-        import time
-
-        if self._digest_thread is not None and self._digest_thread.is_alive():
-            return
-        if self._last_digest_check and time.monotonic() - self._last_digest_check < _DIGEST_CHECK_INTERVAL_S:
-            return
-        self._last_digest_check = time.monotonic()
-        self._digest_thread = threading.Thread(target=_ensure_digest, name="market-digest", daemon=True)
-        self._digest_thread.start()
-
-    def _maybe_sweep_embeddings(self) -> None:
-        """Индексация новых вакансий раз в ``ai.embeddings.sweep_interval_seconds`` — в своём потоке."""
-        import time
-
-        if self._embedding_thread is not None and self._embedding_thread.is_alive():
-            return
-        try:
-            interval = load_config(get_settings().config_path).ai.embeddings.sweep_interval_seconds
-        except Exception:
-            return
-        if self._last_embedding_sweep and time.monotonic() - self._last_embedding_sweep < interval:
-            return
-        self._last_embedding_sweep = time.monotonic()
-        self._embedding_thread = threading.Thread(target=_sweep_embeddings, name="embedding-sweep", daemon=True)
-        self._embedding_thread.start()
+    def _tick_maintenance(self) -> None:
+        if self._maintenance is not None:
+            self._maintenance.tick()
 
     def on_acquire(self) -> None:
         import time
@@ -215,9 +127,7 @@ class _LeaderDuties:
         self._last_cleanup = time.monotonic()
         threading.Thread(target=_sync_fx_on_startup, name="fx-startup-sync", daemon=True).start()
         self._metrics_server = _start_metrics_server()
-        self._maybe_sweep_embeddings()
-        self._maybe_ensure_digest()
-        self._maybe_build_map()
+        self._tick_maintenance()
 
     def on_tick(self) -> None:
         import time
@@ -228,9 +138,7 @@ class _LeaderDuties:
         if time.monotonic() - self._last_cleanup >= _CLEANUP_INTERVAL_S:
             self._last_cleanup = time.monotonic()
             _periodic_cleanup()
-        self._maybe_sweep_embeddings()
-        self._maybe_ensure_digest()
-        self._maybe_build_map()
+        self._tick_maintenance()
 
     def on_lose(self) -> None:
         server, self._metrics_server = self._metrics_server, None

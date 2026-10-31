@@ -538,7 +538,7 @@ class AiEmbeddingsConfig(BaseModel):
         ),
     )
     sweep_interval_seconds: int = Field(
-        default=300, ge=30, le=86400, description="Как часто лидер API индексирует новые вакансии."
+        default=300, ge=30, le=86400, description="Как часто фоновое обслуживание индексирует новые вакансии."
     )
     batch_size: int = Field(default=64, ge=1, le=256, description="Текстов в одном запросе к API.")
     max_per_sweep: int = Field(
@@ -546,7 +546,10 @@ class AiEmbeddingsConfig(BaseModel):
     )
     max_input_chars: int = Field(default=8000, ge=500, le=30_000, description="Символов текста на эмбеддинг.")
     map_interval_hours: int = Field(
-        default=24, ge=0, le=720, description="Как часто лидер API пересчитывает карту рынка; 0 — только вручную."
+        default=24,
+        ge=0,
+        le=720,
+        description="Как часто фоновое обслуживание пересчитывает карту рынка; 0 — только вручную.",
     )
     map_max_points: int = Field(
         default=8000, ge=100, le=30_000, description="Вакансий на карте рынка (самые свежие за год)."

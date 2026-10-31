@@ -1053,6 +1053,8 @@ export interface MarketMap {
   archived: boolean[];
   resume: { resume_id: number; x: number; y: number; cluster: number; nearest: string[] } | null;
   resume_error: string | null;
+  /** Админ запросил пересчёт, фоновое обслуживание его ещё не выполнило. */
+  rebuild_pending: boolean;
 }
 
 export interface RecruiterContact {

@@ -21,6 +21,7 @@ _ENV_KEYS = (
     "PARSE_JOB_BACKEND",
     "LLM_JOB_BACKEND",
     "HH_SYNC_JOB_BACKEND",
+    "MAINTENANCE_BACKEND",
     "API_WORKERS",
     "REDIS_URL",
     "DB_POOL_TIMEOUT",
@@ -243,3 +244,15 @@ def test_invalid_timeouts_name_variable(make_settings, name, raw):
     with pytest.raises(ValidationError) as exc:
         make_settings(**{name: raw})
     assert name in str(exc.value)
+
+
+@pytest.mark.parametrize(("raw", "expected"), [(" Worker ", "worker"), ("", "inprocess"), (None, "inprocess")])
+def test_maintenance_backend_ignores_case_and_spaces(make_settings, raw, expected):
+    s = make_settings() if raw is None else make_settings(MAINTENANCE_BACKEND=raw)
+    assert s.maintenance_backend == expected
+
+
+def test_unknown_maintenance_backend_is_rejected(make_settings):
+    with pytest.raises(ValidationError) as exc:
+        make_settings(MAINTENANCE_BACKEND="rq")
+    assert "MAINTENANCE_BACKEND" in str(exc.value)
