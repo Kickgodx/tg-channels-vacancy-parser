@@ -5,9 +5,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from backend import maintenance
 from backend.api.deps import CurrentUser, get_current_user, get_db, require_admin, verify_api_key
 from backend.api.routes.resumes import _get_own_resume
-from backend.errors import CODE_CONFLICT_ACTIVE_RUN, CODE_VALIDATION, http_error
+from backend.db import maintenance_requests
+from backend.errors import CODE_VALIDATION, http_error
 from backend.schemas import MarketMapCluster, MarketMapOut, MarketMapResume
 from backend.services import market_map_service
 from backend.services.embedding_service import EmbeddingsUnavailable
@@ -16,9 +18,10 @@ router = APIRouter(prefix="/market-map", tags=["market-map"], dependencies=[Depe
 
 
 def _map_out(db: Session, *, resume_id: int | None, user: CurrentUser) -> MarketMapOut:
+    pending = maintenance_requests.pending_since(db, maintenance_requests.TASK_MARKET_MAP) is not None
     m = market_map_service.latest_map(db)
     if m is None:
-        return MarketMapOut(available=False)
+        return MarketMapOut(available=False, rebuild_pending=pending)
     rows = market_map_service.map_points(db, m.id)
     out = MarketMapOut(
         available=True,
@@ -37,6 +40,7 @@ def _map_out(db: Session, *, resume_id: int | None, user: CurrentUser) -> Market
         company=[r[7] for r in rows],
         archived=[r[8] is not None for r in rows],
     )
+    out.rebuild_pending = pending
     if resume_id is not None:
         resume = _get_own_resume(db, resume_id, user)
         try:
@@ -58,13 +62,18 @@ def get_market_map(
     return _map_out(db, resume_id=resume_id, user=user)
 
 
-@router.post("/rebuild", response_model=MarketMapOut)
+@router.post("/rebuild", response_model=MarketMapOut, status_code=202)
 def rebuild_market_map(db: Session = Depends(get_db), user: CurrentUser = Depends(require_admin)) -> MarketMapOut:
-    """Пересчитать карту сейчас (несколько секунд CPU на тысячи вакансий); только админ."""
-    try:
-        built = market_map_service.build_market_map()
-    except market_map_service.MapBusy as e:
-        raise http_error(409, CODE_CONFLICT_ACTIVE_RUN, str(e), retryable=True) from e
-    if built is None:
+    """Запросить пересчёт карты; только админ. Ответ — текущая карта с ``rebuild_pending``.
+
+    Считает фоновое обслуживание (лидер API или ``jobdesk-maintenance-worker``), не этот запрос:
+    t-SNE на тысячах точек — минуты CPU. Готово, когда ``GET /market-map`` вернёт
+    ``rebuild_pending=false``. Мало вакансий с эмбеддингами — 422 сразу.
+    """
+    if not market_map_service.has_enough_points(db):
         raise http_error(422, CODE_VALIDATION, f"Мало вакансий с эмбеддингами (нужно {market_map_service.MIN_POINTS})")
+    maintenance_requests.request_task(db, maintenance_requests.TASK_MARKET_MAP)
+    db.commit()
+    if maintenance.runs_here_inprocess():
+        maintenance.kick_requested_map_build()
     return _map_out(db, resume_id=None, user=user)

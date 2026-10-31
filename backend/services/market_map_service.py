@@ -6,8 +6,9 @@ PCA до 50 измерений и t-SNE (косинус) до 2D; на плос�
 по рынку (lift). Рост ниши — доля её вакансий за последние 30 дней против предыдущих 30.
 Резюме ставится в среднюю точку ближайших к нему по эмбеддингу вакансий карты.
 
-Расчёт — несколько секунд CPU на тысячи точек: его делает лидер API раз в
-``ai.embeddings.map_interval_hours`` в своём потоке или админ кнопкой. Хранится только
+Расчёт — от секунд до минут CPU на тысячи точек: его делает фоновое обслуживание
+(``backend/maintenance.py``: лидер API или ``jobdesk-maintenance-worker``) раз в
+``ai.embeddings.map_interval_hours`` или по запросу администратора. Хранится только
 последняя карта; двух расчётов одновременно не бывает (advisory lock).
 """
 
@@ -159,6 +160,22 @@ def _clusters(rows: list, labels: list[int], coords: list[tuple[float, float]]) 
     return out
 
 
+def _eligible(stmt, model: str):
+    """Вакансии карты: уникальные, за ``WINDOW_DAYS``, с вектором ``model``."""
+    since = datetime.now(UTC) - timedelta(days=WINDOW_DAYS)
+    v, e = VacancyRow, VacancyEmbeddingRow
+    return stmt.join(e, e.vacancy_id == v.id).where(e.model == model, v.is_duplicate.is_(False), v.post_date >= since)
+
+
+def has_enough_points(session: Session) -> bool:
+    """Хватит ли вакансий с эмбеддингами на карту (не меньше ``MIN_POINTS``)."""
+    model = embedding_service.current_model()
+    found = session.scalar(
+        select(func.count()).select_from(_eligible(select(VacancyRow.id), model).limit(MIN_POINTS).subquery())
+    )
+    return (found or 0) >= MIN_POINTS
+
+
 def build_market_map(*, max_points: int | None = None) -> MarketMapRow | None:
     """Пересчитать карту. None — мало вакансий с эмбеддингами; ``MapBusy`` — уже считается."""
     ai = embedding_service._ai()
@@ -167,14 +184,19 @@ def build_market_map(*, max_points: int | None = None) -> MarketMapRow | None:
     with session_scope() as session:
         if not session.scalar(select(func.pg_try_advisory_xact_lock(_LOCK_KEY))):
             raise MapBusy("Карта рынка уже пересчитывается")
-        since = datetime.now(UTC) - timedelta(days=WINDOW_DAYS)
         v, e = VacancyRow, VacancyEmbeddingRow
         rows = session.execute(
-            select(
-                v.id, v.detected_specializations, v.technologies, v.detected_salary_avg_rub, v.post_date, e.embedding
+            _eligible(
+                select(
+                    v.id,
+                    v.detected_specializations,
+                    v.technologies,
+                    v.detected_salary_avg_rub,
+                    v.post_date,
+                    e.embedding,
+                ),
+                ai.embeddings.model,
             )
-            .join(e, e.vacancy_id == v.id)
-            .where(e.model == ai.embeddings.model, v.is_duplicate.is_(False), v.post_date >= since)
             .order_by(v.post_date.desc(), v.id)
             .limit(limit)
         ).all()

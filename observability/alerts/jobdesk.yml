@@ -97,7 +97,7 @@ groups:
       - alert: TargetDown
         # Ловит и остановленный воркер: Docker DNS на имя остановленного контейнера отвечает
         # ошибкой, и DNS SD при ошибке держит прежний адрес — цель остаётся с up == 0.
-        expr: up{job=~"jobdesk-backend|jobdesk-llm-worker|jobdesk-parse-worker|jobdesk-hh-worker"} == 0
+        expr: up{job=~"jobdesk-backend|jobdesk-llm-worker|jobdesk-parse-worker|jobdesk-hh-worker|jobdesk-maintenance-worker"} == 0
         for: 5m
         labels:
           severity: critical
@@ -112,6 +112,7 @@ groups:
           absent(up{job="jobdesk-llm-worker"})
           or absent(up{job="jobdesk-parse-worker"})
           or absent(up{job="jobdesk-hh-worker"})
+          or absent(up{job="jobdesk-maintenance-worker"})
         for: 5m
         labels:
           severity: critical

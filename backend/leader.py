@@ -67,7 +67,7 @@ class LeaderLock:
             self._conn.execute(text("SELECT 1"))
             return True
         except Exception as exc:
-            _LOG.warning("Соединение лидера API потеряно: %s", exc)
+            _LOG.warning("Соединение с advisory lock лидера потеряно: %s", exc)
             self._drop()
             return False
 

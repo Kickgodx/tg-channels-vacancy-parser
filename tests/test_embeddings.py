@@ -145,6 +145,62 @@ def test_sweep_stops_on_provider_error(pg_db, fake_embed, monkeypatch):
     assert _embedded_ids() == set()
 
 
+def test_sweep_skips_vacancy_rejected_by_provider(pg_db, fake_embed, monkeypatch):
+    """Вакансия, на которой падает пачка, откладывается; остальные индексируются."""
+    good_a, bad, good_b = _add(_vac("Python", days_ago=1), _vac("POISON", days_ago=2), _vac("Golang", days_ago=3))
+    calls: list[list[str]] = []
+
+    def _embed(texts, *, ai=None):
+        calls.append(list(texts))
+        if any("POISON" in t for t in texts):
+            raise EmbeddingsUnavailable("400 bad input")
+        return [_fake_vector(t) for t in texts]
+
+    monkeypatch.setattr(embedding_service, "embed_texts", _embed)
+    r = embedding_service.sweep_vacancies()
+    assert (r.embedded, r.failed) == (2, False)
+    assert _embedded_ids() == {good_a, good_b}
+
+    # Следующий проход к API за ней не ходит и не застревает.
+    calls.clear()
+    r = embedding_service.sweep_vacancies()
+    assert (r.embedded, r.skipped, r.failed) == (0, 1, False)
+    assert calls == []
+
+    # Текст изменился — снова пробуем.
+    with session_scope() as s:
+        s.execute(
+            update(VacancyRow)
+            .where(VacancyRow.id == bad)
+            .values(cleaned_text="QA", updated_at=datetime.now(UTC) + timedelta(minutes=1))
+        )
+    assert embedding_service.sweep_vacancies().embedded == 1
+    assert _embedded_ids() == {good_a, bad, good_b}
+
+
+def test_sweep_provider_down_mid_batch_defers_nothing(pg_db, fake_embed, monkeypatch, tmp_path):
+    """Провайдер лёг посреди разбора по одной: проход остановлен, вакансии не откладываются."""
+    use_ai_config(monkeypatch, tmp_path, embeddings={"enabled": True, "batch_size": 8})
+    ids = _add(*[_vac(f"Python {i}", days_ago=i) for i in range(5)])
+    state = {"single": 0}
+
+    def _embed(texts, *, ai=None):
+        if len(texts) > 1:
+            raise EmbeddingsUnavailable("500")
+        state["single"] += 1
+        if state["single"] > 1:
+            raise EmbeddingsUnavailable("down")
+        return [_fake_vector(texts[0])]
+
+    monkeypatch.setattr(embedding_service, "embed_texts", _embed)
+    r = embedding_service.sweep_vacancies()
+    assert r.failed is True and r.embedded == 1
+    assert embedding_service._poison == {}
+    monkeypatch.setattr(embedding_service, "embed_texts", lambda texts, *, ai=None: [_fake_vector(t) for t in texts])
+    r = embedding_service.sweep_vacancies()
+    assert (r.embedded, r.skipped) == (len(ids) - 1, 0)
+
+
 def test_sweep_disabled(pg_db, monkeypatch, tmp_path):
     use_ai_config(monkeypatch, tmp_path, embeddings={"enabled": False})
     _add(_vac("Python"))

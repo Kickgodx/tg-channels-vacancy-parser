@@ -133,6 +133,12 @@ class Settings(BaseSettings):
     # Sync безопасно повторять (detail уже скачанных listings не перекачивается).
     hh_sync_job_max_attempts: int = Field(default=2, ge=1, alias="HH_SYNC_JOB_MAX_ATTEMPTS")
 
+    # Фоновое обслуживание каталога (индексация эмбеддингов, оценки зарплат, обзор и карта
+    # рынка; backend/maintenance.py): inprocess — потоки лидера API (локальный запуск, тесты),
+    # worker — отдельный процесс jobdesk-maintenance-worker, API этим не занимается.
+    maintenance_backend: Literal["inprocess", "worker"] = Field(default="inprocess", alias="MAINTENANCE_BACKEND")
+    maintenance_worker_metrics_port: int = Field(default=9104, alias="MAINTENANCE_WORKER_METRICS_PORT")
+
     # RQ-воркер, чей heartbeat (цикл RQ или lease джобы) молчит дольше — завершает процесс,
     # чтобы restart policy его перезапустила (Docker unhealthy-контейнер сам не рестартит).
     # 0 — watchdog выключен. Порог healthcheck — WORKER_HEARTBEAT_MAX_AGE_SECONDS (180).
@@ -146,7 +152,9 @@ class Settings(BaseSettings):
         normalized = value.strip().lower()
         return _APP_ENV_ALIASES.get(normalized, normalized)
 
-    @field_validator("llm_job_backend", "parse_job_backend", "hh_sync_job_backend", mode="before")
+    @field_validator(
+        "llm_job_backend", "parse_job_backend", "hh_sync_job_backend", "maintenance_backend", mode="before"
+    )
     @classmethod
     def _normalize_job_backend(cls, value: Any) -> Any:
         # Другое значение отклоняет Literal: опечатка не должна молча включать inprocess.

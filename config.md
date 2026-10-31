@@ -104,8 +104,8 @@
 | **`embeddings.providers`** | Порядок провайдеров OpenRouter для модели эмбеддингов (`provider.order`, остальные — запасные; по умолчанию `[DeepInfra, Nebius]` — у Nebius бывает исчерпана квота на Qwen3, 429). `[]` — провайдера выбирает OpenRouter. |
 | **`embeddings.query_instruction`** / **`resume_instruction`** | Инструкция к тексту смыслового запроса / резюме: уходит как `Instruct: …\nQuery:<текст>` (формат Qwen3, Nemotron). Для моделей без инструкций (OpenAI, Gemini, pplx) — `""`. Вакансии — всегда без инструкции. |
 | **`embeddings.near_duplicate_distance`** | «Похожие»: ближе этого косинусного расстояния — тот же текст, не показывается (0.013 для Qwen3; 0.02 для `text-embedding-3-small`). Зависит от модели — пересчёт в отчёте eval (`scale.dup_threshold_equiv`). |
-| **`embeddings.sweep_interval_seconds`** | Как часто лидер API индексирует новые и изменённые вакансии (по умолчанию 300). |
-| **`embeddings.map_interval_hours`** / **`map_max_points`** | Карта рынка: как часто лидер API её пересчитывает (24 ч, `0` — только кнопкой админа) и сколько самых свежих вакансий за год на ней (8000; t-SNE на 8000 точек — около минуты CPU). |
+| **`embeddings.sweep_interval_seconds`** | Как часто фоновое обслуживание (лидер API или `maintenance-worker`) индексирует новые и изменённые вакансии (по умолчанию 300). |
+| **`embeddings.map_interval_hours`** / **`map_max_points`** | Карта рынка: как часто фоновое обслуживание её пересчитывает (24 ч, `0` — только кнопкой админа) и сколько самых свежих вакансий за год на ней (8000; t-SNE на 8000 точек — около минуты CPU). |
 | **`embeddings.batch_size`** / **`max_per_sweep`** / **`max_input_chars`** | Текстов в запросе (64), вакансий за проход (2000, `0` — не индексировать), символов текста на эмбеддинг (8000). |
 | **`max_posts_per_run`** | Потолок вызовов LLM за прогон (`0` — без потолка). Ответы из кэша его не расходуют и используются и после потолка. Посты, которым нужен вызов сверх потолка: в `assist` — сохраняются с полями правил; в `primary` — не сохраняются, прогон `partial`, чекпоинты каналов с первого такого поста не двигаются (следующий прогон разберёт их). В `primary` это ограничитель расходов, а не режим работы: при потолке меньше числа новых постов остаток копится от прогона к прогону. |
 
@@ -140,6 +140,8 @@ Env (не yaml): `LLM_JOB_BACKEND=inprocess|rq`, `REDIS_URL`, `LLM_WORKER_METRIC
 Прогоны парсинга (не yaml): `PARSE_JOB_BACKEND=inprocess|rq`, `PARSE_JOB_STUCK_MINUTES`, `PARSE_JOB_LEASE_SECONDS`, `PARSE_JOB_MAX_ATTEMPTS`, `PARSE_RQ_JOB_TIMEOUT_SECONDS`, `PARSE_WORKER_METRICS_PORT` — в Docker Compose по умолчанию `rq` + сервис `parse-worker`; см. `.env.example` и README.
 
 HH sync (не yaml): `HH_SYNC_JOB_BACKEND=inprocess|rq`, `HH_SYNC_JOB_STUCK_MINUTES`, `HH_SYNC_JOB_LEASE_SECONDS`, `HH_SYNC_JOB_MAX_ATTEMPTS`, `HH_SYNC_RQ_JOB_TIMEOUT_SECONDS`, `HH_WORKER_METRICS_PORT` — в Docker Compose `rq` + сервис `hh-worker`.
+
+Фоновое обслуживание каталога (не yaml): `MAINTENANCE_BACKEND=inprocess|worker` — индексацию эмбеддингов, оценки зарплат, обзор и карту рынка выполняет лидер API (`inprocess`, по умолчанию) или отдельный процесс `jobdesk-maintenance-worker` (`worker`; задать и API, и воркеру — в Docker Compose так и сделано). `MAINTENANCE_WORKER_METRICS_PORT` — порт `/metrics` воркера (9104).
 
 `*_JOB_BACKEND` принимает только `inprocess` или `rq` (регистр и пробелы не важны, пусто — `inprocess`); другое значение — процесс не стартует, ошибка называет переменную.
 

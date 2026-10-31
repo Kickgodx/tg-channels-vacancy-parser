@@ -57,6 +57,7 @@ jobdesk-api = "backend.main:main"
 jobdesk-llm-worker = "backend.workers.llm_worker:main"
 jobdesk-parse-worker = "backend.workers.parse_worker:main"
 jobdesk-hh-worker = "backend.workers.hh_worker:main"
+jobdesk-maintenance-worker = "backend.workers.maintenance_worker:main"
 jobdesk-mcp = "jobdesk_mcp.__main__:main"
 
 [tool.setuptools.packages.find]

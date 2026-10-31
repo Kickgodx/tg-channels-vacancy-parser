@@ -46,7 +46,7 @@ docker compose up --build
 | **PostgreSQL** | `127.0.0.1:5432` (user/pass/db: `tgjobs` / `tgjobs` / `tgjobs`) |
 | **Redis** | `127.0.0.1:16379` → контейнер `:6379` (очереди RQ: parse + LLM) |
 
-В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `parse-worker` (тот же образ, команда `jobdesk-parse-worker`) выполняет прогоны парсинга через RQ (очередь `parse`, concurrency=1, volume `sessions/` для Telethon); метрики — контейнерный `:9102` (на хост не публикуется). Сервис `llm-worker` (`jobdesk-llm-worker`) обрабатывает матчинг и письма; метрики — `:9101` (тоже без host mapping, чтобы работал `--scale`). Сервис `hh-worker` (`jobdesk-hh-worker`, очередь `hh`) выполняет HH sync; метрики — `:9103`. Redis хранит очереди на томе `redis_data` с AOF (`appendonly yes`): рестарт контейнера их не теряет.
+В compose backend слушает контейнерный `:8000`, на хост проброшен **`9000`**. Сервис `parse-worker` (тот же образ, команда `jobdesk-parse-worker`) выполняет прогоны парсинга через RQ (очередь `parse`, concurrency=1, volume `sessions/` для Telethon); метрики — контейнерный `:9102` (на хост не публикуется). Сервис `llm-worker` (`jobdesk-llm-worker`) обрабатывает матчинг и письма; метрики — `:9101` (тоже без host mapping, чтобы работал `--scale`). Сервис `hh-worker` (`jobdesk-hh-worker`, очередь `hh`) выполняет HH sync; метрики — `:9103`. Сервис `maintenance-worker` (`jobdesk-maintenance-worker`) — фоновое обслуживание каталога (см. ниже); метрики — `:9104`. Redis хранит очереди на томе `redis_data` с AOF (`appendonly yes`): рестарт контейнера их не теряет.
 
 Полный стек (Prometheus, Grafana, Loki, Alloy, Tempo) включается профилем
 `observability` через `COMPOSE_PROFILES=observability` в `.env` (уже есть в
@@ -410,7 +410,7 @@ p25–p75 у 48,6%; у лестницы «Рынка для похожих» —
 вызов в неделю, своим клиентом — вне суточного бюджета пользовательского LLM. Модель
 недоступна или нет ключа — обзор сохраняется только с цифрами и пометкой.
 
-Обзор за прошедшую неделю формирует лидер API (проверка раз в час), если в неделе были
+Обзор за прошедшую неделю формирует фоновое обслуживание (проверка раз в час; где именно — `MAINTENANCE_BACKEND`, см. `config.md`), если в неделе были
 вакансии (`digest.enabled`, текст — `digest.llm_summary`, см. `config.md`). Прошлые недели
 сами не досчитываются: админ формирует обзор за любую завершённую неделю кнопкой на
 странице (`POST /digests`, повторно — с пересчётом). Читать обзоры может любой
@@ -427,9 +427,11 @@ p25–p75 у 48,6%; у лестницы «Рынка для похожих» —
 
 На карте: подписи ниш, подсказка по наведению, клик открывает вакансию, колесо — масштаб, перетаскивание
 — сдвиг; клик по строке таблицы ниш подсвечивает нишу. Выбранное резюме ставится в среднюю точку 15
-ближайших к нему вакансий, они подсвечены (`GET /market-map?resume_id=`). Карту пересчитывает лидер API
-раз в `ai.embeddings.map_interval_hours` (24 ч) или админ кнопкой (`POST /market-map/rebuild`); на 2,4 тыс.
-вакансий расчёт идёт около 5 секунд. Хранится только последняя карта (`market_maps`, `market_map_points`,
+ближайших к нему вакансий, они подсвечены (`GET /market-map?resume_id=`). Карту пересчитывает фоновое обслуживание
+раз в `ai.embeddings.map_interval_hours` (24 ч) или по кнопке админа: `POST /market-map/rebuild` отвечает 202
+сразу (мало вакансий с эмбеддингами — 422), а пересчёт идёт в фоне — пока он не закончен, `GET /market-map`
+отдаёт `rebuild_pending: true`, и страница опрашивает его раз в 5 секунд. На 2,4 тыс. вакансий расчёт идёт
+около 5 секунд, на 8 тыс. — около минуты. Хранится только последняя карта (`market_maps`, `market_map_points`,
 миграция 048). Нужен `scikit-learn`.
 
 ### Спросить базу
@@ -619,10 +621,13 @@ LLM пишет черновик отклика под конкретную ва�
 своих вакансиях (см. «Eval моделей эмбеддингов»): против `text-embedding-3-small` — nDCG@10
 поиска 0.84 против 0.68, «Похожих» 0.87 против 0.71. Смена модели безопасна: пока каталог
 переиндексируется, поиск, подбор и «Похожие» видят только векторы текущей модели, а карту
-рынка лидер пересчитывает, когда переиндексация закончена.
-Индексирует лидер API раз в `ai.embeddings.sweep_interval_seconds` (5 мин): новые,
+рынка пересчитывается, когда переиндексация закончена.
+Индексирует фоновое обслуживание раз в `ai.embeddings.sweep_interval_seconds` (5 мин): новые,
 изменённые (по `updated_at` и хэшу текста) и посчитанные другой моделью; вакансия,
-которую просто встретили снова, к API не идёт. Отдельный клиент OpenRouter — без суточного
+которую просто встретили снова, к API не идёт. Пачку, которую провайдер отверг, проход
+повторяет по одной вакансии: вакансия, падающая сама по себе, откладывается на сутки (или до
+изменения текста), остальные индексируются; три неудачи подряд — провайдер недоступен,
+проход останавливается до следующего интервала. Отдельный клиент OpenRouter — без суточного
 бюджета пользовательского LLM: каталог из 2,3 тыс. вакансий индексируется примерно за
 минуту и несколько центов.
 
@@ -794,9 +799,10 @@ uvicorn backend.main:app --reload --port 8000
 - **LLM не запустился в `primary` — `failed`.** Если LLM не удалось запустить (нет ключа, неизвестная модель), прогон в `ai.mode: primary` сразу завершается `failed` — до чтения Telegram, без записи вакансий и чекпоинтов и без повторной попытки; что исправить — в `error_message`. В `assist` прогон в этом случае идёт на правилах с предупреждением.
 - **Docker Compose:** у сервисов приложения `restart: unless-stopped` и healthcheck; воркеры стартуют после того, как backend стал healthy (то есть применил миграции).
 - **Миграции под замком.** `alembic upgrade head` при старте выполняется под `pg_advisory_lock`: второй процесс или реплика API ждёт, пока первый применит миграции, вместо гонки DDL.
-- **Пул соединений по роли процесса.** API — 20 + 20 overflow на все процессы API вместе (`API_WORKERS=4` → 5 + 5 у каждого; потоков threadpool у процесса столько же, сколько соединений), `parse-worker` — 4 + 12 (LLM-потоки прогона ходят в AI-кэш), `llm-worker` и `hh-worker` — 2 + 2. Так `--scale llm-worker=4` укладывается в `max_connections=100` Postgres. Переопределение — `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`; фактические значения — метрики `db_pool_*` (при нескольких процессах — сумма).
+- **Пул соединений по роли процесса.** API — 20 + 20 overflow на все процессы API вместе (`API_WORKERS=4` → 5 + 5 у каждого; потоков threadpool у процесса столько же, сколько соединений), `parse-worker` — 4 + 12 (LLM-потоки прогона ходят в AI-кэш), `llm-worker`, `hh-worker` и `maintenance-worker` — 2 + 2. Так `--scale llm-worker=4` укладывается в `max_connections=100` Postgres. Переопределение — `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`; фактические значения — метрики `db_pool_*` (при нескольких процессах — сумма).
 - **Защита от перегрузки.** Процесс API обрабатывает одновременно не больше запросов, чем у него соединений с БД (при `API_WORKERS=4` — 10). Остальные ждут в очереди процесса до `API_QUEUE_TIMEOUT_SECONDS` (2 с), после чего получают 503 `OVERLOADED` с `retryable: true` и `Retry-After: 1`; в HTTP-журнале это WARNING, а не ERROR. Без лимита всплеск нагрузки приводил к тупику: sync-эндпоинт проходит через threadpool несколько раз и держит соединение между переходами, так что потоки ждали соединения, а соединения — потоки. API зависал целиком, вместе с `/health`, на минуты. `/health` очередь не проходит, SSE-стрим отдаёт место сразу после начала ответа. Ожидание соединения из пула у API — 5 с (`DB_POOL_TIMEOUT`), у воркеров 30 с. UI повторяет retryable-ошибки (`retryIfRetryable` в `src/api/client.ts`).
 - **Несколько процессов API.** `API_WORKERS` (в compose — 4) запускает столько процессов uvicorn на одном порту: один процесс Python под GIL использует ~1 ядро. Нужны `REDIS_URL` (лимиты входа и одноразовость SSE-тикетов), `JWT_SECRET` (иначе у каждого процесса свой эфемерный секрет) и `rq` у всех задач — без них API не стартует и называет переменную. Общую работу — очистку при старте и раз в час, синхронизацию курсов, сервер `/metrics` — выполняет один процесс-лидер (`pg_try_advisory_lock` на своём соединении, `backend/leader.py`); если он упал, роль за ≤30 с берёт другой процесс или перезапущенный uvicorn воркер. `/metrics` лидера суммирует метрики всех процессов (multiprocess-режим prometheus_client). `uvicorn backend.main:app --reload` всегда один процесс.
+- **Фоновое обслуживание каталога** (`backend/maintenance.py`): индексация эмбеддингов и оценки зарплат, недельный обзор рынка (LLM) и карта рынка (t-SNE — до минуты CPU на 8 тыс. точек). При `MAINTENANCE_BACKEND=worker` (в compose) их выполняет отдельный сервис `maintenance-worker`: задачи не отнимают у запросов API CPU и соединения пула, число мест под запросы которого равно размеру пула. Реплик может быть несколько — работает одна (advisory lock), задачи идут по очереди, цикл раз в 10 с; heartbeat бьёт между циклами, поэтому порог healthcheck и watchdog — 1 ч. Без воркера (`inprocess`, по умолчанию: uvicorn локально, тесты) задачи выполняет лидер API, каждую в своём потоке. Пересчёт карты по кнопке админа — запрос в `maintenance_requests` (миграция 051), его подхватывает тот же исполнитель.
 - **Liveness воркеров.** Healthcheck воркера проверяет не ответ порта, а возраст heartbeat в `/metrics` (`worker_heartbeat_timestamp_seconds`): его обновляют цикл RQ (в простое раз в 45 с) и продление lease выполняемой джобы. Старше `WORKER_HEARTBEAT_MAX_AGE_SECONDS` (180 с) — `unhealthy`. Docker unhealthy-контейнер сам не перезапускает, поэтому воркер, чей heartbeat молчит дольше `WORKER_STALL_EXIT_SECONDS` (900 с), завершается сам, restart policy поднимает его, а recover возвращает джобу в очередь.
 
 SSE (`/runs/{id}/events`, `/llm-jobs/{id}/events`, `/hh/sync-jobs/{id}/events`): один подписчик `redis.asyncio` на процесс API раздаёт события всем стримам — соединения не занимают потоки, а БД читается вне event loop. Каждые 15 с тишины стрим шлёт комментарий `: ping` (прокси не рвут соединение по idle-timeout), раз в 5 с сверяет статус с БД на случай пропущенного `done`. Без Redis или при его сбое стрим переходит на опрос БД и живёт до терминального статуса.
@@ -1042,7 +1048,7 @@ HH отдаёт не глубже 2000 вакансий на поиск: есл�
 | `idempotency_keys` | Сохранённые ответы мутаций по `Idempotency-Key` (TTL) |
 | `parse_run_vacancies` | Какие вакансии встретил прогон (история и экспорт прогона) |
 | `vacancy_sightings` | Каждое появление поста Telegram: оригинал или дубль со ссылкой на вакансию |
-| `vacancy_salary_estimates` | Ориентировочная зарплата вакансий без вилки (медиана, p25–p75, соседи); пересчитывает лидер API |
+| `vacancy_salary_estimates` | Ориентировочная зарплата вакансий без вилки (медиана, p25–p75, соседи); пересчитывает фоновое обслуживание |
 
 Служебные таблицы чистятся сами (при старте и раз в час): просроченный кэш LLM и ключи идемпотентности, завершённые LLM-джобы старше `retention.llm_jobs_ttl_days` (30) и прогоны старше `retention.parse_runs_ttl_days` (180) — см. [config.md](config.md). Вакансии только архивируются, не удаляются.
 
@@ -1061,7 +1067,7 @@ jobdesk/
   config.yaml
   llm_models.yaml
   docker-compose.yml       — postgres, redis, backend, parse-worker, llm-worker, hh-worker,
-                             frontend, pg-backup; observability — profile `observability`
+                             maintenance-worker, frontend, pg-backup; observability — profile `observability`
   Dockerfile.backend
   scripts/pg_backup.sh     — плановый pg_dump + проверка восстановления (сервис pg-backup)
   .github/workflows/ci.yml — CI, только ручной запуск (см. «Тесты» → CI)
@@ -1330,11 +1336,11 @@ docker compose exec pg-backup /scripts/pg_backup.sh check /backups/tgjobs_202610
 оставил бы таблицы из миграций новее дампа, и `alembic upgrade` при старте упал бы.
 
 ```powershell
-docker compose stop backend parse-worker llm-worker hh-worker
+docker compose stop backend parse-worker llm-worker hh-worker maintenance-worker
 docker compose exec pg-backup dropdb --force tgjobs
 docker compose exec pg-backup createdb tgjobs
 docker compose exec pg-backup pg_restore -d tgjobs --no-owner --exit-on-error /backups/tgjobs_20261015_030000.dump
-docker compose start backend parse-worker llm-worker hh-worker
+docker compose start backend parse-worker llm-worker hh-worker maintenance-worker
 ```
 
 Backend при старте догонит схему миграциями, если дамп старше кода.
@@ -1388,7 +1394,7 @@ poetry run jobdesk db import -f backup/jobdesk_dump.json --mode replace
 |-----------|------------|
 | **`prometheus-fastapi-instrumentator`** | Счётчики запросов, статус-коды, latency на backend |
 | **`GET /metrics`** | Эндпоинт Prometheus на отдельном порту `API_METRICS_PORT` (`backend:9100`, только Docker-сеть; не путать с `/api/v1/vacancies/metrics`) |
-| **Prometheus** | Scrape backend, llm-worker, parse-worker и hh-worker каждые 15 с (`observability/prometheus.yml`); правила алертов — `observability/alerts/` |
+| **Prometheus** | Scrape backend, llm-worker, parse-worker, hh-worker и maintenance-worker каждые 15 с (`observability/prometheus.yml`); правила алертов — `observability/alerts/` |
 | **Alertmanager** | Сработавшие алерты (см. «Алерты»); наружу не отправляет — UI `:9093` и Grafana → Alerting |
 | **Grafana** | Дашборды **API**, **LLM**, **LLM jobs / queue**, **Pipeline**, **Parse run**, **HH.ru sync**, **DB pool** |
 | **`llm_*` метрики** | Вызовы OpenRouter, токены, latency, кэш и пропуски при AI-enrichment; ожидание RPM-лимита (`llm_rate_gate_wait_seconds`), повторы (`llm_retries_total{reason}`), оценка стоимости по ценам `llm_models.yaml` (`llm_cost_usd_total{model}`), отключение LLM посреди разбора — раз за прогон или импорт (`llm_enrich_disabled_total{reason}`: `circuit_breaker`, `quota`, `init_failed`) |
@@ -1427,7 +1433,7 @@ Alertmanager). Пороги — в `openspec/specs/platform/alerting`.
 | `FxRatesStale` | warning | последний курс ЦБ старше 3 суток дольше часа |
 | `ApiOverloaded` | warning | 503 `OVERLOADED` — больше 1% запросов и больше 0,1/с 5 мин подряд |
 | `TargetDown` | critical | backend или воркер не отдаёт `/metrics` 5 мин, в т.ч. остановленный контейнер |
-| `WorkerMissing` | critical | у llm-, parse- или hh-worker нет ни одной цели 5 мин (не запускался с момента старта Prometheus) |
+| `WorkerMissing` | critical | у llm-, parse-, hh- или maintenance-worker нет ни одной цели 5 мин (не запускался с момента старта Prometheus) |
 | `PgBackupStale` | critical | проверенный дамп старше 1,5 × `BACKUP_INTERVAL_HOURS` дольше часа |
 | `PgBackupFailed` | critical | последняя попытка бэкапа провалилась (до следующей удачной) |
 | `PgBackupMetricsMissing` | warning | метрик бэкапа нет 30 мин (pg-backup не пишет `pg_backup.prom` или Alloy его не читает) |

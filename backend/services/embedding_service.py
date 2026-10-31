@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 
@@ -107,6 +108,8 @@ def reset_embedding_client() -> None:
             _client.close()
         _client, _client_fp = None, None
     _query_cache.clear()
+    with _poison_lock:
+        _poison.clear()
 
 
 def embed_texts(texts: list[str], *, ai: AiConfig | None = None) -> list[list[float]]:
@@ -132,6 +135,79 @@ class SweepResult:
     embedded: int = 0
     unchanged: int = 0
     failed: bool = False
+    # Вакансии, которые провайдер отверг поодиночке: отложены на ``POISON_RETRY_SECONDS``.
+    skipped: int = 0
+
+
+# Пачку с ошибкой повторяем по одной вакансии. Столько неудач подряд без единого успеха —
+# провайдер недоступен целиком: проход останавливается, ничего не откладывается.
+PROVIDER_DOWN_AFTER = 3
+# Вакансия, которую провайдер отверг поодиночке, не участвует в индексации столько секунд
+# (или до изменения её текста): иначе она первой попадала бы в каждый проход и тормозила его.
+POISON_RETRY_SECONDS = 24 * 3600
+_POISON_MAX = 10_000
+_poison_lock = threading.Lock()
+_poison: dict[str, tuple[str, float]] = {}  # vacancy_id → (content_hash, когда отложена, monotonic)
+
+
+def _is_poisoned(vacancy_id: str, h: str) -> bool:
+    with _poison_lock:
+        entry = _poison.get(vacancy_id)
+        if entry is None:
+            return False
+        if entry[0] != h or time.monotonic() - entry[1] >= POISON_RETRY_SECONDS:
+            del _poison[vacancy_id]
+            return False
+        return True
+
+
+def _mark_poisoned(vacancy_id: str, h: str) -> None:
+    with _poison_lock:
+        if len(_poison) >= _POISON_MAX:
+            _poison.clear()
+        _poison[vacancy_id] = (h, time.monotonic())
+
+
+def _embed_one_by_one(
+    batch: list[tuple[str, str, str]], ai: AiConfig
+) -> tuple[list[tuple[tuple[str, str, str], list[float]]], bool]:
+    """Пачка, которую провайдер отверг: по одной вакансии. Второе — провайдер недоступен целиком.
+
+    Вакансия, которая падает сама, когда соседние проходят, откладывается (``_mark_poisoned``).
+    ``PROVIDER_DOWN_AFTER`` неудач подряд — провайдер лёг: эти вакансии не откладываются.
+    """
+    done: list[tuple[tuple[str, str, str], list[float]]] = []
+    failed: list[tuple[str, str, str]] = []
+    in_a_row = 0
+    provider_down = False
+    for item in batch:
+        try:
+            [vector] = embed_texts([item[1]], ai=ai)
+        except EmbeddingsUnavailable as e:
+            failed.append(item)
+            in_a_row += 1
+            if in_a_row >= PROVIDER_DOWN_AFTER:
+                _LOG.warning("Индексация эмбеддингов остановлена: %s", e)
+                del failed[-in_a_row:]
+                provider_down = True
+                break
+            _LOG.warning("Эмбеддинг вакансии %s не получен: %s", item[0], e)
+            continue
+        in_a_row = 0
+        done.append((item, vector))
+    if not done:
+        # Не прошла ни одна: виноват провайдер, а не тексты.
+        return done, True
+    for vid, _, h in failed:
+        _mark_poisoned(vid, h)
+    if failed:
+        _LOG.warning(
+            "Эмбеддинги: %s вакансий отложено на %s ч — провайдер отвергает их текст: %s",
+            len(failed),
+            POISON_RETRY_SECONDS // 3600,
+            ", ".join(vid for vid, _, _ in failed),
+        )
+    return done, provider_down
 
 
 def _candidates(session: Session, *, model: str, limit: int) -> list[VacancyRow]:
@@ -169,7 +245,11 @@ def _upsert_vacancy_vectors(session: Session, rows: list[dict]) -> None:
 
 
 def sweep_vacancies(*, max_items: int | None = None) -> SweepResult:
-    """Один проход индексации; ошибка провайдера останавливает проход до следующего интервала."""
+    """Один проход индексации; недоступный провайдер останавливает проход до следующего интервала.
+
+    Пачка с ошибкой повторяется по одной вакансии: вакансию, которую провайдер отвергает сам по
+    себе, проход откладывает (``POISON_RETRY_SECONDS`` или до изменения текста) и идёт дальше.
+    """
     ai = _ai()
     cfg = ai.embeddings
     result = SweepResult()
@@ -194,6 +274,8 @@ def sweep_vacancies(*, max_items: int | None = None) -> SweepResult:
             h = content_hash(text, cfg.model)
             if existing.get(row.id) == h:
                 unchanged.append(row.id)
+            elif _is_poisoned(row.id, h):
+                result.skipped += 1
             else:
                 todo.append((row.id, text, h))
         if unchanged:
@@ -206,21 +288,33 @@ def sweep_vacancies(*, max_items: int | None = None) -> SweepResult:
             result.unchanged = len(unchanged)
     for start in range(0, len(todo), cfg.batch_size):
         batch = todo[start : start + cfg.batch_size]
+        provider_down = False
         try:
-            vectors = embed_texts([t for _, t, _ in batch], ai=ai)
+            done = list(zip(batch, embed_texts([t for _, t, _ in batch], ai=ai), strict=True))
         except EmbeddingsUnavailable as e:
-            _LOG.warning("Индексация эмбеддингов остановлена: %s", e)
+            if len(batch) == 1:
+                _LOG.warning("Индексация эмбеддингов остановлена: %s", e)
+                done, provider_down = [], True
+            else:
+                # Пачку может валить одна вакансия: без разбора по одной она стояла бы первой
+                # в каждом проходе и навсегда останавливала индексацию остальных.
+                _LOG.warning("Пачка эмбеддингов не прошла (%s), повтор по одной вакансии", e)
+                done, provider_down = _embed_one_by_one(batch, ai)
+        if done:
+            with session_scope() as session:
+                _upsert_vacancy_vectors(
+                    session,
+                    [
+                        {"vacancy_id": vid, "model": cfg.model, "content_hash": h, "embedding": vec}
+                        for (vid, _, h), vec in done
+                    ],
+                )
+            result.embedded += len(done)
+        if provider_down:
             result.failed = True
             break
-        with session_scope() as session:
-            _upsert_vacancy_vectors(
-                session,
-                [
-                    {"vacancy_id": vid, "model": cfg.model, "content_hash": h, "embedding": vec}
-                    for (vid, _, h), vec in zip(batch, vectors, strict=True)
-                ],
-            )
-        result.embedded += len(batch)
+    if result.skipped:
+        _LOG.info("Эмбеддинги: %s вакансий пропущено — провайдер отверг их раньше", result.skipped)
     if result.embedded:
         _LOG.info("Эмбеддинги: проиндексировано %s вакансий (без изменений %s)", result.embedded, result.unchanged)
     return result

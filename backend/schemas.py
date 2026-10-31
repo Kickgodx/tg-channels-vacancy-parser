@@ -914,6 +914,8 @@ class MarketMapOut(BaseModel):
     archived: list[bool] = Field(default_factory=list)
     resume: MarketMapResume | None = None
     resume_error: str | None = None
+    # Администратор запросил пересчёт, фоновое обслуживание его ещё не выполнило.
+    rebuild_pending: bool = False
 
 
 CoverLetterTone = Literal["neutral", "friendly", "formal"]

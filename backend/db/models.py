@@ -513,6 +513,17 @@ class MarketMapRow(Base):
     clusters: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
 
 
+class MaintenanceRequestRow(Base):
+    """Запрос фоновой работы вне расписания (миграция 051): одна строка на задачу."""
+
+    __tablename__ = "maintenance_requests"
+
+    task: Mapped[str] = mapped_column(String(32), primary_key=True)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, server_default=func.now()
+    )
+
+
 class MarketMapPointRow(Base):
     """Вакансия на карте рынка: 2D-координаты (0–1) и номер кластера."""
 

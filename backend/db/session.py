@@ -14,13 +14,15 @@ _SessionLocal: sessionmaker[Session] | None = None
 
 # (pool_size, max_overflow) по роли процесса. API: 20 + 20 = 40 — столько же, сколько потоков
 # у threadpool sync-эндпоинтов (anyio). Воркер выполняет одну джобу за раз; parse-worker —
-# с LLM-потоками прогона, которые ходят в AI-кэш в БД. API + parse + hh + 4 llm-worker
-# укладываются в ~76 соединений при max_connections=100.
+# с LLM-потоками прогона, которые ходят в AI-кэш в БД. API + parse + hh + maintenance +
+# 4 llm-worker укладываются в ~80 соединений при max_connections=100.
 POOL_BY_ROLE: dict[str, tuple[int, int]] = {
     "api": (20, 20),
     "parse-worker": (4, 12),
     "llm-worker": (2, 2),
     "hh-worker": (2, 2),
+    # Задачи обслуживания идут по одной (backend/maintenance.py).
+    "maintenance-worker": (2, 2),
 }
 # Ожидание свободного соединения (сек), если DB_POOL_TIMEOUT не задан. У API лимит
 # одновременных запросов равен пулу (backend/overload.py), и долгое ожидание означает цикл
@@ -31,6 +33,7 @@ POOL_TIMEOUT_BY_ROLE: dict[str, float] = {
     "parse-worker": 30.0,
     "llm-worker": 30.0,
     "hh-worker": 30.0,
+    "maintenance-worker": 30.0,
 }
 _pool_role = "api"
 
